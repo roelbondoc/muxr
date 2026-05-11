@@ -4,7 +4,7 @@ Gem::Specification.new do |spec|
   spec.name          = "muxr"
   spec.version       = Muxr::VERSION
   spec.authors       = ["Roel Bondoc"]
-  spec.email         = ["roel.bondoc@phoenix.ca"]
+  spec.email         = ["rsbondoc@gmail.com"]
 
   spec.summary       = "A keyboard-driven terminal multiplexer with tiling layouts and a Quake-style drawer"
   spec.description   = <<~DESC
@@ -17,12 +17,21 @@ Gem::Specification.new do |spec|
   spec.license       = "MIT"
   spec.required_ruby_version = ">= 3.4"
 
+  spec.metadata = {
+    "source_code_uri"       => "https://github.com/roelbondoc/muxr",
+    "bug_tracker_uri"       => "https://github.com/roelbondoc/muxr/issues",
+    "changelog_uri"         => "https://github.com/roelbondoc/muxr/blob/main/CHANGELOG.md",
+    "rubygems_mfa_required" => "true",
+    "allowed_push_host"     => "https://rubygems.org"
+  }
+
   spec.bindir        = "bin"
   spec.executables   = ["muxr"]
   spec.files         = Dir[
     "lib/**/*.rb",
     "bin/muxr",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE.txt",
     "muxr.gemspec"
   ]
