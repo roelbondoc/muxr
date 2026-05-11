@@ -25,28 +25,62 @@ the active layout decides geometry.
 ```bash
 git clone https://github.com/roelbondoc/muxr
 cd muxr
-bin/muxr                 # start the "default" session
-bin/muxr work            # start (or restore) a named session
+bin/muxr                 # attach the "default" session (auto-spawn if needed)
+bin/muxr work            # attach (or start) a named session
+bin/muxr --list          # list saved sessions and exit
 bin/muxr --help
 ```
 
 Requires **Ruby ≥ 3.4**. No runtime gems — just `PTY`, `IO.console`, `JSON`,
-and `FileUtils` from stdlib.
+`Socket`, and `FileUtils` from stdlib.
+
+`bin/muxr` is the client. The first invocation for a session daemonizes a
+server in the background; subsequent invocations attach to it over a Unix
+socket. `Ctrl-a d` detaches the client and leaves the server (and every
+shell it owns) running, so reattaching gives you back the exact same panes
+with their full history.
 
 ## Keybindings (Ctrl-a prefix)
 
-| Keys           | Action                                  |
-|----------------|-----------------------------------------|
-| `C-a c`        | new pane                                |
-| `C-a n` / `p`  | focus next / previous pane              |
-| `C-a k`        | close focused pane (or hide drawer)     |
-| `C-a Tab`      | cycle layout (`tall` → `grid` → `monocle`) |
-| `C-a Enter`    | promote focused pane to master          |
-| `C-a ~`        | toggle drawer                           |
-| `C-a d`        | detach                                  |
-| `C-a :`        | command prompt                          |
-| `C-a ?`        | help                                    |
-| `C-a C-a`      | send literal `C-a` to focused pane      |
+| Keys           | Action                                                  |
+|----------------|---------------------------------------------------------|
+| `C-a c`        | new pane                                                |
+| `C-a n` / `p`  | focus next / previous pane                              |
+| `C-a a`        | toggle last (previously focused) pane                   |
+| `C-a 1` … `9`  | jump to pane by its label                               |
+| `C-a k`        | close focused pane (or hide drawer)                     |
+| `C-a Tab`      | cycle layout (`tall` → `grid` → `monocle`)              |
+| `C-a Enter`    | promote focused pane to master                          |
+| `C-a ~`        | toggle drawer                                           |
+| `C-a [`        | enter scrollback / copy-mode                            |
+| `C-a ]`        | paste internal yank buffer into focused pane            |
+| `C-a d`        | detach (server keeps running)                           |
+| `C-a q`        | kill session (asks `kill session? (y/n)`)               |
+| `C-a :`        | command prompt                                          |
+| `C-a ?`        | help                                                    |
+| `C-a C-a`      | send literal `C-a` to focused pane                      |
+
+### Scrollback and copy-mode
+
+Each pane keeps a bounded (5000-row) scrollback ring. `C-a [` enters
+scrollback with vi-style navigation; the status bar shows a key hint and
+the pane title gains `[scrollback N/M]`.
+
+| Keys                    | Action                              |
+|-------------------------|-------------------------------------|
+| `j` / `k`               | scroll one line                     |
+| `d` / `u` (or `C-d`/`C-u`) | half page                        |
+| `f` / `b` / Space (or `C-f`/`C-b`) | full page                |
+| `g` / `G`               | top / bottom                        |
+| `q` / `Esc` / `C-c`     | exit back to live view              |
+
+Press `v` inside scrollback to enter a movable-cursor selection mode
+(`h j k l`, `0`/`$`, `g`/`G`, `C-d`/`C-u`, `C-f`/`C-b`, Space). Press `v`
+again to anchor a character selection or `C-v` to anchor a block
+(rectangular) selection — toggling between the two preserves the anchor.
+`y` or Enter yanks the selection into an internal buffer and pipes it to
+`pbcopy` in the background (silent no-op when `pbcopy` is unavailable).
+`C-a ]` writes the yank buffer back into the focused pane.
 
 ## Commands (typed after `C-a :`)
 
@@ -55,31 +89,56 @@ layout {tall|grid|monocle}     # also: layout (no arg) → cycle
 drawer {toggle|show|hide|reset}
 save                           # persist session to ~/.muxr/sessions/<name>.json
 restore                        # show path to saved session
+sessions | ls                  # list saved sessions
 new | close | next | prev | master
-detach | quit
+detach | quit                  # quit asks for y/n confirmation
 ```
 
 ## Architecture
 
+muxr runs as **two processes** that talk over a Unix domain socket at
+`~/.muxr/sockets/<name>.sock`. The server owns the PTYs and all session
+state; the client is a thin TTY front-end that comes and goes across
+detach/reattach.
+
 ```
-Application
- ├─ Session ──── Window ── Pane[ ] ─ Terminal (VT100 emulator) + PTYProcess
- │     └─ Drawer ─ Pane
- ├─ Renderer ── composes one frame, diff-emits ANSI to STDOUT
- ├─ InputHandler ── Ctrl-a state machine (:idle → :prefix → :idle | :command)
- ├─ CommandDispatcher ── parses ":"-prefixed commands
- └─ LayoutManager ── pure functions: (layout, count, area) → [Rect]
+Client (foreground, owns the TTY)              Server (daemon, owns the PTYs)
+ ├─ STDIN in raw mode + alt screen              Application (event loop, lifecycle)
+ ├─ SIGWINCH → RESIZE frame                      ├─ Session ─ Window ─ Pane[ ] ─ Terminal + PTYProcess
+ │                                               │      └─ Drawer ─ Pane
+ └─ Protocol                                     ├─ Renderer        – diff-emits ANSI as OUTPUT frames
+     ◄── OUTPUT bytes ──── Renderer ◄────────────┤   InputHandler    – Ctrl-a state machine
+     ──── INPUT bytes ───► InputHandler          ├─ CommandDispatcher – parses ":"-prefixed commands
+     ──── HELLO/RESIZE ──► apply_size            ├─ LayoutManager    – pure (layout, count, area) → [Rect]
+     ◄── BYE ───────────── disconnect_client     └─ UNIXServer listener (one client at a time)
 ```
 
-The event loop is single-threaded using `IO.select` over all pane PTYs,
-the drawer PTY (when present), and STDIN. Layouts are pure — the
-LayoutManager has no mutable state, so the renderer can re-compute geometry
-on every tick after a resize or pane add/remove without bookkeeping.
+Frames are length-prefixed (`[1-byte type][4-byte BE length][payload]`):
+`H` hello, `I` input, `R` resize, `B` bye, `O` output.
+
+The server's event loop is single-threaded `IO.select` over the listening
+socket, the attached client (when present), every pane PTY, and the
+drawer PTY. Layouts are pure — `LayoutManager` has no mutable state, so
+the renderer recomputes geometry on every tick after a resize or
+pane add/remove without bookkeeping.
+
+`Ctrl-a d` detaches the client but leaves the server (and its shells)
+running; reattaching gives you back the same panes with their full
+history. `Ctrl-a q` and `:quit` flash `kill session? (y/n)` in the status
+bar and only tear the server down on `y` — there is no "kill without
+confirm" keybinding by design.
 
 The drawer's PTY is **never torn down** when the drawer is hidden — its
 shell process keeps running so the next toggle restores the previous
-session. Its initial working directory is inherited from whatever pane was
-focused when the drawer was first created.
+session. Its initial working directory is inherited from whatever pane
+was focused when the drawer was first created; only `drawer reset` kills
+the PTY.
+
+The per-pane `Terminal` is a real VT100 emulator (cursor movement, SGR
+including 256-color/truecolor and underline subparameters, erase/insert/
+delete, autowrap, scroll regions). Scrollback is composited into the
+visible grid through a view-offset that auto-tracks new rows while
+scrolled back, so reviewed content stays frozen.
 
 ## Session persistence
 
@@ -96,18 +155,39 @@ Sessions live in `~/.muxr/sessions/<name>.json`:
 }
 ```
 
-Re-launching `muxr <name>` rebuilds pane and drawer shells using the saved
-working directories. Shell history within those panes is **not** persisted
-(that's the job of your shell's own history file).
+The JSON file is mainly a **cold-storage fallback**. Between detaches the
+live session lives inside the running server process, so `Ctrl-a d` then
+`bin/muxr <name>` reattaches to the exact same shells with their full
+history. The JSON only matters once the server is gone (after `Ctrl-a q`
+or a reboot): re-launching `muxr <name>` rebuilds pane and drawer shells
+using the saved working directories. Shell command history within those
+panes is **not** persisted — that's the job of your shell's own history
+file. Run `:save` from inside muxr to write the snapshot.
 
 ## Development
 
 ```bash
 bundle install      # only minitest and rake
-rake test           # runs ~37 unit tests
+rake test           # full suite (100+ unit tests)
+
+# Run a single file or test
+ruby -Ilib -Itest test/test_layout_manager.rb
+ruby -Ilib -Itest test/test_terminal.rb -n test_csi_cursor_position
 ```
 
 Tests cover the layout algorithms, drawer state machine, window pane
-ordering, session JSON round-trip, and the VT100 emulator's cursor
-movement, SGR, erase, and autowrap handling. PTY-dependent code paths
+ordering, session JSON round-trip, the client/server framing protocol,
+the input-handler state machine (including scrollback and selection
+modes), the renderer's diff-emit, and the VT100 emulator's cursor
+movement, SGR (including colon-subparameter and underline-color forms),
+erase, scroll-region, and autowrap handling. PTY-dependent code paths
 are exercised via dependency injection so tests don't spawn shells.
+
+On-disk layout:
+
+```
+~/.muxr/
+ ├─ sessions/<name>.json   structural snapshot written by `:save`
+ ├─ sockets/<name>.sock    server's Unix listener (auto-managed)
+ └─ logs/<name>.log        server stdout/stderr
+```
