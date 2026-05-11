@@ -60,4 +60,64 @@ class TestWindow < Minitest::Test
     w = Rux::Window.new
     assert_raises(ArgumentError) { w.set_layout(:floating) }
   end
+
+  def test_focus_last_toggles_between_two_panes
+    w = Rux::Window.new
+    3.times { w.add_pane(FakePane.new) }
+    w.focus_next
+    assert_equal 1, w.focused_index
+    w.focus_last
+    assert_equal 0, w.focused_index
+    w.focus_last
+    assert_equal 1, w.focused_index
+  end
+
+  def test_focus_last_noop_with_no_history
+    w = Rux::Window.new
+    2.times { w.add_pane(FakePane.new) }
+    w.focus_last
+    assert_equal 0, w.focused_index
+  end
+
+  def test_focus_last_tracks_pane_through_promote_to_master
+    w = Rux::Window.new
+    a, b, c = FakePane.new("a"), FakePane.new("b"), FakePane.new("c")
+    [a, b, c].each { |p| w.add_pane(p) }
+    w.focused_index = 2 # focused = c, last = a
+    w.promote_to_master # panes = [c, a, b], focused = 0
+    w.focus_last        # should jump to a, now at index 1
+    assert_equal 1, w.focused_index
+  end
+
+  def test_focus_last_cleared_when_previous_pane_removed
+    w = Rux::Window.new
+    a, b, c = FakePane.new("a"), FakePane.new("b"), FakePane.new("c")
+    [a, b, c].each { |p| w.add_pane(p) }
+    w.focused_index = 2 # focused = c, last = a
+    w.remove_pane(a)    # last reference gone
+    before = w.focused_index
+    w.focus_last
+    assert_equal before, w.focused_index
+  end
+
+  def test_focus_index_sets_focused_pane
+    w = Rux::Window.new
+    3.times { w.add_pane(FakePane.new) }
+    w.focus_index(2)
+    assert_equal 2, w.focused_index
+    w.focus_index(0)
+    assert_equal 0, w.focused_index
+    # focus_last should swing back to the previous index (2).
+    w.focus_last
+    assert_equal 2, w.focused_index
+  end
+
+  def test_focus_index_out_of_range_is_noop
+    w = Rux::Window.new
+    3.times { w.add_pane(FakePane.new) }
+    w.focus_index(5)
+    assert_equal 0, w.focused_index
+    w.focus_index(-1)
+    assert_equal 0, w.focused_index
+  end
 end

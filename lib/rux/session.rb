@@ -62,6 +62,14 @@ module Rux
       File.exist?(save_path_for(name))
     end
 
+    def self.list
+      return [] unless File.directory?(SESSIONS_DIR)
+      Dir.children(SESSIONS_DIR).filter_map do |entry|
+        next unless entry.end_with?(".json")
+        File.basename(entry, ".json")
+      end.sort
+    end
+
     private
 
     def safe_cwd(pane)

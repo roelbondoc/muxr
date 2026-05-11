@@ -98,4 +98,31 @@ class TestSession < Minitest::Test
       assert Rux::Session.exists?("spec")
     end
   end
+
+  def test_list_returns_sorted_session_names
+    with_isolated_sessions_dir do |dir|
+      assert_equal [], Rux::Session.list
+
+      File.write(File.join(dir, "work.json"), "{}")
+      File.write(File.join(dir, "play.json"), "{}")
+      File.write(File.join(dir, "notes.txt"), "ignore me")
+
+      assert_equal %w[play work], Rux::Session.list
+    end
+  end
+
+  def test_list_returns_empty_when_dir_missing
+    Dir.mktmpdir("rux-sessions") do |tmp|
+      missing = File.join(tmp, "does-not-exist")
+      original = Rux::Session::SESSIONS_DIR
+      Rux::Session.send(:remove_const, :SESSIONS_DIR)
+      Rux::Session.const_set(:SESSIONS_DIR, missing)
+      begin
+        assert_equal [], Rux::Session.list
+      ensure
+        Rux::Session.send(:remove_const, :SESSIONS_DIR)
+        Rux::Session.const_set(:SESSIONS_DIR, original)
+      end
+    end
+  end
 end

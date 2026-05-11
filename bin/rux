@@ -9,6 +9,12 @@ if ARGV.include?("-v") || ARGV.include?("--version")
   exit 0
 end
 
+if ARGV.include?("-l") || ARGV.include?("--list")
+  names = Rux::Session.list
+  puts names.join("\n") unless names.empty?
+  exit 0
+end
+
 if ARGV.include?("-h") || ARGV.include?("--help")
   puts <<~USAGE
     rux #{Rux::VERSION} — a tiling terminal multiplexer
@@ -17,6 +23,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       rux                 start the default session
       rux <name>          start (or restore) the named session
       rux -s <name>       same as above
+      rux --list          list saved sessions and exit
       rux --version       print version and exit
       rux --help          this help
 

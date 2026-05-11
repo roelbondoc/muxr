@@ -5,15 +5,25 @@ module Rux
   class Window
     LAYOUTS = LayoutManager::LAYOUTS
 
-    attr_accessor :name, :layout, :focused_index, :master_index
-    attr_reader :panes
+    attr_accessor :name, :layout, :master_index
+    attr_reader :panes, :focused_index
 
     def initialize(name: "main")
       @name = name
       @panes = []
       @focused_index = 0
+      @last_focused_pane = nil
       @master_index = 0
       @layout = :tall
+    end
+
+    # Setter records the outgoing focused pane (by reference) so focus_last can
+    # return to it even after the panes array is reordered (e.g. by
+    # promote_to_master).
+    def focused_index=(value)
+      return if value == @focused_index
+      @last_focused_pane = focused_pane
+      @focused_index = value
     end
 
     def add_pane(pane)
@@ -26,6 +36,7 @@ module Rux
       return false unless idx
       pane.close
       @panes.delete_at(idx)
+      @last_focused_pane = nil if @last_focused_pane == pane
       clamp_indices!
       true
     end
@@ -37,12 +48,25 @@ module Rux
 
     def focus_next
       return if @panes.empty?
-      @focused_index = (@focused_index + 1) % @panes.length
+      self.focused_index = (@focused_index + 1) % @panes.length
     end
 
     def focus_prev
       return if @panes.empty?
-      @focused_index = (@focused_index - 1) % @panes.length
+      self.focused_index = (@focused_index - 1) % @panes.length
+    end
+
+    def focus_last
+      return unless @last_focused_pane
+      idx = @panes.index(@last_focused_pane)
+      return unless idx
+      self.focused_index = idx
+    end
+
+    def focus_index(idx)
+      return if @panes.empty?
+      return unless idx.is_a?(Integer) && idx >= 0 && idx < @panes.length
+      self.focused_index = idx
     end
 
     def promote_to_master

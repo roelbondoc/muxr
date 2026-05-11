@@ -66,6 +66,25 @@ module Rux
       invalidate
     end
 
+    def focus_last
+      return if @session.window.panes.empty?
+      if @session.focus_drawer && @session.drawer&.visible?
+        @session.focus_drawer = false
+      else
+        @session.window.focus_last
+      end
+      invalidate
+    end
+
+    def focus_pane_number(n)
+      return if @session.window.panes.empty?
+      idx = n - 1
+      return unless idx >= 0 && idx < @session.window.panes.length
+      @session.focus_drawer = false
+      @session.window.focus_index(idx)
+      invalidate
+    end
+
     def close_focused
       if @session.focus_drawer && @session.drawer&.visible?
         hide_drawer
@@ -176,6 +195,16 @@ module Rux
         flash("session file: #{Session.save_path_for(@session_name)}")
       else
         flash("no saved session")
+      end
+    end
+
+    def list_sessions
+      names = Session.list
+      if names.empty?
+        flash("no saved sessions")
+      else
+        marker = ->(n) { n == @session_name ? "*#{n}" : n }
+        flash("sessions: #{names.map(&marker).join(", ")}")
       end
     end
 

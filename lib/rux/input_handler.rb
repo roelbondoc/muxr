@@ -10,6 +10,7 @@ module Rux
       "c"    => :new_pane,
       "n"    => :focus_next,
       "p"    => :focus_prev,
+      "a"    => :focus_last,
       "k"    => :close_focused,
       "\t"   => :cycle_layout,
       "\r"   => :promote_master,
@@ -19,6 +20,8 @@ module Rux
       "?"    => :show_help,
       "q"    => :quit_immediate
     }.freeze
+
+    DIGIT_RE = /\A[1-9]\z/.freeze
 
     attr_reader :state, :command_buffer
 
@@ -67,6 +70,9 @@ module Rux
         @command_buffer = +""
       when ch == PREFIX
         @app.send_to_focused(PREFIX)
+        @state = :idle
+      when DIGIT_RE.match?(ch)
+        @app.focus_pane_number(ch.to_i)
         @state = :idle
       when action
         @app.public_send(action)

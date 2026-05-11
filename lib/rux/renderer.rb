@@ -204,6 +204,8 @@ module Rux
       "",
       "  C-a c       new pane",
       "  C-a n / p   next / prev pane",
+      "  C-a a       toggle to previously focused pane",
+      "  C-a 1..9    jump to pane by number",
       "  C-a k       close focused pane",
       "  C-a Tab     cycle layout (tall → grid → monocle)",
       "  C-a Enter   promote focused pane to master",
@@ -214,7 +216,7 @@ module Rux
       "  C-a C-a     send literal C-a",
       "",
       "Commands: layout {tall|grid|monocle}, drawer {toggle|show|hide|reset},",
-      "          save, restore, quit, new, close, next, prev",
+      "          save, restore, sessions, quit, new, close, next, prev",
       "",
       "press any key to dismiss"
     ].freeze

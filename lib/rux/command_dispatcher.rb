@@ -18,6 +18,7 @@ module Rux
       when "drawer"  then handle_drawer(args)
       when "save"    then @app.save_session
       when "restore" then @app.restore_session
+      when "sessions", "ls" then @app.list_sessions
       when "quit", "q", "exit"
         @app.quit
       when "new", "c"
