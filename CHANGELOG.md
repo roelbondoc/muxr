@@ -6,6 +6,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-05-11
+
+### Added
+- Vim-style word and viewport motions in copy-mode selection cursor:
+  `w`/`W`/`e`/`E`/`b`/`B` walk word and WORD boundaries, `^` jumps to
+  the first non-blank on the line, and `H`/`M`/`L` land on the visible
+  top/middle/bottom rows. Yanking now drops straight back to the live
+  shell (matching vim's `v…y` returning to normal mode); the tmux-style
+  `b` alias for page-back is now `Ctrl-b` only.
+
+### Fixed
+- Honor SGR 2 (dim) so faint text actually renders faint. The emulator
+  was silently dropping the attribute, which left Claude Code's
+  suggested-prompt placeholder rendering at normal intensity. SGR 22
+  now correctly clears both bold and dim per spec.
+
 ## [0.1.1] - 2026-05-11
 
 ### Fixed
@@ -51,6 +67,7 @@ Initial release.
   boundaries.
 - Renderer that composes one frame and diff-emits ANSI to STDOUT.
 
-[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.2
 [0.1.1]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.1
 [0.1.0]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.0
