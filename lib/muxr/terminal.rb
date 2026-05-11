@@ -48,7 +48,12 @@ module Muxr
       @dirty = true
       @scrollback = []
       @view_offset = 0
+      @selection_anchor = nil
+      @selection_cursor = nil
+      @selection_mode = :linear
     end
+
+    attr_reader :selection_mode
 
     def cell(r, c)
       @buffer[r][c]
@@ -94,6 +99,148 @@ module Muxr
       set_view_offset(0)
     end
 
+    # ---------- selection ----------
+    #
+    # Selection coordinates are in the combined "timeline":
+    #   0..scrollback.size-1                 → @scrollback rows
+    #   scrollback.size..scrollback.size+rows-1 → @buffer rows
+    # so the selection stays anchored to the same text as the user pages
+    # through history.
+
+    def selection_active?
+      !@selection_anchor.nil?
+    end
+
+    # Place the moving cursor at a viewport position without dropping an
+    # anchor — the user is still navigating, not yet selecting.
+    def place_selection_cursor(r, c)
+      tr = timeline_row_for_visible(r).clamp(0, timeline_size - 1)
+      tc = c.clamp(0, @cols - 1)
+      @selection_cursor = [tr, tc]
+      @selection_anchor = nil
+      @dirty = true
+    end
+
+    # Drop the anchor at the cursor's current position. `mode` controls the
+    # selection shape: :linear (character-by-character, reading order) or
+    # :block (rectangular).
+    def anchor_selection!(mode: :linear)
+      return unless @selection_cursor
+      @selection_anchor = @selection_cursor.dup
+      @selection_mode = mode
+      @dirty = true
+    end
+
+    # Drop the anchor but keep the cursor so the user can continue navigating
+    # (vim's behavior when pressing v while already in linear visual mode).
+    def clear_anchor!
+      return unless @selection_anchor
+      @selection_anchor = nil
+      @dirty = true
+    end
+
+    # Convenience for tests: place cursor at (r,c) AND anchor immediately.
+    def start_selection_at_visible(r, c, mode: :linear)
+      place_selection_cursor(r, c)
+      anchor_selection!(mode: mode)
+    end
+
+    def move_selection_cursor_by(dr, dc)
+      return unless @selection_cursor
+      tr, tc = @selection_cursor
+      ntr = (tr + dr).clamp(0, timeline_size - 1)
+      ntc = (tc + dc).clamp(0, @cols - 1)
+      return if ntr == tr && ntc == tc
+      @selection_cursor = [ntr, ntc]
+      ensure_selection_cursor_visible
+      @dirty = true
+    end
+
+    def selection_cursor_to(tr, tc)
+      return unless @selection_cursor
+      ntr = tr.clamp(0, timeline_size - 1)
+      ntc = tc.clamp(0, @cols - 1)
+      @selection_cursor = [ntr, ntc]
+      ensure_selection_cursor_visible
+      @dirty = true
+    end
+
+    def selection_cursor_to_line_start
+      return unless @selection_cursor
+      selection_cursor_to(@selection_cursor[0], 0)
+    end
+
+    def selection_cursor_to_line_end
+      return unless @selection_cursor
+      selection_cursor_to(@selection_cursor[0], @cols - 1)
+    end
+
+    def selection_cursor_to_top
+      selection_cursor_to(0, 0)
+    end
+
+    def selection_cursor_to_bottom
+      selection_cursor_to(timeline_size - 1, @cols - 1)
+    end
+
+    def clear_selection
+      return unless @selection_anchor
+      @selection_anchor = nil
+      @selection_cursor = nil
+      @dirty = true
+    end
+
+    def selected_at_visible?(r, c)
+      return false unless @selection_anchor
+      tr = timeline_row_for_visible(r)
+      inside_selection?(tr, c)
+    end
+
+    def selection_cursor_visible
+      return nil unless @selection_cursor
+      tr, tc = @selection_cursor
+      vr = tr - (@scrollback.size - @view_offset)
+      return nil unless vr.between?(0, @rows - 1)
+      [vr, tc]
+    end
+
+    def extract_selection_text
+      return "" unless @selection_anchor
+      if @selection_mode == :block
+        ar, ac = @selection_anchor
+        br, bc = @selection_cursor
+        min_r, max_r = ar <= br ? [ar, br] : [br, ar]
+        min_c, max_c = ac <= bc ? [ac, bc] : [bc, ac]
+        lines = []
+        (min_r..max_r).each do |tr|
+          row = timeline_row(tr)
+          if row.nil? || min_c >= row.length
+            lines << ""
+            next
+          end
+          last = [max_c, row.length - 1].min
+          chars = (min_c..last).map { |c| row[c]&.char || " " }
+          lines << chars.join.rstrip
+        end
+        return lines.join("\n")
+      end
+      sr, sc, er, ec = ordered_selection
+      lines = []
+      (sr..er).each do |tr|
+        row = timeline_row(tr)
+        if row.nil?
+          lines << ""
+          next
+        end
+        first = (tr == sr) ? sc : 0
+        last = (tr == er) ? ec : row.length - 1
+        last = [last, row.length - 1].min
+        chars = (first..last).map { |c| row[c]&.char || " " }
+        lines << chars.join.rstrip
+      end
+      lines.join("\n")
+    end
+
     def dirty?
       @dirty
     end
@@ -121,6 +268,10 @@ module Muxr
       @cursor_row = @cursor_row.clamp(0, rows - 1)
       @cursor_col = @cursor_col.clamp(0, cols - 1)
       @autowrap_pending = false
+      # Selection points at timeline rows whose shape can't be remapped
+      # meaningfully through a resize, so drop it rather than show a smear.
+      @selection_anchor = nil
+      @selection_cursor = nil
       @dirty = true
     end
 
@@ -400,7 +551,16 @@ module Muxr
       # "off the top of the screen" and shouldn't pollute history.
       if @scroll_top.zero? && @scroll_bottom == @rows - 1
         @scrollback << @buffer[0]
-        @scrollback.shift if @scrollback.size > SCROLLBACK_MAX
+        if @scrollback.size > SCROLLBACK_MAX
+          @scrollback.shift
+          # Selection coordinates are timeline-indexed; an eviction shifts the
+          # whole timeline down by one. Track that or selection points at the
+          # wrong row.
+          if @selection_anchor
+            @selection_anchor[0] = [@selection_anchor[0] - 1, 0].max
+            @selection_cursor[0] = [@selection_cursor[0] - 1, 0].max
+          end
+        end
         # Keep the user's view frozen on the same content when new rows arrive
         # while they're scrolled back.
         if @view_offset.positive?
@@ -416,6 +576,65 @@ module Muxr
       return if new_v == @view_offset
       @view_offset = new_v
       @dirty = true
+    end
+
+    def timeline_size
+      @scrollback.size + @rows
+    end
+
+    def timeline_row(tr)
+      if tr < @scrollback.size
+        @scrollback[tr]
+      else
+        @buffer[tr - @scrollback.size]
+      end
+    end
+
+    def timeline_row_for_visible(r)
+      @scrollback.size - @view_offset + r
+    end
+
+    def ordered_selection
+      a = @selection_anchor
+      b = @selection_cursor
+      if a[0] < b[0] || (a[0] == b[0] && a[1] <= b[1])
+        [a[0], a[1], b[0], b[1]]
+      else
+        [b[0], b[1], a[0], a[1]]
+      end
+    end
+
+    def inside_selection?(tr, c)
+      if @selection_mode == :block
+        ar, ac = @selection_anchor
+        br, bc = @selection_cursor
+        min_r, max_r = ar <= br ? [ar, br] : [br, ar]
+        min_c, max_c = ac <= bc ? [ac, bc] : [bc, ac]
+        return tr.between?(min_r, max_r) && c.between?(min_c, max_c)
+      end
+      sr, sc, er, ec = ordered_selection
+      return false if tr < sr || tr > er
+      if sr == er
+        c.between?(sc, ec)
+      elsif tr == sr
+        c >= sc
+      elsif tr == er
+        c <= ec
+      else
+        true
+      end
+    end
+
+    def ensure_selection_cursor_visible
+      return unless @selection_cursor
+      tr = @selection_cursor[0]
+      top = @scrollback.size - @view_offset
+      bottom = top + @rows - 1
+      if tr < top
+        set_view_offset(@scrollback.size - tr)
+      elsif tr > bottom
+        set_view_offset(@scrollback.size - tr + @rows - 1)
+      end
     end
 
     def scroll_down_region

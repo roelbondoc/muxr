@@ -223,4 +223,173 @@ class TestTerminal < Minitest::Test
     cell = t.visible_cell(0, 2)
     assert_equal " ", cell.char
   end
+
+  def test_selection_extract_single_row
+    t = Muxr::Terminal.new(rows: 2, cols: 6)
+    t.feed("hello\r\nworld")
+    t.start_selection_at_visible(0, 0)
+    t.move_selection_cursor_by(0, 4) # extend to col 4 (inclusive)
+    assert t.selection_active?
+    assert_equal "hello", t.extract_selection_text
+  end
+
+  def test_selection_extract_multi_row_strips_trailing_whitespace
+    t = Muxr::Terminal.new(rows: 3, cols: 8)
+    t.feed("one\r\ntwo\r\nthree")
+    t.start_selection_at_visible(0, 0)
+    t.move_selection_cursor_by(2, 7) # row 2 col 7 (end of row)
+    assert_equal "one\ntwo\nthree", t.extract_selection_text
+  end
+
+  def test_selection_extract_handles_reverse_anchor_cursor_order
+    # Anchor below cursor: extract should still be in reading order.
+    t = Muxr::Terminal.new(rows: 2, cols: 5)
+    t.feed("aaaaa\r\nbbbbb")
+    t.start_selection_at_visible(1, 4)
+    t.move_selection_cursor_by(-1, -4) # back to (0,0)
+    assert_equal "aaaaa\nbbbbb", t.extract_selection_text
+  end
+
+  def test_selection_spans_scrollback_and_live_buffer
+    t = Muxr::Terminal.new(rows: 2, cols: 5)
+    t.feed("aaaaa\r\nbbbbb\r\nccccc")
+    # scrollback: [aaaaa], grid: [bbbbb, ccccc]. Anchor on scrollback row.
+    t.scroll_back(1)                       # view: [aaaaa, bbbbb]
+    t.start_selection_at_visible(0, 0)     # timeline row 0 (aaaaa), col 0
+    t.scroll_to_bottom                     # back to view: [bbbbb, ccccc]
+    t.move_selection_cursor_by(2, 4)       # to bottom row col 4 (ccccc end)
+    assert_equal "aaaaa\nbbbbb\nccccc", t.extract_selection_text
+  end
+
+  def test_selection_cursor_movement_auto_scrolls_view
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aaa\r\nbbb\r\nccc")
+    t.scroll_back(1)                       # view: [aaa, bbb]
+    t.start_selection_at_visible(0, 0)     # on aaa
+    assert_equal 1, t.view_offset
+    t.move_selection_cursor_by(2, 0)       # cursor jumps to ccc — must scroll forward
+    assert_equal 0, t.view_offset
+  end
+
+  def test_clear_selection_removes_state
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aa\r\nbb")
+    t.start_selection_at_visible(0, 0)
+    t.move_selection_cursor_by(1, 1)
+    t.clear_selection
+    refute t.selection_active?
+    assert_equal "", t.extract_selection_text
+  end
+
+  def test_selected_at_visible_marks_cells_inside_range
+    t = Muxr::Terminal.new(rows: 2, cols: 4)
+    t.feed("abcd\r\nefgh")
+    t.start_selection_at_visible(0, 1)
+    t.move_selection_cursor_by(1, 1) # (1,2)
+    assert t.selected_at_visible?(0, 1)
+    assert t.selected_at_visible?(0, 3)
+    assert t.selected_at_visible?(1, 2)
+    refute t.selected_at_visible?(0, 0)
+    refute t.selected_at_visible?(1, 3)
+  end
+
+  def test_selection_cursor_visible_returns_nil_when_off_screen
+    # Anchor cursor on a scrollback row, then page forward past it so the
+    # cursor is no longer inside the viewport. Auto-follow keeps the cursor
+    # visible when the user moves IT — but plain scrolling should not.
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aaa\r\nbbb\r\nccc\r\nddd")
+    t.scroll_back(2)                       # view: [aaa, bbb]
+    t.start_selection_at_visible(0, 0)     # cursor on aaa (timeline row 0)
+    refute_nil t.selection_cursor_visible
+    t.scroll_to_bottom                     # view: [ccc, ddd], cursor at aaa is off-screen
+    assert_nil t.selection_cursor_visible
+  end
+
+  def test_resize_clears_selection
+    t = Muxr::Terminal.new(rows: 3, cols: 5)
+    t.feed("abc\r\ndef")
+    t.start_selection_at_visible(0, 0)
+    t.move_selection_cursor_by(1, 2)
+    assert t.selection_active?
+    t.resize(4, 6)
+    refute t.selection_active?
+  end
+
+  def test_place_selection_cursor_does_not_activate_selection
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aa\r\nbb")
+    t.place_selection_cursor(0, 0)
+    refute t.selection_active?
+    # Cursor is movable even without an anchor.
+    t.move_selection_cursor_by(1, 1)
+    refute t.selection_active?
+    refute_nil t.selection_cursor_visible
+  end
+
+  def test_anchor_selection_after_navigation
+    t = Muxr::Terminal.new(rows: 2, cols: 4)
+    t.feed("abcd\r\nefgh")
+    t.place_selection_cursor(0, 1)
+    t.anchor_selection!
+    assert t.selection_active?
+    assert_equal :linear, t.selection_mode
+    t.move_selection_cursor_by(1, 1) # extend to (1, 2)
+    assert_equal "bcd\nefg", t.extract_selection_text
+  end
+
+  def test_clear_anchor_keeps_cursor
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aa\r\nbb")
+    t.start_selection_at_visible(0, 0)
+    t.move_selection_cursor_by(1, 1)
+    t.clear_anchor!
+    refute t.selection_active?
+    refute_nil t.selection_cursor_visible
+  end
+
+  def test_block_selection_extracts_rectangle
+    t = Muxr::Terminal.new(rows: 3, cols: 6)
+    t.feed("abcdef\r\nghijkl\r\nmnopqr")
+    t.place_selection_cursor(0, 1)
+    t.anchor_selection!(mode: :block)
+    t.move_selection_cursor_by(2, 2) # rect: rows 0..2, cols 1..3
+    assert_equal :block, t.selection_mode
+    assert_equal "bcd\nhij\nnop", t.extract_selection_text
+  end
+
+  def test_block_selection_handles_reverse_corners
+    # Anchor in the bottom-right, cursor moves to top-left → still extracts
+    # the natural rectangle in reading order.
+    t = Muxr::Terminal.new(rows: 3, cols: 6)
+    t.feed("abcdef\r\nghijkl\r\nmnopqr")
+    t.place_selection_cursor(2, 3) # anchor at bottom-right corner
+    t.anchor_selection!(mode: :block)
+    t.move_selection_cursor_by(-2, -2) # cursor to (0, 1)
+    assert_equal "bcd\nhij\nnop", t.extract_selection_text
+  end
+
+  def test_block_selection_selected_at_visible_marks_rectangle_only
+    t = Muxr::Terminal.new(rows: 3, cols: 4)
+    t.feed("abcd\r\nefgh\r\nijkl")
+    t.place_selection_cursor(0, 1)
+    t.anchor_selection!(mode: :block)
+    t.move_selection_cursor_by(2, 1) # rows 0..2, cols 1..2
+    assert t.selected_at_visible?(0, 1)
+    assert t.selected_at_visible?(1, 2)
+    assert t.selected_at_visible?(2, 1)
+    # Outside the rectangle, including cells inside the linear-mode reading
+    # path: (0, 3) is between top-left and bottom-right when read linearly,
+    # but is NOT in the block rectangle.
+    refute t.selected_at_visible?(0, 3)
+    refute t.selected_at_visible?(1, 0)
+    refute t.selected_at_visible?(2, 3)
+  end
+
+  def test_anchor_selection_is_a_noop_without_a_placed_cursor
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aa\r\nbb")
+    t.anchor_selection!
+    refute t.selection_active?
+  end
 end

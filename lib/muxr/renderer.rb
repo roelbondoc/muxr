@@ -199,7 +199,7 @@ module Muxr
           c.attrs = 0
         end
       elsif input_state == :scrollback
-        overlay = " SCROLLBACK  j/k line  d/u half  f/b page  g/G top/bot  q quit "
+        overlay = " SCROLLBACK  j/k line  d/u half  f/b page  g/G top/bot  v select  q quit "
         overlay = overlay[0, w]
         overlay.each_char.with_index do |ch, x|
           c = frame[y][x]
@@ -213,6 +213,29 @@ module Muxr
           c.char = " "
           c.fg = nil
           c.bg = [:c256, 214]
+          c.attrs = 0
+        end
+      elsif input_state == :selection
+        mode = nil
+        focused = session.window.focused_pane
+        if focused && focused.terminal.selection_active?
+          mode = focused.terminal.selection_mode == :block ? "BLOCK" : "CHAR"
+        end
+        label = mode ? "SELECTION/#{mode}" : "SELECTION (cursor)"
+        overlay = " #{label}  h/j/k/l move  v char  C-v block  y/Enter yank  q cancel "
+        overlay = overlay[0, w]
+        overlay.each_char.with_index do |ch, x|
+          c = frame[y][x]
+          c.char = ch
+          c.fg = [:c256, 232]
+          c.bg = [:c256, 156]
+          c.attrs = Terminal::BOLD
+        end
+        (overlay.length...w).each do |x|
+          c = frame[y][x]
+          c.char = " "
+          c.fg = nil
+          c.bg = [:c256, 156]
           c.attrs = 0
         end
       elsif message
@@ -241,7 +264,9 @@ module Muxr
       "  C-a Tab     cycle layout (tall → grid → monocle)",
       "  C-a Enter   promote focused pane to master",
       "  C-a ~       toggle drawer",
-      "  C-a [       enter scrollback (j/k d/u f/b g/G, q to quit)",
+      "  C-a [       enter scrollback (j/k d/u f/b g/G; v→cursor, q quits)",
+      "              in cursor mode: v char-select, C-v block-select, y yank",
+      "  C-a ]       paste internal copy buffer",
       "  C-a d       detach (server keeps running)",
       "  C-a q       kill session (asks y/n)",
       "  C-a :       command prompt",
@@ -316,6 +341,7 @@ module Muxr
       term = pane.terminal
       rows = term.rows
       cols = term.cols
+      selection = term.selection_active?
       rows.times do |r|
         fy = dst_y + r
         next if fy < 0 || fy >= frame.length
@@ -328,6 +354,7 @@ module Muxr
           dst.fg = src.fg
           dst.bg = src.bg
           dst.attrs = src.attrs
+          dst.attrs |= Terminal::REVERSE if selection && term.selected_at_visible?(r, c)
         end
       end
     end
@@ -394,8 +421,15 @@ module Muxr
       return "\e[?25l" unless target&.rect
 
       term = target.terminal
-      return "\e[?25l" if term.scrolled_back?
       rect = target.rect
+      if input_state == :selection
+        pos = term.selection_cursor_visible
+        return "\e[?25l" unless pos
+        row = rect.y + 1 + pos[0] + 1
+        col = rect.x + 1 + pos[1] + 1
+        return "\e[#{row};#{col}H\e[?25h"
+      end
+      return "\e[?25l" if term.scrolled_back?
       row = rect.y + 1 + term.cursor_row + 1
       col = rect.x + 1 + term.cursor_col + 1
       "\e[#{row};#{col}H\e[?25h"

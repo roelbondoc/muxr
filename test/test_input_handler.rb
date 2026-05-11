@@ -97,4 +97,92 @@ class TestInputHandler < Minitest::Test
     h.feed("hi")
     assert_equal [[:send_to_focused, "h"], [:send_to_focused, "i"]], app.calls
   end
+
+  def test_scrollback_v_enters_selection
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("v")
+    assert_equal [:enter_selection], app.calls
+  end
+
+  def test_selection_mode_dispatches_directional_moves
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_selection_mode
+    h.feed("hjkl")
+    assert_equal [[:move_selection, :left],
+                  [:move_selection, :down],
+                  [:move_selection, :up],
+                  [:move_selection, :right]], app.calls
+    assert_equal :selection, h.state
+  end
+
+  def test_selection_mode_supports_paging_and_jumps
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_selection_mode
+    h.feed("dufbgG0$")
+    actions = app.calls.map { |c| c.is_a?(Array) ? c[1] : c }
+    assert_equal %i[half_down half_up full_down full_up top bottom line_start line_end], actions
+  end
+
+  def test_selection_yank_on_enter_dispatches_yank_true
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_selection_mode
+    h.feed("\r")
+    assert_equal [[:exit_selection, { yank: true }]], app.calls
+  end
+
+  def test_selection_yank_on_y_dispatches_yank_true
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_selection_mode
+    h.feed("y")
+    assert_equal [[:exit_selection, { yank: true }]], app.calls
+  end
+
+  def test_selection_cancel_on_escape_dispatches_yank_false
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_selection_mode
+    h.feed("\e")
+    assert_equal [[:exit_selection, { yank: false }]], app.calls
+  end
+
+  def test_prefix_close_bracket_pastes
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed("\x01]")
+    assert_equal [:paste_from_buffer], app.calls
+  end
+
+  def test_selection_mode_ignores_unknown_keys
+    # "x" and "z" are not bound. "y" would yank, so don't include it.
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_selection_mode
+    h.feed("xz!")
+    assert_equal [], app.calls
+    assert_equal :selection, h.state
+  end
+
+  def test_selection_mode_v_toggles_linear
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_selection_mode
+    h.feed("v")
+    assert_equal [[:toggle_selection, :linear]], app.calls
+    assert_equal :selection, h.state # stays in selection mode
+  end
+
+  def test_selection_mode_ctrl_v_toggles_block
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_selection_mode
+    h.feed("\x16")
+    assert_equal [[:toggle_selection, :block]], app.calls
+    assert_equal :selection, h.state
+  end
 end

@@ -38,7 +38,10 @@ module Muxr
       @current_client = nil
       @listening_socket = nil
       @socket_path = self.class.socket_path_for(@session_name)
+      @paste_buffer = +""
     end
+
+    attr_reader :paste_buffer
 
     def run
       setup
@@ -215,7 +218,6 @@ module Muxr
     def enter_scrollback
       target = focused_target
       return unless target
-      return if target.terminal.scrollback_size.zero?
       @input.enter_scrollback_mode
       @renderer.reset_frame!
       invalidate
@@ -223,6 +225,7 @@ module Muxr
 
     def exit_scrollback
       target = focused_target
+      target&.terminal&.clear_selection
       target&.terminal&.scroll_to_bottom
       @renderer.reset_frame!
       invalidate
@@ -244,6 +247,84 @@ module Muxr
       when :bottom        then term.scroll_to_bottom
       end
       invalidate
+    end
+
+    def enter_selection
+      target = focused_target
+      return unless target
+      # Vim-style: drop the user at a movable cursor with NO selection yet.
+      # They navigate with h/j/k/l, then press v (linear) or C-v (block) to
+      # anchor.
+      target.terminal.place_selection_cursor(0, 0)
+      @input.enter_selection_mode
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def toggle_selection(mode)
+      target = focused_target
+      return unless target
+      term = target.terminal
+      if term.selection_active? && term.selection_mode == mode
+        # Same mode pressed again — drop the anchor, return to navigation.
+        term.clear_anchor!
+      else
+        # No anchor, or switching between linear/block — anchor at the
+        # current cursor in the requested mode (vim keeps the visual range
+        # when switching shapes, and we mirror that by not moving the
+        # cursor).
+        term.anchor_selection!(mode: mode)
+      end
+      invalidate
+    end
+
+    def exit_selection(yank:)
+      target = focused_target
+      term = target&.terminal
+      if yank
+        # No anchor → no-op. User is still positioning; they can press v
+        # first, then yank. Esc/q is the way to exit from navigation.
+        return unless term&.selection_active?
+        text = term.extract_selection_text
+        unless text.empty?
+          @paste_buffer = text
+          spawn_pbcopy(text)
+          flash("yanked #{text.bytesize} bytes")
+        end
+      end
+      term&.clear_selection
+      @input.enter_scrollback_mode
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def move_selection(action)
+      target = focused_target
+      return unless target
+      term = target.terminal
+      rows = term.rows
+      cols = term.cols
+      case action
+      when :left       then term.move_selection_cursor_by(0, -1)
+      when :right      then term.move_selection_cursor_by(0, 1)
+      when :up         then term.move_selection_cursor_by(-1, 0)
+      when :down       then term.move_selection_cursor_by(1, 0)
+      when :half_up    then term.move_selection_cursor_by(-[rows / 2, 1].max, 0)
+      when :half_down  then term.move_selection_cursor_by([rows / 2, 1].max, 0)
+      when :full_up    then term.move_selection_cursor_by(-[rows - 1, 1].max, 0)
+      when :full_down  then term.move_selection_cursor_by([rows - 1, 1].max, 0)
+      when :line_start then term.selection_cursor_to_line_start
+      when :line_end   then term.selection_cursor_to_line_end
+      when :top        then term.selection_cursor_to_top
+      when :bottom     then term.selection_cursor_to_bottom
+      end
+      invalidate
+    end
+
+    def paste_from_buffer
+      return if @paste_buffer.nil? || @paste_buffer.empty?
+      target = focused_target
+      target&.write(@paste_buffer)
     end
 
     def flash(msg)
@@ -512,6 +593,18 @@ module Muxr
       flash("bye")
       disconnect_client(reason: "shutdown")
       @running = false
+    end
+
+    # Fire-and-forget pipe to pbcopy. Runs on its own thread so even a slow
+    # macOS pbcopy doesn't stall the event loop. Silent when pbcopy is absent
+    # (Linux/headless) — selection still goes to the internal buffer.
+    def spawn_pbcopy(text)
+      Thread.new do
+        IO.popen("pbcopy", "w") { |io| io.write(text) }
+      rescue Errno::ENOENT, Errno::EPIPE, IOError, StandardError
+        # pbcopy unavailable or pipe broken — selection still lives in
+        # @paste_buffer.
+      end
     end
 
     def make_pane(cwd: nil)

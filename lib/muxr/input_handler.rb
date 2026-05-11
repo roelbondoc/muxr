@@ -19,7 +19,8 @@ module Muxr
       "d"    => :detach,
       "?"    => :show_help,
       "q"    => :quit_immediate,
-      "["    => :enter_scrollback
+      "["    => :enter_scrollback,
+      "]"    => :paste_from_buffer
     }.freeze
 
     SCROLLBACK_BINDINGS = {
@@ -38,7 +39,30 @@ module Muxr
       "G"    => :bottom
     }.freeze
 
-    SCROLLBACK_EXITS = ["q", "\e", "\r", "\n", "\x03"].freeze # q, Esc, Enter, Ctrl-c
+    SCROLLBACK_EXITS = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
+
+    SELECTION_BINDINGS = {
+      "h"    => :left,
+      "l"    => :right,
+      "j"    => :down,
+      "k"    => :up,
+      "0"    => :line_start,
+      "$"    => :line_end,
+      "g"    => :top,
+      "G"    => :bottom,
+      "\x04" => :half_down, # Ctrl-d
+      "\x15" => :half_up,   # Ctrl-u
+      "d"    => :half_down,
+      "u"    => :half_up,
+      "\x06" => :full_down, # Ctrl-f
+      "\x02" => :full_up,   # Ctrl-b
+      "f"    => :full_down,
+      "b"    => :full_up,
+      " "    => :full_down
+    }.freeze
+
+    SELECTION_YANK = ["\r", "\n", "y"].freeze
+    SELECTION_CANCEL = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
 
     DIGIT_RE = /\A[1-9]\z/.freeze
 
@@ -70,6 +94,8 @@ module Muxr
           handle_command_input(ch)
         when :scrollback
           handle_scrollback_input(ch)
+        when :selection
+          handle_selection_input(ch)
         end
       end
     end
@@ -84,6 +110,14 @@ module Muxr
 
     def enter_scrollback_mode
       @state = :scrollback
+    end
+
+    def enter_selection_mode
+      @state = :selection
+    end
+
+    def enter_idle_mode
+      @state = :idle
     end
 
     def cancel
@@ -129,10 +163,36 @@ module Muxr
         @app.exit_scrollback
         return
       end
+      if ch == "v"
+        @app.enter_selection
+        return
+      end
       action = SCROLLBACK_BINDINGS[ch]
       @app.scroll_focused(action) if action
       # Unknown keys: ignored. Avoids accidental shell input when the user
       # mistypes inside scrollback mode.
+    end
+
+    def handle_selection_input(ch)
+      if SELECTION_YANK.include?(ch)
+        @app.exit_selection(yank: true)
+        return
+      end
+      if SELECTION_CANCEL.include?(ch)
+        @app.exit_selection(yank: false)
+        return
+      end
+      case ch
+      when "v"
+        @app.toggle_selection(:linear)
+        return
+      when "\x16" # Ctrl-v
+        @app.toggle_selection(:block)
+        return
+      end
+      action = SELECTION_BINDINGS[ch]
+      @app.move_selection(action) if action
+      # Unknown keys ignored — same rationale as scrollback mode.
     end
 
     def handle_command_input(ch)
