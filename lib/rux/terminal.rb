@@ -211,6 +211,23 @@ module Rux
       raw.split(";", -1).map { |p| p.empty? ? default : p.to_i }
     end
 
+    # SGR allows colon-separated subparameters within a single semicolon-delimited
+    # piece (e.g. `4:3` for curly underline, `38:2:R:G:B` for RGB foreground,
+    # `58:5:N` for an indexed underline color). csi_params collapses these to a
+    # single int via `to_i`, which silently turns `4:0` (underline off) into
+    # `4` (underline on). Return Integers for plain pieces and Arrays for any
+    # piece that contained a colon so apply_sgr can dispatch on the difference.
+    def sgr_params
+      raw = @parser_params.delete_prefix("?").delete_prefix(">").delete_prefix("!")
+      raw.split(";", -1).map do |piece|
+        if piece.include?(":")
+          piece.split(":", -1).map { |p| p.empty? ? 0 : p.to_i }
+        else
+          piece.empty? ? 0 : piece.to_i
+        end
+      end
+    end
+
     def handle_csi(final)
       pms = csi_params
       case final
@@ -279,7 +296,7 @@ module Rux
         @cursor_col = 0
         @autowrap_pending = false
       when "m"
-        apply_sgr(pms)
+        apply_sgr(sgr_params)
       when "s"
         @saved_cursor = [@cursor_row, @cursor_col]
       when "u"
@@ -386,11 +403,17 @@ module Rux
       end
     end
 
-    def apply_sgr(pms)
-      pms = [0] if pms.empty?
+    def apply_sgr(tokens)
+      tokens = [0] if tokens.empty?
       i = 0
-      while i < pms.length
-        p = pms[i]
+      while i < tokens.length
+        t = tokens[i]
+        if t.is_a?(Array)
+          apply_sgr_colon(t)
+          i += 1
+          next
+        end
+        p = t
         case p
         when 0
           @fg = nil
@@ -404,28 +427,79 @@ module Rux
         when 27 then @attrs &= ~REVERSE
         when 30..37 then @fg = p - 30
         when 38
-          if pms[i + 1] == 5
-            @fg = [:c256, pms[i + 2]]
+          if tokens[i + 1] == 5
+            @fg = [:c256, tokens[i + 2]]
             i += 2
-          elsif pms[i + 1] == 2
-            @fg = [:rgb, pms[i + 2], pms[i + 3], pms[i + 4]]
+          elsif tokens[i + 1] == 2
+            @fg = [:rgb, tokens[i + 2], tokens[i + 3], tokens[i + 4]]
             i += 4
           end
         when 39 then @fg = nil
         when 40..47 then @bg = p - 40
         when 48
-          if pms[i + 1] == 5
-            @bg = [:c256, pms[i + 2]]
+          if tokens[i + 1] == 5
+            @bg = [:c256, tokens[i + 2]]
             i += 2
-          elsif pms[i + 1] == 2
-            @bg = [:rgb, pms[i + 2], pms[i + 3], pms[i + 4]]
+          elsif tokens[i + 1] == 2
+            @bg = [:rgb, tokens[i + 2], tokens[i + 3], tokens[i + 4]]
             i += 4
           end
         when 49 then @bg = nil
+        when 58
+          # Set underline color. We don't render underline color separately,
+          # but the params must be consumed or they'll be re-interpreted as
+          # standalone SGR codes (e.g. an R/G/B value of 4 would spuriously
+          # turn on underline for every cell that follows).
+          if tokens[i + 1] == 5
+            i += 2
+          elsif tokens[i + 1] == 2
+            i += 4
+          end
+        when 59
+          # Default underline color — nothing to track.
         when 90..97 then @fg = p - 90 + 8
         when 100..107 then @bg = p - 100 + 8
         end
         i += 1
+      end
+    end
+
+    def apply_sgr_colon(parts)
+      return if parts.empty?
+      case parts[0]
+      when 4
+        # `4:0` disables underline; `4:1..5` selects a style (straight, double,
+        # curly, dotted, dashed) — we render them all as plain underline.
+        if parts[1] == 0
+          @attrs &= ~UNDERLINE
+        else
+          @attrs |= UNDERLINE
+        end
+      when 24
+        @attrs &= ~UNDERLINE
+      when 38
+        apply_extended_color(parts, foreground: true)
+      when 48
+        apply_extended_color(parts, foreground: false)
+      when 58
+        # Underline color — ignored, but consumed.
+      end
+    end
+
+    def apply_extended_color(parts, foreground:)
+      case parts[1]
+      when 5
+        color = [:c256, parts[2] || 0]
+        foreground ? @fg = color : @bg = color
+      when 2
+        # ITU T.416 allows an optional colorspace id, giving `38:2::R:G:B`
+        # (length 6) rather than `38:2:R:G:B` (length 5).
+        rgb_start = parts.length >= 6 ? 3 : 2
+        r = parts[rgb_start] || 0
+        g = parts[rgb_start + 1] || 0
+        b = parts[rgb_start + 2] || 0
+        color = [:rgb, r, g, b]
+        foreground ? @fg = color : @bg = color
       end
     end
 

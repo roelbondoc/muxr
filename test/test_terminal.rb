@@ -68,6 +68,46 @@ class TestTerminal < Minitest::Test
     assert_equal "d", t.cell(1, 0).char
   end
 
+  def test_sgr_colon_form_disables_underline
+    # `\e[4:0m` is the colon-subparameter form for "no underline". Without
+    # explicit colon handling, csi_params collapses "4:0" to 4 and we'd
+    # erroneously turn underline ON.
+    t = Rux::Terminal.new(rows: 1, cols: 4)
+    t.feed("\e[4mA\e[4:0mB")
+    assert_equal Rux::Terminal::UNDERLINE, t.cell(0, 0).attrs & Rux::Terminal::UNDERLINE
+    assert_equal 0, t.cell(0, 1).attrs & Rux::Terminal::UNDERLINE
+  end
+
+  def test_sgr_colon_form_curly_underline_renders_as_underline
+    t = Rux::Terminal.new(rows: 1, cols: 2)
+    t.feed("\e[4:3mA")
+    assert_equal Rux::Terminal::UNDERLINE, t.cell(0, 0).attrs & Rux::Terminal::UNDERLINE
+  end
+
+  def test_sgr_underline_color_semicolon_does_not_leak_into_attrs
+    # `\e[58;5;4m` sets the underline color (index 4). The trailing `4` must
+    # NOT be re-interpreted as SGR 4 (underline on).
+    t = Rux::Terminal.new(rows: 1, cols: 2)
+    t.feed("\e[58;5;4mA")
+    assert_equal 0, t.cell(0, 0).attrs & Rux::Terminal::UNDERLINE
+    assert_nil t.cell(0, 0).fg
+  end
+
+  def test_sgr_underline_color_rgb_does_not_leak_into_attrs
+    # `\e[58;2;1;4;7m` sets RGB underline color. Without consuming the color
+    # parameters, the `1`, `4`, and `7` would each toggle BOLD, UNDERLINE,
+    # and REVERSE respectively.
+    t = Rux::Terminal.new(rows: 1, cols: 2)
+    t.feed("\e[58;2;1;4;7mA")
+    assert_equal 0, t.cell(0, 0).attrs
+  end
+
+  def test_sgr_colon_extended_foreground_color
+    t = Rux::Terminal.new(rows: 1, cols: 2)
+    t.feed("\e[38:5:9mA")
+    assert_equal [:c256, 9], t.cell(0, 0).fg
+  end
+
   def test_autowrap_at_right_edge
     t = Rux::Terminal.new(rows: 2, cols: 3)
     t.feed("abcd")
