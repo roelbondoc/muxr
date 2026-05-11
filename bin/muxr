@@ -2,33 +2,33 @@
 # frozen_string_literal: true
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
-require "rux"
+require "muxr"
 require "fileutils"
 require "rbconfig"
 require "socket"
 
 if ARGV.include?("-v") || ARGV.include?("--version")
-  puts "rux #{Rux::VERSION}"
+  puts "muxr #{Muxr::VERSION}"
   exit 0
 end
 
 if ARGV.include?("-l") || ARGV.include?("--list")
-  names = Rux::Session.list
+  names = Muxr::Session.list
   puts names.join("\n") unless names.empty?
   exit 0
 end
 
 if ARGV.include?("-h") || ARGV.include?("--help")
   puts <<~USAGE
-    rux #{Rux::VERSION} — a tiling terminal multiplexer
+    muxr #{Muxr::VERSION} — a tiling terminal multiplexer
 
     Usage:
-      rux                 attach the default session (auto-spawn if needed)
-      rux <name>          attach (or start) the named session
-      rux -s <name>       same as above
-      rux --list          list saved session files and exit
-      rux --version       print version and exit
-      rux --help          this help
+      muxr                 attach the default session (auto-spawn if needed)
+      muxr <name>          attach (or start) the named session
+      muxr -s <name>       same as above
+      muxr --list          list saved session files and exit
+      muxr --version       print version and exit
+      muxr --help          this help
 
     Keybindings (Ctrl-a prefix):
       C-a c   new pane            C-a n / p   next / prev pane
@@ -43,7 +43,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
   exit 0
 end
 
-# Internal: run as the server process. bin/rux fork-execs itself with this
+# Internal: run as the server process. bin/muxr fork-execs itself with this
 # flag when no server is alive for the requested session.
 if ARGV.include?("--server")
   args = ARGV.reject { |a| a == "--server" }
@@ -56,9 +56,9 @@ if ARGV.include?("--server")
     # Platforms without Process.daemon (rare on POSIX) just run inline.
   end
   begin
-    Rux::Application.new(args).run
+    Muxr::Application.new(args).run
   rescue => e
-    $stderr.puts "rux server: #{e.class}: #{e.message}"
+    $stderr.puts "muxr server: #{e.class}: #{e.message}"
     $stderr.puts e.backtrace.first(20).join("\n")
     exit 1
   end
@@ -110,28 +110,28 @@ def wait_for_socket(path, deadline)
 end
 
 name = session_name_from(ARGV)
-socket_path = Rux::Application.socket_path_for(name)
+socket_path = Muxr::Application.socket_path_for(name)
 
 case probe_socket(socket_path)
 when :forbidden
-  $stderr.puts "rux: cannot access #{socket_path} (permission denied)"
+  $stderr.puts "muxr: cannot access #{socket_path} (permission denied)"
   exit 1
 when :alive
   # great — attach.
 when :missing, :stale
-  log_path = File.join(Dir.home, ".rux", "logs", "#{name}.log")
+  log_path = File.join(Dir.home, ".muxr", "logs", "#{name}.log")
   spawn_server(name, log_path)
   unless wait_for_socket(socket_path, Time.now + 3.0)
-    $stderr.puts "rux: server did not start within 3s (see #{log_path})"
+    $stderr.puts "muxr: server did not start within 3s (see #{log_path})"
     exit 1
   end
 end
 
-client = Rux::Client.new(name)
+client = Muxr::Client.new(name)
 begin
   client.connect
 rescue Errno::ECONNREFUSED, Errno::ENOENT => e
-  $stderr.puts "rux: cannot connect to server at #{socket_path}: #{e.message}"
+  $stderr.puts "muxr: cannot connect to server at #{socket_path}: #{e.message}"
   exit 1
 end
 exit(client.run || 0)
