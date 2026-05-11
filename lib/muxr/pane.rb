@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # A Pane bundles a Terminal emulator buffer with the PTYProcess running the
   # shell that feeds it. The Window keeps a list of panes; the Renderer asks
   # each pane for its current grid contents and cursor position.

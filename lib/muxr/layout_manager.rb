@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # Pure functions that turn (layout_name, pane_count, screen_rect) into an
   # array of pane rectangles. No mutable state; safe to call repeatedly on
   # every render. Following xmonad, layouts decide geometry — users never

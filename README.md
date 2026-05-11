@@ -1,6 +1,6 @@
-# rux
+# muxr
 
-A keyboard-driven terminal multiplexer in pure Ruby. `rux` (Ruby + Unix)
+A keyboard-driven terminal multiplexer in pure Ruby. `muxr` (Ruby + Unix)
 combines the familiar keybindings of **GNU Screen**, the automatic tiling
 of **xmonad**, and a **Quake-style drop-down drawer**. Panes are treated
 like tiling-window-manager clients — you never resize them by hand;
@@ -17,17 +17,17 @@ the active layout decides geometry.
 ┌ Drawer ─────────────────────────────────────────────────┐
 │ persistent overlay shell, opens from the bottom         │
 └─────────────────────────────────────────────────────────┘
- [default] panes:3 layout:tall focused:#1 drawer:shown     rux ^a ?
+ [default] panes:3 layout:tall focused:#1 drawer:shown     muxr ^a ?
 ```
 
 ## Install / run
 
 ```bash
-git clone https://github.com/roelbondoc/rux
-cd rux
-bin/rux                 # start the "default" session
-bin/rux work            # start (or restore) a named session
-bin/rux --help
+git clone https://github.com/roelbondoc/muxr
+cd muxr
+bin/muxr                 # start the "default" session
+bin/muxr work            # start (or restore) a named session
+bin/muxr --help
 ```
 
 Requires **Ruby ≥ 3.4**. No runtime gems — just `PTY`, `IO.console`, `JSON`,
@@ -53,7 +53,7 @@ and `FileUtils` from stdlib.
 ```
 layout {tall|grid|monocle}     # also: layout (no arg) → cycle
 drawer {toggle|show|hide|reset}
-save                           # persist session to ~/.rux/sessions/<name>.json
+save                           # persist session to ~/.muxr/sessions/<name>.json
 restore                        # show path to saved session
 new | close | next | prev | master
 detach | quit
@@ -83,7 +83,7 @@ focused when the drawer was first created.
 
 ## Session persistence
 
-Sessions live in `~/.rux/sessions/<name>.json`:
+Sessions live in `~/.muxr/sessions/<name>.json`:
 
 ```json
 {
@@ -96,7 +96,7 @@ Sessions live in `~/.rux/sessions/<name>.json`:
 }
 ```
 
-Re-launching `rux <name>` rebuilds pane and drawer shells using the saved
+Re-launching `muxr <name>` rebuilds pane and drawer shells using the saved
 working directories. Shell history within those panes is **not** persisted
 (that's the job of your shell's own history file).
 

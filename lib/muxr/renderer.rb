@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # The Renderer composites the Session into a single grid of cells and then
   # emits ANSI escape sequences to write that grid to STDOUT. It compares the
   # new frame against the previous one and only repositions/redraws cells
@@ -162,7 +162,7 @@ module Rux
       left << " focused:#{focused_label}"
       left << " drawer:#{drawer_state} "
 
-      right = " rux ^a ? "
+      right = " muxr ^a ? "
 
       bar = (left + " " * w)[0, w - right.length] + right
       bar = bar[0, w]
@@ -208,7 +208,7 @@ module Rux
     end
 
     HELP_LINES = [
-      "rux — keybindings",
+      "muxr — keybindings",
       "",
       "  C-a c       new pane",
       "  C-a n / p   next / prev pane",

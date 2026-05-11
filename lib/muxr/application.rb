@@ -1,10 +1,10 @@
 require "socket"
 require "fileutils"
 
-module Rux
-  # The Application is the rux server. It owns the Session, panes, Renderer,
+module Muxr
+  # The Application is the muxr server. It owns the Session, panes, Renderer,
   # and InputHandler, and listens on a Unix socket at
-  # ~/.rux/sockets/<name>.sock for a Client to attach. Shells and other PTY
+  # ~/.muxr/sockets/<name>.sock for a Client to attach. Shells and other PTY
   # processes survive client detach/reattach — only the listening socket and
   # the one currently-attached client come and go.
   #
@@ -16,7 +16,7 @@ module Rux
   # attach via Renderer#reset_frame!.
   class Application
     SELECT_TIMEOUT = 0.05
-    SOCKETS_DIR    = File.join(Dir.home, ".rux", "sockets").freeze
+    SOCKETS_DIR    = File.join(Dir.home, ".muxr", "sockets").freeze
     DEFAULT_WIDTH  = 80
     DEFAULT_HEIGHT = 24
 
@@ -164,7 +164,7 @@ module Rux
     def detach
       flash("detached")
       disconnect_client(reason: "detached")
-      # Server keeps running. Next `bin/rux <name>` invocation will re-attach.
+      # Server keeps running. Next `bin/muxr <name>` invocation will re-attach.
     end
 
     # Both Ctrl-a q and :quit funnel through here. We don't kill the server
@@ -292,7 +292,7 @@ module Rux
     def setup
       FileUtils.mkdir_p(SOCKETS_DIR)
       if File.exist?(@socket_path) && existing_server_alive?
-        raise "rux server already running for session '#{@session_name}'"
+        raise "muxr server already running for session '#{@session_name}'"
       end
       File.unlink(@socket_path) if File.exist?(@socket_path)
       @listening_socket = UNIXServer.new(@socket_path)

@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # Length-prefixed framing for client <-> server messages over a Unix socket.
   #
   # Wire format per message:

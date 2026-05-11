@@ -1,6 +1,6 @@
 require "test_helper"
 require "stringio"
-require "rux/renderer"
+require "muxr/renderer"
 
 class TestRenderer < Minitest::Test
   # Renderer duck-types panes on rect/terminal/resize, so a small struct
@@ -12,7 +12,7 @@ class TestRenderer < Minitest::Test
 
     def initialize(label:, rows: 9, cols: 38)
       @label = label
-      @terminal = Rux::Terminal.new(rows: rows, cols: cols)
+      @terminal = Muxr::Terminal.new(rows: rows, cols: cols)
       @terminal.feed(label)
       @rect = nil
     end
@@ -23,7 +23,7 @@ class TestRenderer < Minitest::Test
   end
 
   def build_session(layout:, focused_index:, pane_labels: %w[AAA BBB CCC])
-    session = Rux::Session.new(name: "spec", width: 40, height: 12)
+    session = Muxr::Session.new(name: "spec", width: 40, height: 12)
     pane_labels.each { |l| session.window.add_pane(FakePane.new(label: l)) }
     session.window.set_layout(layout)
     session.window.focused_index = focused_index
@@ -32,7 +32,7 @@ class TestRenderer < Minitest::Test
 
   def render(session)
     out = StringIO.new
-    renderer = Rux::Renderer.new(out: out)
+    renderer = Muxr::Renderer.new(out: out)
     renderer.render(session)
     out.string
   end

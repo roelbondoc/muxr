@@ -1,8 +1,8 @@
 require "socket"
 require "io/console"
 
-module Rux
-  # The rux client. It is a small front-end whose only jobs are:
+module Muxr
+  # The muxr client. It is a small front-end whose only jobs are:
   #   1. Connect to the server's Unix socket and send HELLO with the
   #      terminal's current size.
   #   2. Put the controlling TTY into the alt screen + raw mode.
@@ -27,7 +27,7 @@ module Rux
     end
 
     # Opens the socket. Returns true on success. Raises Errno::ENOENT /
-    # Errno::ECONNREFUSED to the caller, which is bin/rux's job to handle by
+    # Errno::ECONNREFUSED to the caller, which is bin/muxr's job to handle by
     # spawning a server.
     def connect
       @sock = UNIXSocket.new(@socket_path)
@@ -138,7 +138,7 @@ module Rux
         # terminal may have already been reset by a signal handler.
       end
       if @bye_reason && !@bye_reason.empty? && @bye_reason != "detached"
-        $stderr.puts "rux: #{@bye_reason}"
+        $stderr.puts "muxr: #{@bye_reason}"
       end
     end
   end

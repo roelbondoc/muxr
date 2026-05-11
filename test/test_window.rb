@@ -9,7 +9,7 @@ class TestWindow < Minitest::Test
   end
 
   def test_focus_next_wraps_around
-    w = Rux::Window.new
+    w = Muxr::Window.new
     3.times { w.add_pane(FakePane.new) }
     assert_equal 0, w.focused_index
     w.focus_next; assert_equal 1, w.focused_index
@@ -18,14 +18,14 @@ class TestWindow < Minitest::Test
   end
 
   def test_focus_prev_wraps_around
-    w = Rux::Window.new
+    w = Muxr::Window.new
     3.times { w.add_pane(FakePane.new) }
     w.focus_prev
     assert_equal 2, w.focused_index
   end
 
   def test_remove_pane_clamps_indices
-    w = Rux::Window.new
+    w = Muxr::Window.new
     a, b, c = FakePane.new("a"), FakePane.new("b"), FakePane.new("c")
     [a, b, c].each { |p| w.add_pane(p) }
     w.focused_index = 2
@@ -37,7 +37,7 @@ class TestWindow < Minitest::Test
   end
 
   def test_promote_to_master_moves_pane_to_front
-    w = Rux::Window.new
+    w = Muxr::Window.new
     a, b, c = FakePane.new("a"), FakePane.new("b"), FakePane.new("c")
     [a, b, c].each { |p| w.add_pane(p) }
     w.focused_index = 2
@@ -48,7 +48,7 @@ class TestWindow < Minitest::Test
   end
 
   def test_cycle_layout_rotates_through_known_layouts
-    w = Rux::Window.new
+    w = Muxr::Window.new
     w.add_pane(FakePane.new)
     assert_equal :tall, w.layout
     w.cycle_layout; assert_equal :grid, w.layout
@@ -57,12 +57,12 @@ class TestWindow < Minitest::Test
   end
 
   def test_set_layout_rejects_unknown
-    w = Rux::Window.new
+    w = Muxr::Window.new
     assert_raises(ArgumentError) { w.set_layout(:floating) }
   end
 
   def test_focus_last_toggles_between_two_panes
-    w = Rux::Window.new
+    w = Muxr::Window.new
     3.times { w.add_pane(FakePane.new) }
     w.focus_next
     assert_equal 1, w.focused_index
@@ -73,14 +73,14 @@ class TestWindow < Minitest::Test
   end
 
   def test_focus_last_noop_with_no_history
-    w = Rux::Window.new
+    w = Muxr::Window.new
     2.times { w.add_pane(FakePane.new) }
     w.focus_last
     assert_equal 0, w.focused_index
   end
 
   def test_focus_last_tracks_pane_through_promote_to_master
-    w = Rux::Window.new
+    w = Muxr::Window.new
     a, b, c = FakePane.new("a"), FakePane.new("b"), FakePane.new("c")
     [a, b, c].each { |p| w.add_pane(p) }
     w.focused_index = 2 # focused = c, last = a
@@ -90,7 +90,7 @@ class TestWindow < Minitest::Test
   end
 
   def test_focus_last_cleared_when_previous_pane_removed
-    w = Rux::Window.new
+    w = Muxr::Window.new
     a, b, c = FakePane.new("a"), FakePane.new("b"), FakePane.new("c")
     [a, b, c].each { |p| w.add_pane(p) }
     w.focused_index = 2 # focused = c, last = a
@@ -101,7 +101,7 @@ class TestWindow < Minitest::Test
   end
 
   def test_focus_index_sets_focused_pane
-    w = Rux::Window.new
+    w = Muxr::Window.new
     3.times { w.add_pane(FakePane.new) }
     w.focus_index(2)
     assert_equal 2, w.focused_index
@@ -113,7 +113,7 @@ class TestWindow < Minitest::Test
   end
 
   def test_focus_index_out_of_range_is_noop
-    w = Rux::Window.new
+    w = Muxr::Window.new
     3.times { w.add_pane(FakePane.new) }
     w.focus_index(5)
     assert_equal 0, w.focused_index

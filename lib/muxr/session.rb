@@ -1,14 +1,14 @@
 require "json"
 require "fileutils"
 
-module Rux
+module Muxr
   # A Session bundles the user's Window + Drawer plus a snapshot of the
   # terminal dimensions. It is responsible for persisting/restoring its own
-  # state as JSON on disk (~/.rux/sessions/<name>.json). Only the shape of
+  # state as JSON on disk (~/.muxr/sessions/<name>.json). Only the shape of
   # the session (pane count, layout, cwds, drawer state) is persisted — the
   # live shell history is not.
   class Session
-    SESSIONS_DIR = File.join(Dir.home, ".rux", "sessions").freeze
+    SESSIONS_DIR = File.join(Dir.home, ".muxr", "sessions").freeze
 
     attr_accessor :width, :height, :window, :drawer, :focus_drawer
     attr_reader :name

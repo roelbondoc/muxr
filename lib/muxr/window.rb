@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # A Window is a single logical "screen" containing an ordered list of panes,
   # a focused-index, a master-index (which pane is the master for tall/grid
   # layouts), and the currently-selected layout.

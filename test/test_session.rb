@@ -17,28 +17,28 @@ class TestSession < Minitest::Test
   end
 
   def with_isolated_sessions_dir
-    Dir.mktmpdir("rux-sessions") do |dir|
-      original = Rux::Session::SESSIONS_DIR
-      Rux::Session.send(:remove_const, :SESSIONS_DIR)
-      Rux::Session.const_set(:SESSIONS_DIR, dir)
+    Dir.mktmpdir("muxr-sessions") do |dir|
+      original = Muxr::Session::SESSIONS_DIR
+      Muxr::Session.send(:remove_const, :SESSIONS_DIR)
+      Muxr::Session.const_set(:SESSIONS_DIR, dir)
       begin
         yield dir
       ensure
-        Rux::Session.send(:remove_const, :SESSIONS_DIR)
-        Rux::Session.const_set(:SESSIONS_DIR, original)
+        Muxr::Session.send(:remove_const, :SESSIONS_DIR)
+        Muxr::Session.const_set(:SESSIONS_DIR, original)
       end
     end
   end
 
   def build_session
-    session = Rux::Session.new(name: "spec", width: 100, height: 30)
+    session = Muxr::Session.new(name: "spec", width: 100, height: 30)
     session.window.add_pane(FakePane.new("/tmp/one"))
     session.window.add_pane(FakePane.new("/tmp/two"))
     session.window.set_layout(:grid)
     session.window.focused_index = 1
     session.window.master_index = 0
     drawer_pane = FakeDrawerPane.new("/tmp/drawer")
-    drawer = Rux::Drawer.new(pane: drawer_pane, origin_cwd: "/tmp/drawer")
+    drawer = Muxr::Drawer.new(pane: drawer_pane, origin_cwd: "/tmp/drawer")
     drawer.show!
     session.drawer = drawer
     session.focus_drawer = true
@@ -70,7 +70,7 @@ class TestSession < Minitest::Test
       session = build_session
       session.save
 
-      loaded = Rux::Session.load("spec")
+      loaded = Muxr::Session.load("spec")
       refute_nil loaded
       assert_equal "spec", loaded["name"]
       assert_equal 2, loaded["panes"].length
@@ -79,12 +79,12 @@ class TestSession < Minitest::Test
 
   def test_load_returns_nil_for_missing
     with_isolated_sessions_dir do
-      assert_nil Rux::Session.load("nonexistent")
+      assert_nil Muxr::Session.load("nonexistent")
     end
   end
 
   def test_serialize_handles_missing_drawer
-    session = Rux::Session.new(name: "spec", width: 80, height: 24)
+    session = Muxr::Session.new(name: "spec", width: 80, height: 24)
     session.window.add_pane(FakePane.new("/tmp"))
     data = session.serialize
     assert_nil data["drawer"]
@@ -92,36 +92,36 @@ class TestSession < Minitest::Test
 
   def test_exists_check
     with_isolated_sessions_dir do
-      refute Rux::Session.exists?("missing")
+      refute Muxr::Session.exists?("missing")
       session = build_session
       session.save
-      assert Rux::Session.exists?("spec")
+      assert Muxr::Session.exists?("spec")
     end
   end
 
   def test_list_returns_sorted_session_names
     with_isolated_sessions_dir do |dir|
-      assert_equal [], Rux::Session.list
+      assert_equal [], Muxr::Session.list
 
       File.write(File.join(dir, "work.json"), "{}")
       File.write(File.join(dir, "play.json"), "{}")
       File.write(File.join(dir, "notes.txt"), "ignore me")
 
-      assert_equal %w[play work], Rux::Session.list
+      assert_equal %w[play work], Muxr::Session.list
     end
   end
 
   def test_list_returns_empty_when_dir_missing
-    Dir.mktmpdir("rux-sessions") do |tmp|
+    Dir.mktmpdir("muxr-sessions") do |tmp|
       missing = File.join(tmp, "does-not-exist")
-      original = Rux::Session::SESSIONS_DIR
-      Rux::Session.send(:remove_const, :SESSIONS_DIR)
-      Rux::Session.const_set(:SESSIONS_DIR, missing)
+      original = Muxr::Session::SESSIONS_DIR
+      Muxr::Session.send(:remove_const, :SESSIONS_DIR)
+      Muxr::Session.const_set(:SESSIONS_DIR, missing)
       begin
-        assert_equal [], Rux::Session.list
+        assert_equal [], Muxr::Session.list
       ensure
-        Rux::Session.send(:remove_const, :SESSIONS_DIR)
-        Rux::Session.const_set(:SESSIONS_DIR, original)
+        Muxr::Session.send(:remove_const, :SESSIONS_DIR)
+        Muxr::Session.const_set(:SESSIONS_DIR, original)
       end
     end
   end

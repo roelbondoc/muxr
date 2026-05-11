@@ -4,16 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`rux` is a keyboard-driven terminal multiplexer written in pure Ruby — Screen-style keybindings, xmonad-style automatic tiling, and a Quake-style drawer overlay. It is a **standalone Ruby gem**, not a Rails app. Unlike the other projects in this workspace, **rux does not use Docker** — run Ruby commands directly. Like `slimmetry-ruby`, it follows the gem exception in the workspace CLAUDE.md.
+`muxr` is a keyboard-driven terminal multiplexer written in pure Ruby — Screen-style keybindings, xmonad-style automatic tiling, and a Quake-style drawer overlay. It is a **standalone Ruby gem**, not a Rails app. Unlike the other projects in this workspace, **muxr does not use Docker** — run Ruby commands directly. Like `slimmetry-ruby`, it follows the gem exception in the workspace CLAUDE.md.
 
 Runtime depends only on Ruby ≥ 3.4 stdlib (`PTY`, `IO.console`, `JSON`, `FileUtils`). Dev-only gems: `minitest`, `rake`.
 
 ## Commands
 
 ```bash
-# Run the multiplexer (bin/rux puts lib/ on $LOAD_PATH itself, no -I needed)
-bin/rux                          # start the "default" session
-bin/rux work                     # start (or restore) a named session
+# Run the multiplexer (bin/muxr puts lib/ on $LOAD_PATH itself, no -I needed)
+bin/muxr                          # start the "default" session
+bin/muxr work                     # start (or restore) a named session
 
 # Tests — no Rakefile dependency needed for the file-loader form
 rake test                                                              # full suite
@@ -25,7 +25,7 @@ There is no lint config, no CI, and no build step (no bundler/asset/transpile).
 
 ## Architecture (the parts you have to read multiple files to see)
 
-rux runs as **two processes** talking over a Unix domain socket at `~/.rux/sockets/<name>.sock`. PTYs and Session state live in the long-running server; the client is a thin TTY front-end that comes and goes during detach/reattach.
+muxr runs as **two processes** talking over a Unix domain socket at `~/.muxr/sockets/<name>.sock`. PTYs and Session state live in the long-running server; the client is a thin TTY front-end that comes and goes during detach/reattach.
 
 ```
 Client (foreground, owns the TTY)              Server (daemon, owns the PTYs)
@@ -43,11 +43,11 @@ Client (foreground, owns the TTY)              Server (daemon, owns the PTYs)
 
 A few things that are not obvious until you've debugged them:
 
-- **Two processes.** `bin/rux <name>` always runs as the *client*. If no socket exists at `~/.rux/sockets/<name>.sock` (or the existing one is stale), bin/rux fork-execs itself with `--server <name>`, polls up to 3s for the socket to appear, then connects. Server logs go to `~/.rux/logs/<name>.log`. Only one client may attach at a time — newcomers get a `BYE busy`.
+- **Two processes.** `bin/muxr <name>` always runs as the *client*. If no socket exists at `~/.muxr/sockets/<name>.sock` (or the existing one is stale), bin/muxr fork-execs itself with `--server <name>`, polls up to 3s for the socket to appear, then connects. Server logs go to `~/.muxr/logs/<name>.log`. Only one client may attach at a time — newcomers get a `BYE busy`.
 
 - **Detach vs. quit.** `Ctrl-a d` closes the client socket but leaves the server (and all its PTYs) running. `Ctrl-a q` and `:quit` both flash `kill session? (y/n)` in the status bar and only tear the server down on `y`. There is no "kill without confirm" keybinding by design.
 
-- **Protocol framing (`lib/rux/protocol.rb`).** Every message is `[1-byte type][4-byte BE length][payload]`. Types: `H` hello, `I` input, `R` resize, `B` bye, `O` output. The HELLO and RESIZE payloads are `"ROWS COLS"` ASCII; INPUT/OUTPUT carry raw terminal bytes; BYE carries an optional reason string.
+- **Protocol framing (`lib/muxr/protocol.rb`).** Every message is `[1-byte type][4-byte BE length][payload]`. Types: `H` hello, `I` input, `R` resize, `B` bye, `O` output. The HELLO and RESIZE payloads are `"ROWS COLS"` ASCII; INPUT/OUTPUT carry raw terminal bytes; BYE carries an optional reason string.
 
 - **`FramedOutput` (nested in `Application`)** is the Renderer's `out:` sink. It packages each Renderer `write` as one `OUTPUT` frame on the attached client. When no client is attached, render is skipped entirely — PTY data still gets drained so Terminal grids stay current, and the first frame after re-attach is forced to be a full repaint via `Renderer#reset_frame!`.
 
@@ -72,19 +72,19 @@ A few things that are not obvious until you've debugged them:
 ## Testing patterns
 
 - PTY-spawning code paths are **dependency-injected**: `Pane.new` accepts `process:`, `Drawer.new` accepts `pane:`. Unit tests pass fakes (see `test_drawer.rb`, `test_session.rb`, `test_window.rb`) and never spawn a real shell.
-- `test_helper.rb` deliberately loads only the pure pieces (`layout_manager`, `window`, `drawer`, `terminal`, `session`). Tests that need the full stack should `require "rux"` themselves.
+- `test_helper.rb` deliberately loads only the pure pieces (`layout_manager`, `window`, `drawer`, `terminal`, `session`). Tests that need the full stack should `require "muxr"` themselves.
 - `test_session.rb` swaps `Session::SESSIONS_DIR` in/out via `remove_const`/`const_set` around an `mktmpdir` block — copy this pattern if you add tests that touch the filesystem.
 
 ## Session file format
 
-`~/.rux/sessions/<name>.json` — only structural state is persisted (layout, indices, per-pane cwd, drawer visibility/cwd). Shell scrollback, command history, and process state are **not** restored; on restore, fresh shells are spawned with the saved cwds.
+`~/.muxr/sessions/<name>.json` — only structural state is persisted (layout, indices, per-pane cwd, drawer visibility/cwd). Shell scrollback, command history, and process state are **not** restored; on restore, fresh shells are spawned with the saved cwds.
 
-Note: the JSON file is now mainly a *cold-storage* fallback — between detaches the live session lives inside the running server process, so reattaching after `Ctrl-a d` gives you back the exact same shells with their full history. The JSON only matters if the server is killed (`Ctrl-a q`, machine reboot, etc.) and you want to spawn fresh shells in the saved layout next time. Run `:save` from inside rux to write it.
+Note: the JSON file is now mainly a *cold-storage* fallback — between detaches the live session lives inside the running server process, so reattaching after `Ctrl-a d` gives you back the exact same shells with their full history. The JSON only matters if the server is killed (`Ctrl-a q`, machine reboot, etc.) and you want to spawn fresh shells in the saved layout next time. Run `:save` from inside muxr to write it.
 
 ## On-disk layout
 
 ```
-~/.rux/
+~/.muxr/
  ├─ sessions/<name>.json   structural snapshot (manual `:save`)
  ├─ sockets/<name>.sock    server's Unix listener (created on server start, removed on shutdown)
  └─ logs/<name>.log        server stderr/stdout (appended on each spawn)

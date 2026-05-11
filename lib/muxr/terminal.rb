@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # A minimal VT100/ANSI terminal emulator. It maintains a fixed grid of cells
   # plus a cursor and parser state. Bytes fed from a PTY are interpreted into
   # mutations of the grid which the Renderer then composites into the final

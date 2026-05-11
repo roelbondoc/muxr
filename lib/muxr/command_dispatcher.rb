@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # Parses ":"-prefixed commands typed at the command prompt and routes them
   # to the Application. Unknown commands result in a flashed status message
   # rather than a hard error so the user never gets dropped out of the

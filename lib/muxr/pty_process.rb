@@ -1,6 +1,6 @@
 require "pty"
 
-module Rux
+module Muxr
   # Owns a single pseudo-terminal pair plus the child shell process attached to
   # the slave side. The parent side is exposed via #io / #read_nonblock / #write.
   class PTYProcess

@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # A Drawer is a single persistent overlay pane, rendered on top of the tiled
   # layout. Toggling visibility never tears down the underlying PTY — the
   # drawer's shell process and scrollback survive across hide/show.

@@ -1,4 +1,4 @@
-module Rux
+module Muxr
   # Translates raw keystrokes into either commands (when the Ctrl-a prefix is
   # active) or passthrough bytes to the focused pane. The handler is a small
   # state machine: :idle → :prefix → :idle, with a separate :command branch
