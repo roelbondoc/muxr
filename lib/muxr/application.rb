@@ -26,6 +26,27 @@ module Muxr
       File.join(SOCKETS_DIR, "#{name}.sock")
     end
 
+    # Names of sessions whose server socket is currently accepting connections.
+    # Stale sockets (file exists, no listener) are skipped but left in place;
+    # cleanup happens on the next attach attempt.
+    def self.list_active
+      return [] unless File.directory?(SOCKETS_DIR)
+      Dir.children(SOCKETS_DIR).filter_map do |entry|
+        next unless entry.end_with?(".sock")
+        path = File.join(SOCKETS_DIR, entry)
+        next unless alive_socket?(path)
+        File.basename(entry, ".sock")
+      end.sort
+    end
+
+    def self.alive_socket?(path)
+      return false unless File.exist?(path)
+      UNIXSocket.new(path).close
+      true
+    rescue SystemCallError
+      false
+    end
+
     def initialize(argv = [])
       @argv = argv
       @session_name = parse_session_name(argv)

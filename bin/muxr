@@ -13,7 +13,7 @@ if ARGV.include?("-v") || ARGV.include?("--version")
 end
 
 if ARGV.include?("-l") || ARGV.include?("--list")
-  names = Muxr::Session.list
+  names = Muxr::Application.list_active
   puts names.join("\n") unless names.empty?
   exit 0
 end
@@ -26,7 +26,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       muxr                 attach the default session (auto-spawn if needed)
       muxr <name>          attach (or start) the named session
       muxr -s <name>       same as above
-      muxr --list          list saved session files and exit
+      muxr --list          list running sessions and exit
       muxr --version       print version and exit
       muxr --help          this help
 
