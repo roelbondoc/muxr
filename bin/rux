@@ -3,6 +3,9 @@
 
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "rux"
+require "fileutils"
+require "rbconfig"
+require "socket"
 
 if ARGV.include?("-v") || ARGV.include?("--version")
   puts "rux #{Rux::VERSION}"
@@ -20,21 +23,115 @@ if ARGV.include?("-h") || ARGV.include?("--help")
     rux #{Rux::VERSION} — a tiling terminal multiplexer
 
     Usage:
-      rux                 start the default session
-      rux <name>          start (or restore) the named session
+      rux                 attach the default session (auto-spawn if needed)
+      rux <name>          attach (or start) the named session
       rux -s <name>       same as above
-      rux --list          list saved sessions and exit
+      rux --list          list saved session files and exit
       rux --version       print version and exit
       rux --help          this help
 
     Keybindings (Ctrl-a prefix):
       C-a c   new pane            C-a n / p   next / prev pane
+      C-a a   toggle last pane    C-a 1..9    jump to pane by number
       C-a k   close pane          C-a Tab     cycle layout
       C-a ~   toggle drawer       C-a Enter   promote to master
       C-a :   command prompt      C-a ?       toggle help
-      C-a d   detach              C-a C-a     send literal C-a
+      C-a d   detach (server stays running)
+      C-a q   kill session (with y/n confirmation)
+      C-a C-a send literal C-a
   USAGE
   exit 0
 end
 
-Rux::Application.new(ARGV).run
+# Internal: run as the server process. bin/rux fork-execs itself with this
+# flag when no server is alive for the requested session.
+if ARGV.include?("--server")
+  args = ARGV.reject { |a| a == "--server" }
+  # Detach from the controlling terminal so the server survives the parent's
+  # shell closing. nochdir=true preserves cwd (the first pane inherits it);
+  # noclose=true keeps the stdin/out/err redirections Process.spawn set up.
+  begin
+    Process.daemon(true, true)
+  rescue NotImplementedError
+    # Platforms without Process.daemon (rare on POSIX) just run inline.
+  end
+  begin
+    Rux::Application.new(args).run
+  rescue => e
+    $stderr.puts "rux server: #{e.class}: #{e.message}"
+    $stderr.puts e.backtrace.first(20).join("\n")
+    exit 1
+  end
+  exit 0
+end
+
+# ---- client mode (the default) ----
+
+def session_name_from(argv)
+  idx = argv.index("-s") || argv.index("--session")
+  return argv[idx + 1] if idx && argv[idx + 1]
+  argv.find { |a| !a.start_with?("-") } || "default"
+end
+
+def probe_socket(path)
+  return :missing unless File.exist?(path)
+  begin
+    UNIXSocket.new(path).close
+    :alive
+  rescue Errno::ECONNREFUSED, Errno::ENOENT
+    File.unlink(path) rescue nil
+    :stale
+  rescue Errno::EACCES
+    :forbidden
+  end
+end
+
+def spawn_server(name, log_path)
+  FileUtils.mkdir_p(File.dirname(log_path))
+  log = File.open(log_path, "a")
+  pid = Process.spawn(
+    RbConfig.ruby, __FILE__, "--server", name,
+    in:  "/dev/null",
+    out: log,
+    err: log,
+    pgroup: true
+  )
+  log.close
+  Process.detach(pid)
+  pid
+end
+
+def wait_for_socket(path, deadline)
+  until File.exist?(path)
+    return false if Time.now >= deadline
+    sleep 0.05
+  end
+  true
+end
+
+name = session_name_from(ARGV)
+socket_path = Rux::Application.socket_path_for(name)
+
+case probe_socket(socket_path)
+when :forbidden
+  $stderr.puts "rux: cannot access #{socket_path} (permission denied)"
+  exit 1
+when :alive
+  # great — attach.
+when :missing, :stale
+  log_path = File.join(Dir.home, ".rux", "logs", "#{name}.log")
+  spawn_server(name, log_path)
+  unless wait_for_socket(socket_path, Time.now + 3.0)
+    $stderr.puts "rux: server did not start within 3s (see #{log_path})"
+    exit 1
+  end
+end
+
+client = Rux::Client.new(name)
+begin
+  client.connect
+rescue Errno::ECONNREFUSED, Errno::ENOENT => e
+  $stderr.puts "rux: cannot connect to server at #{socket_path}: #{e.message}"
+  exit 1
+end
+exit(client.run || 0)

@@ -9,7 +9,9 @@ require_relative "rux/session"
 require_relative "rux/renderer"
 require_relative "rux/input_handler"
 require_relative "rux/command_dispatcher"
+require_relative "rux/protocol"
 require_relative "rux/application"
+require_relative "rux/client"
 
 module Rux
   class Error < StandardError; end

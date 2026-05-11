@@ -1,25 +1,43 @@
-require "io/console"
+require "socket"
+require "fileutils"
 
 module Rux
-  # The Application is the top-level coordinator. It owns the Session, the
-  # Renderer, the InputHandler, and the IO.select-based event loop. It also
-  # exposes a public action API (new_pane, focus_next, toggle_drawer, ...)
-  # which the InputHandler and CommandDispatcher call into.
+  # The Application is the rux server. It owns the Session, panes, Renderer,
+  # and InputHandler, and listens on a Unix socket at
+  # ~/.rux/sockets/<name>.sock for a Client to attach. Shells and other PTY
+  # processes survive client detach/reattach — only the listening socket and
+  # the one currently-attached client come and go.
+  #
+  # The Renderer's output sink is a small adapter that frames its bytes into
+  # OUTPUT messages on the attached client; when no client is attached the
+  # bytes are silently dropped (we also skip the render entirely in that
+  # case). PTY data still gets drained even with no client, so the in-memory
+  # Terminal grids stay up to date and are repainted in full on the next
+  # attach via Renderer#reset_frame!.
   class Application
     SELECT_TIMEOUT = 0.05
+    SOCKETS_DIR    = File.join(Dir.home, ".rux", "sockets").freeze
+    DEFAULT_WIDTH  = 80
+    DEFAULT_HEIGHT = 24
 
-    attr_reader :session, :renderer, :input
+    attr_reader :session, :renderer, :input, :session_name
+
+    def self.socket_path_for(name)
+      File.join(SOCKETS_DIR, "#{name}.sock")
+    end
 
     def initialize(argv = [])
       @argv = argv
       @session_name = parse_session_name(argv)
       @running = false
       @needs_render = true
-      @resize_pending = false
       @message = nil
       @message_expires = nil
       @help_visible = false
       @next_pane_id = 0
+      @current_client = nil
+      @listening_socket = nil
+      @socket_path = self.class.socket_path_for(@session_name)
     end
 
     def run
@@ -111,7 +129,6 @@ module Rux
       ensure_drawer
       @session.drawer.toggle!
       @session.focus_drawer = @session.drawer.visible?
-      # On hide, refocus a regular pane.
       @session.focus_drawer = false unless @session.drawer.visible?
       renderer.reset_frame!
       invalidate
@@ -146,16 +163,37 @@ module Rux
 
     def detach
       flash("detached")
-      @running = false
+      disconnect_client(reason: "detached")
+      # Server keeps running. Next `bin/rux <name>` invocation will re-attach.
     end
 
+    # Both Ctrl-a q and :quit funnel through here. We don't kill the server
+    # immediately — InputHandler enters a confirmation state and the user
+    # has to press 'y' to actually shut down (see :request_quit_confirmed).
     def quit
-      flash("bye")
-      @running = false
+      request_quit
     end
 
     def quit_immediate
-      @running = false
+      request_quit
+    end
+
+    def request_quit
+      return if @input.state == :confirm_quit
+      @input.enter_confirm_quit
+      flash("kill session? (y/n)")
+      invalidate
+    end
+
+    def confirm_quit
+      shutdown_server
+    end
+
+    def cancel_quit
+      @message = nil
+      @message_expires = nil
+      flash("cancelled")
+      invalidate
     end
 
     def run_command(cmd_line)
@@ -208,9 +246,27 @@ module Rux
       end
     end
 
+    # Called by the FramedOutput adapter; ships one OUTPUT frame to the
+    # currently attached client. No-op when nobody is attached.
+    def deliver_output(bytes)
+      sock = @current_client
+      return unless sock
+      Protocol.write(sock, Protocol::OUTPUT, bytes)
+    rescue Errno::EPIPE, Errno::ECONNRESET, IOError
+      drop_client_silently
+    end
+
     # ---------- internals ----------
 
     private
+
+    def existing_server_alive?
+      s = UNIXSocket.new(@socket_path)
+      s.close
+      true
+    rescue Errno::ECONNREFUSED, Errno::ENOENT
+      false
+    end
 
     def parse_session_name(argv)
       idx = argv.index("-s") || argv.index("--session")
@@ -234,47 +290,42 @@ module Rux
     end
 
     def setup
-      rows, cols = IO.console.winsize
-      @session = Session.new(name: @session_name, width: cols, height: rows)
-      @renderer = Renderer.new
-      @input = InputHandler.new(self)
+      FileUtils.mkdir_p(SOCKETS_DIR)
+      if File.exist?(@socket_path) && existing_server_alive?
+        raise "rux server already running for session '#{@session_name}'"
+      end
+      File.unlink(@socket_path) if File.exist?(@socket_path)
+      @listening_socket = UNIXServer.new(@socket_path)
+      File.chmod(0o600, @socket_path) rescue nil
+
+      @session  = Session.new(name: @session_name, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT)
+      @renderer = Renderer.new(out: FramedOutput.new(self))
+      @input    = InputHandler.new(self)
 
       first_pane = make_pane
       @session.window.add_pane(first_pane)
 
       restore_panes_if_saved
 
-      STDIN.raw!
-      STDIN.echo = false
-
-      Signal.trap("WINCH") { @resize_pending = true }
-      Signal.trap("INT")   { @resize_pending = false }
-
-      @renderer.enter_alt_screen
       @running = true
     end
 
     def teardown
-      @renderer.exit_alt_screen if @renderer
-      begin
-        STDIN.cooked!
-        STDIN.echo = true
-      rescue StandardError
-        # The terminal may already have been reset by a signal handler.
+      disconnect_client
+      if @listening_socket
+        @listening_socket.close rescue nil
       end
-
-      @session.window.panes.each(&:close)
-      @session.drawer&.close
+      if @socket_path && File.exist?(@socket_path)
+        File.unlink(@socket_path) rescue nil
+      end
+      @session&.window&.panes&.each(&:close)
+      @session&.drawer&.close
     end
 
     def loop_forever
       while @running
-        if @resize_pending
-          @resize_pending = false
-          handle_resize
-        end
-
-        ready_ios = [STDIN]
+        ready_ios = [@listening_socket]
+        ready_ios << @current_client if @current_client
         @session.window.panes.each { |p| ready_ios << p.io if p.alive? }
         if @session.drawer&.pane && @session.drawer.pane.alive?
           ready_ios << @session.drawer.pane.io
@@ -285,8 +336,10 @@ module Rux
 
         if ready
           ready.each do |io|
-            if io == STDIN
-              consume_stdin
+            if io == @listening_socket
+              accept_client
+            elsif io == @current_client
+              consume_client_frame
             else
               consume_pane_io(io)
             end
@@ -301,21 +354,60 @@ module Rux
           break
         end
 
-        if @needs_render
+        if @current_client && @needs_render
           render
           @needs_render = false
         end
       end
     end
 
-    def consume_stdin
-      data = STDIN.read_nonblock(4096)
-      @input.feed(data)
+    def accept_client
+      sock = @listening_socket.accept
+      if @current_client
+        # Single attached client at a time. Reject newcomers politely.
+        safe_protocol_write(sock, Protocol::BYE, "busy")
+        sock.close rescue nil
+        return
+      end
+
+      type, payload = Protocol.read(sock)
+      unless type == Protocol::HELLO
+        safe_protocol_write(sock, Protocol::BYE, "expected HELLO")
+        sock.close rescue nil
+        return
+      end
+
+      size = Protocol.decode_size(payload)
+      apply_size(*size) if size
+
+      @current_client = sock
+      @renderer.reset_frame!
       invalidate
-    rescue IO::WaitReadable
-      # spurious wakeup
-    rescue EOFError
-      @running = false
+    end
+
+    def consume_client_frame
+      type, payload = Protocol.read(@current_client)
+      if type.nil?
+        drop_client_silently
+        return
+      end
+
+      case type
+      when Protocol::INPUT
+        @input.feed(payload)
+        invalidate
+      when Protocol::RESIZE
+        size = Protocol.decode_size(payload)
+        if size
+          apply_size(*size)
+          @renderer.reset_frame!
+          invalidate
+        end
+      when Protocol::BYE
+        drop_client_silently
+      else
+        # Unknown frame type — ignore quietly.
+      end
     end
 
     def consume_pane_io(io)
@@ -348,12 +440,9 @@ module Rux
       end
     end
 
-    def handle_resize
-      rows, cols = IO.console.winsize
-      @session.width = cols
+    def apply_size(rows, cols)
+      @session.width  = cols
       @session.height = rows
-      @renderer.reset_frame!
-      invalidate
     end
 
     def render
@@ -364,6 +453,31 @@ module Rux
         message: @message,
         help: @help_visible
       )
+    end
+
+    def disconnect_client(reason: nil)
+      return unless @current_client
+      safe_protocol_write(@current_client, Protocol::BYE, reason || "")
+      @current_client.close rescue nil
+      @current_client = nil
+    end
+
+    def drop_client_silently
+      return unless @current_client
+      @current_client.close rescue nil
+      @current_client = nil
+    end
+
+    def safe_protocol_write(io, type, payload = "")
+      Protocol.write(io, type, payload)
+    rescue Errno::EPIPE, Errno::ECONNRESET, IOError
+      # peer gone; nothing to do.
+    end
+
+    def shutdown_server
+      flash("bye")
+      disconnect_client(reason: "shutdown")
+      @running = false
     end
 
     def make_pane(cwd: nil)
@@ -387,8 +501,6 @@ module Rux
       end
 
       panes_data = data["panes"] || []
-      # The first pane already exists; reuse it but reseat cwd if possible
-      # cannot rewind cwd of the running shell, so just spawn extras.
       panes_data[1..]&.each do |entry|
         cwd = entry["cwd"]
         @session.window.add_pane(make_pane(cwd: cwd))
@@ -406,6 +518,25 @@ module Rux
       @session.window.focused_index = (data["focused_index"] || 0).clamp(0, @session.window.panes.length - 1)
       @session.window.master_index  = (data["master_index"]  || 0).clamp(0, @session.window.panes.length - 1)
       flash("session restored")
+    end
+
+    # Renderer expects an IO-ish sink with #write and #flush. We frame every
+    # write as one OUTPUT message on the attached client; nobody attached =
+    # bytes go nowhere (and Application skips render entirely in that case,
+    # so this path is rarely exercised).
+    class FramedOutput
+      def initialize(app)
+        @app = app
+      end
+
+      def write(bytes)
+        @app.deliver_output(bytes)
+        bytes.bytesize
+      end
+
+      def flush
+        # Unix sockets do not need a Ruby-level flush.
+      end
     end
   end
 end

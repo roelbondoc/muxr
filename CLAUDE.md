@@ -25,21 +25,33 @@ There is no lint config, no CI, and no build step (no bundler/asset/transpile).
 
 ## Architecture (the parts you have to read multiple files to see)
 
+rux runs as **two processes** talking over a Unix domain socket at `~/.rux/sockets/<name>.sock`. PTYs and Session state live in the long-running server; the client is a thin TTY front-end that comes and goes during detach/reattach.
+
 ```
-Application (event loop, lifecycle)
- ├─ Session (Window + Drawer + dimensions; JSON save/restore)
- │   ├─ Window  – panes[], focused_index, master_index, layout
- │   ├─ Pane[]  – Terminal (VT100 buffer) + PTYProcess (shell)
- │   └─ Drawer  – wraps one Pane; visibility flag; persistent PTY
- ├─ Renderer        – composites a frame, diff-emits ANSI
- ├─ InputHandler    – Ctrl-a state machine
- ├─ CommandDispatcher – ":cmd" prompt parser
- └─ LayoutManager   – pure functions (no state)
+Client (foreground, owns the TTY)              Server (daemon, owns the PTYs)
+ ├─ STDIN raw + alt screen                      Application (event loop, lifecycle)
+ ├─ SIGWINCH → RESIZE frame                      ├─ Session (Window + Drawer + dimensions)
+ │                                               │   ├─ Window  – panes[], focused_index, ...
+ └─ Protocol                                     │   ├─ Pane[]  – Terminal + PTYProcess
+     ◄── OUTPUT bytes ──── Renderer ◄────────────┤   └─ Drawer  – persistent PTY, toggleable
+     ──── INPUT bytes ───► InputHandler          ├─ Renderer        – frame composer, diff-emits ANSI
+     ──── HELLO/RESIZE ──► apply_size            ├─ InputHandler    – Ctrl-a state machine
+     ◄── BYE ───────────── disconnect_client     ├─ CommandDispatcher
+                                                 ├─ LayoutManager   – pure functions
+                                                 └─ UNIXServer listener (accepts one client)
 ```
 
 A few things that are not obvious until you've debugged them:
 
-- **Event loop is single-threaded `IO.select`** over STDIN plus every pane PTY plus the drawer PTY (when present). All PTY reads feed into the focused/destination pane's `Terminal#feed`. Nothing happens off the main thread.
+- **Two processes.** `bin/rux <name>` always runs as the *client*. If no socket exists at `~/.rux/sockets/<name>.sock` (or the existing one is stale), bin/rux fork-execs itself with `--server <name>`, polls up to 3s for the socket to appear, then connects. Server logs go to `~/.rux/logs/<name>.log`. Only one client may attach at a time — newcomers get a `BYE busy`.
+
+- **Detach vs. quit.** `Ctrl-a d` closes the client socket but leaves the server (and all its PTYs) running. `Ctrl-a q` and `:quit` both flash `kill session? (y/n)` in the status bar and only tear the server down on `y`. There is no "kill without confirm" keybinding by design.
+
+- **Protocol framing (`lib/rux/protocol.rb`).** Every message is `[1-byte type][4-byte BE length][payload]`. Types: `H` hello, `I` input, `R` resize, `B` bye, `O` output. The HELLO and RESIZE payloads are `"ROWS COLS"` ASCII; INPUT/OUTPUT carry raw terminal bytes; BYE carries an optional reason string.
+
+- **`FramedOutput` (nested in `Application`)** is the Renderer's `out:` sink. It packages each Renderer `write` as one `OUTPUT` frame on the attached client. When no client is attached, render is skipped entirely — PTY data still gets drained so Terminal grids stay current, and the first frame after re-attach is forced to be a full repaint via `Renderer#reset_frame!`.
+
+- **Event loop is single-threaded `IO.select`** over the listening socket, the attached client socket (when present), every pane PTY, and the drawer PTY (when present). All PTY reads feed into the destination pane's `Terminal#feed`. Nothing happens off the main thread.
 
 - **`Terminal` is a real VT100 emulator**, not a line buffer. It maintains a `rows × cols` grid of `Cell` (char + fg + bg + attrs) plus cursor and scroll region. It handles CSI cursor movement, SGR (16-color, 256-color, truecolor), erase/insert/delete, autowrap, and scroll regions. UTF-8 bytes are buffered across PTY read boundaries via `@feed_remainder`.
 
@@ -51,7 +63,7 @@ A few things that are not obvious until you've debugged them:
 
 - **Drawer PTY is never torn down on hide.** `toggle/show/hide` only flip `@visible`; the shell process keeps running so its scrollback survives. Only `drawer reset` actually kills the PTY. cwd inheritance happens **once at first creation** from the focused pane's `cwd`.
 
-- **`InputHandler` state machine:** `:idle` → (Ctrl-a) → `:prefix` → dispatches single key → `:idle`, OR `:prefix` + `:` → `:command` (buffered until Enter). `Ctrl-a Ctrl-a` sends a literal Ctrl-a byte through to the focused pane. Help mode is a one-shot `:help` state cleared on any key.
+- **`InputHandler` state machine:** `:idle` → (Ctrl-a) → `:prefix` → dispatches single key → `:idle`, OR `:prefix` + `:` → `:command` (buffered until Enter). `:confirm_quit` is a one-shot state entered by `:quit` / `Ctrl-a q`; it consumes one key and either calls `confirm_quit` (on `y`/`Y`) or `cancel_quit` (anything else). `:help` is the same shape — one-shot, cleared on any key. `Ctrl-a Ctrl-a` sends a literal Ctrl-a byte through to the focused pane.
 
 - **`Window#promote_to_master`** does NOT just swap indices — it moves the focused pane to position 0 in `@panes` and resets both indices to 0. This keeps tall/grid layouts visually stable (master is always `panes[0]`).
 
@@ -66,3 +78,14 @@ A few things that are not obvious until you've debugged them:
 ## Session file format
 
 `~/.rux/sessions/<name>.json` — only structural state is persisted (layout, indices, per-pane cwd, drawer visibility/cwd). Shell scrollback, command history, and process state are **not** restored; on restore, fresh shells are spawned with the saved cwds.
+
+Note: the JSON file is now mainly a *cold-storage* fallback — between detaches the live session lives inside the running server process, so reattaching after `Ctrl-a d` gives you back the exact same shells with their full history. The JSON only matters if the server is killed (`Ctrl-a q`, machine reboot, etc.) and you want to spawn fresh shells in the saved layout next time. Run `:save` from inside rux to write it.
+
+## On-disk layout
+
+```
+~/.rux/
+ ├─ sessions/<name>.json   structural snapshot (manual `:save`)
+ ├─ sockets/<name>.sock    server's Unix listener (created on server start, removed on shutdown)
+ └─ logs/<name>.log        server stderr/stdout (appended on each spawn)
+```

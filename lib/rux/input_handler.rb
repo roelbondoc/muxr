@@ -37,6 +37,8 @@ module Rux
         when :help
           @app.dismiss_help
           @state = :idle
+        when :confirm_quit
+          handle_confirm_quit(ch)
         when :idle
           if ch == PREFIX
             @state = :prefix
@@ -53,6 +55,10 @@ module Rux
 
     def enter_help_mode
       @state = :help
+    end
+
+    def enter_confirm_quit
+      @state = :confirm_quit
     end
 
     def cancel
@@ -80,6 +86,15 @@ module Rux
       else
         # Unknown prefix-key: return to idle silently.
         @state = :idle
+      end
+    end
+
+    def handle_confirm_quit(ch)
+      @state = :idle
+      if ch == "y" || ch == "Y"
+        @app.confirm_quit
+      else
+        @app.cancel_quit
       end
     end
 
