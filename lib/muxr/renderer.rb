@@ -439,6 +439,7 @@ module Muxr
       parts = ["0"]
       attrs = cell.attrs.to_i
       parts << "1" if (attrs & Terminal::BOLD) != 0
+      parts << "2" if (attrs & Terminal::DIM) != 0
       parts << "4" if (attrs & Terminal::UNDERLINE) != 0
       parts << "7" if (attrs & Terminal::REVERSE) != 0
       append_color(parts, cell.fg, true)

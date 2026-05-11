@@ -8,6 +8,7 @@ module Muxr
     BOLD      = 1
     UNDERLINE = 2
     REVERSE   = 4
+    DIM       = 8
 
     SCROLLBACK_MAX = 5000
 
@@ -719,9 +720,10 @@ module Muxr
           @bg = nil
           @attrs = 0
         when 1 then @attrs |= BOLD
+        when 2 then @attrs |= DIM
         when 4 then @attrs |= UNDERLINE
         when 7 then @attrs |= REVERSE
-        when 22 then @attrs &= ~BOLD
+        when 22 then @attrs &= ~(BOLD | DIM)
         when 24 then @attrs &= ~UNDERLINE
         when 27 then @attrs &= ~REVERSE
         when 30..37 then @fg = p - 30

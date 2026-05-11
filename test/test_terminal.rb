@@ -57,6 +57,16 @@ class TestTerminal < Minitest::Test
     assert_nil t.cell(0, 1).fg
   end
 
+  def test_sgr_dim
+    # Claude Code emits SGR 2 for placeholder/suggestion text. Without the
+    # DIM attribute, it'd be silently dropped and the placeholder would
+    # render at normal intensity.
+    t = Muxr::Terminal.new(rows: 1, cols: 4)
+    t.feed("\e[2mA\e[22mB")
+    assert_equal Muxr::Terminal::DIM, t.cell(0, 0).attrs & Muxr::Terminal::DIM
+    assert_equal 0, t.cell(0, 1).attrs & Muxr::Terminal::DIM
+  end
+
   def test_resize_preserves_content_within_bounds
     t = Muxr::Terminal.new(rows: 4, cols: 5)
     t.feed("abc\r\ndef")
