@@ -74,6 +74,8 @@ module Rux
         master_index: win.master_index
       )
 
+      monocle = win.layout == :monocle
+
       win.panes.each_with_index do |pane, i|
         rect = rects[i]
         pane.rect = rect
@@ -83,8 +85,14 @@ module Rux
         inner_h = rect.h - 2
         pane.resize(inner_h, inner_w)
 
+        # In monocle every rect is identical, so drawing all panes would just
+        # stack them and let the last-in-array win. Only composite the focused
+        # pane; the others stay resized so their PTYs are ready when focus moves.
+        next if monocle && i != win.focused_index
+
         focused = (i == win.focused_index) && !(session.focus_drawer && session.drawer&.visible?)
         title = "##{i + 1}"
+        title += "/#{win.panes.length}" if monocle
         title += " ★" if i == win.master_index
         title += " (" + win.layout.to_s + ")" if i == win.focused_index
         draw_box(frame, rect,
