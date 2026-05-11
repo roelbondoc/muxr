@@ -18,8 +18,27 @@ module Muxr
       "~"    => :toggle_drawer,
       "d"    => :detach,
       "?"    => :show_help,
-      "q"    => :quit_immediate
+      "q"    => :quit_immediate,
+      "["    => :enter_scrollback
     }.freeze
+
+    SCROLLBACK_BINDINGS = {
+      "j"    => :line_forward,
+      "k"    => :line_back,
+      "\x04" => :half_forward, # Ctrl-d
+      "\x15" => :half_back,    # Ctrl-u
+      "d"    => :half_forward,
+      "u"    => :half_back,
+      "\x06" => :full_forward, # Ctrl-f
+      "\x02" => :full_back,    # Ctrl-b
+      "f"    => :full_forward,
+      "b"    => :full_back,
+      " "    => :full_forward,
+      "g"    => :top,
+      "G"    => :bottom
+    }.freeze
+
+    SCROLLBACK_EXITS = ["q", "\e", "\r", "\n", "\x03"].freeze # q, Esc, Enter, Ctrl-c
 
     DIGIT_RE = /\A[1-9]\z/.freeze
 
@@ -49,6 +68,8 @@ module Muxr
           handle_prefix(ch)
         when :command
           handle_command_input(ch)
+        when :scrollback
+          handle_scrollback_input(ch)
         end
       end
     end
@@ -59,6 +80,10 @@ module Muxr
 
     def enter_confirm_quit
       @state = :confirm_quit
+    end
+
+    def enter_scrollback_mode
+      @state = :scrollback
     end
 
     def cancel
@@ -96,6 +121,18 @@ module Muxr
       else
         @app.cancel_quit
       end
+    end
+
+    def handle_scrollback_input(ch)
+      if SCROLLBACK_EXITS.include?(ch)
+        @state = :idle
+        @app.exit_scrollback
+        return
+      end
+      action = SCROLLBACK_BINDINGS[ch]
+      @app.scroll_focused(action) if action
+      # Unknown keys: ignored. Avoids accidental shell input when the user
+      # mistypes inside scrollback mode.
     end
 
     def handle_command_input(ch)

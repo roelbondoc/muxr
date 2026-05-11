@@ -95,6 +95,9 @@ module Muxr
         title += "/#{win.panes.length}" if monocle
         title += " ★" if i == win.master_index
         title += " (" + win.layout.to_s + ")" if i == win.focused_index
+        if pane.terminal.scrolled_back?
+          title += " [scrollback #{pane.terminal.view_offset}/#{pane.terminal.scrollback_size}]"
+        end
         draw_box(frame, rect,
                  border: focused ? BORDER_FOCUSED : BORDER_UNFOCUSED,
                  bold_border: focused,
@@ -130,10 +133,13 @@ module Muxr
       end
 
       focused = session.focus_drawer
+      title = focused ? "Drawer" : "Drawer (hidden focus)"
+      term = drawer.pane.terminal
+      title += " [scrollback #{term.view_offset}/#{term.scrollback_size}]" if term.scrolled_back?
       draw_box(frame, rect,
                border: focused ? BORDER_DRAWER_FOCUS : BORDER_DRAWER_IDLE,
                bold_border: true,
-               title: focused ? "Drawer" : "Drawer (hidden focus)",
+               title: title,
                title_focused: focused)
       copy_terminal(frame, drawer.pane, rect.x + 1, rect.y + 1)
     end
@@ -192,6 +198,23 @@ module Muxr
           c.bg = [:c256, 226]
           c.attrs = 0
         end
+      elsif input_state == :scrollback
+        overlay = " SCROLLBACK  j/k line  d/u half  f/b page  g/G top/bot  q quit "
+        overlay = overlay[0, w]
+        overlay.each_char.with_index do |ch, x|
+          c = frame[y][x]
+          c.char = ch
+          c.fg = [:c256, 232]
+          c.bg = [:c256, 214]
+          c.attrs = Terminal::BOLD
+        end
+        (overlay.length...w).each do |x|
+          c = frame[y][x]
+          c.char = " "
+          c.fg = nil
+          c.bg = [:c256, 214]
+          c.attrs = 0
+        end
       elsif message
         msg = " #{message} "
         start = [w - msg.length, 0].max
@@ -218,6 +241,7 @@ module Muxr
       "  C-a Tab     cycle layout (tall → grid → monocle)",
       "  C-a Enter   promote focused pane to master",
       "  C-a ~       toggle drawer",
+      "  C-a [       enter scrollback (j/k d/u f/b g/G, q to quit)",
       "  C-a d       detach (server keeps running)",
       "  C-a q       kill session (asks y/n)",
       "  C-a :       command prompt",
@@ -298,7 +322,7 @@ module Muxr
         cols.times do |c|
           fx = dst_x + c
           next if fx < 0 || fx >= frame[0].length
-          src = term.cell(r, c)
+          src = term.visible_cell(r, c)
           dst = frame[fy][fx]
           dst.char = src.char
           dst.fg = src.fg
@@ -370,6 +394,7 @@ module Muxr
       return "\e[?25l" unless target&.rect
 
       term = target.terminal
+      return "\e[?25l" if term.scrolled_back?
       rect = target.rect
       row = rect.y + 1 + term.cursor_row + 1
       col = rect.x + 1 + term.cursor_col + 1

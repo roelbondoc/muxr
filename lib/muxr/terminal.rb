@@ -9,6 +9,8 @@ module Muxr
     UNDERLINE = 2
     REVERSE   = 4
 
+    SCROLLBACK_MAX = 5000
+
     Cell = Struct.new(:char, :fg, :bg, :attrs) do
       def reset!
         self.char = " "
@@ -25,7 +27,7 @@ module Muxr
       end
     end
 
-    attr_reader :rows, :cols, :cursor_row, :cursor_col
+    attr_reader :rows, :cols, :cursor_row, :cursor_col, :view_offset
 
     def initialize(rows: 24, cols: 80)
       @rows = rows
@@ -44,10 +46,52 @@ module Muxr
       @parser_params = +""
       @feed_remainder = +"".b
       @dirty = true
+      @scrollback = []
+      @view_offset = 0
     end
 
     def cell(r, c)
       @buffer[r][c]
+    end
+
+    # Returns the Cell that should be visible at (r, c) given the current
+    # scrollback view_offset. When view_offset == 0 this is the live grid.
+    # When view_offset > 0, rows in the top of the visible area are sourced
+    # from @scrollback instead.
+    def visible_cell(r, c)
+      return @buffer[r][c] if @view_offset.zero?
+      idx = @scrollback.size - @view_offset + r
+      if idx < @scrollback.size
+        row = @scrollback[idx]
+        return blank_cell if row.nil? || c >= row.length
+        row[c]
+      else
+        @buffer[idx - @scrollback.size][c]
+      end
+    end
+
+    def scrollback_size
+      @scrollback.size
+    end
+
+    def scrolled_back?
+      @view_offset > 0
+    end
+
+    def scroll_back(n = 1)
+      set_view_offset(@view_offset + n)
+    end
+
+    def scroll_forward(n = 1)
+      set_view_offset(@view_offset - n)
+    end
+
+    def scroll_to_top
+      set_view_offset(@scrollback.size)
+    end
+
+    def scroll_to_bottom
+      set_view_offset(0)
     end
 
     def dirty?
@@ -351,8 +395,27 @@ module Muxr
     end
 
     def scroll_up_region
+      # Only the default full-screen region contributes to scrollback. Partial
+      # regions (vi/less status lines) scroll inner content that's not really
+      # "off the top of the screen" and shouldn't pollute history.
+      if @scroll_top.zero? && @scroll_bottom == @rows - 1
+        @scrollback << @buffer[0]
+        @scrollback.shift if @scrollback.size > SCROLLBACK_MAX
+        # Keep the user's view frozen on the same content when new rows arrive
+        # while they're scrolled back.
+        if @view_offset.positive?
+          @view_offset = (@view_offset + 1).clamp(0, @scrollback.size)
+        end
+      end
       @buffer[@scroll_top, @scroll_bottom - @scroll_top + 1] =
         @buffer[(@scroll_top + 1)..@scroll_bottom] + [Array.new(@cols) { blank_cell }]
+    end
+
+    def set_view_offset(v)
+      new_v = v.clamp(0, @scrollback.size)
+      return if new_v == @view_offset
+      @view_offset = new_v
+      @dirty = true
     end
 
     def scroll_down_region

@@ -140,4 +140,87 @@ class TestTerminal < Minitest::Test
     assert_equal "c", t.cell(0, 2).char
     assert_equal "d", t.cell(1, 0).char
   end
+
+  def test_scrollback_captures_lines_scrolled_off_top
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    # Three lines into a 2-row grid: the first line gets pushed into
+    # scrollback, the last two stay on the visible grid.
+    t.feed("aaa\r\nbbb\r\nccc")
+    assert_equal 1, t.scrollback_size
+    # Visible grid (offset 0) shows the latest two rows.
+    assert_equal "b", t.visible_cell(0, 0).char
+    assert_equal "c", t.visible_cell(1, 0).char
+  end
+
+  def test_scroll_back_reveals_history
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aaa\r\nbbb\r\nccc")
+    t.scroll_back(1)
+    assert_equal 1, t.view_offset
+    # Top visible row now sources from scrollback, bottom row from the grid.
+    assert_equal "a", t.visible_cell(0, 0).char
+    assert_equal "b", t.visible_cell(1, 0).char
+  end
+
+  def test_scroll_back_clamps_to_scrollback_size
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aaa\r\nbbb\r\nccc")
+    t.scroll_back(99)
+    assert_equal 1, t.view_offset
+  end
+
+  def test_view_offset_bumps_when_scrolled_back_and_new_row_arrives
+    # When the user is scrolled back, fresh output must not shift the visible
+    # content out from under them — view_offset compensates by tracking the
+    # newly-pushed scrollback rows.
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aaa\r\nbbb\r\nccc") # scrollback: [aaa], grid: [bbb, ccc]
+    t.scroll_back(1)            # top visible = aaa
+    assert_equal "a", t.visible_cell(0, 0).char
+    t.feed("\r\nddd")           # scrollback: [aaa, bbb], grid: [ccc, ddd]
+    assert_equal 2, t.scrollback_size
+    assert_equal 2, t.view_offset
+    # Top of view should STILL be aaa — frozen on the same content.
+    assert_equal "a", t.visible_cell(0, 0).char
+  end
+
+  def test_scroll_to_top_and_bottom
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aaa\r\nbbb\r\nccc\r\nddd")
+    t.scroll_to_top
+    assert_equal 2, t.view_offset
+    assert_equal "a", t.visible_cell(0, 0).char
+    t.scroll_to_bottom
+    assert_equal 0, t.view_offset
+    assert_equal "c", t.visible_cell(0, 0).char
+    assert_equal "d", t.visible_cell(1, 0).char
+  end
+
+  def test_scrollback_evicts_oldest_at_cap
+    cap = Muxr::Terminal::SCROLLBACK_MAX
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    # cap+5 lines worth of scrollback pushes — oldest fall off, newest stays.
+    lines = Array.new(cap + 5) { |i| format("%03d", i % 1000) }
+    t.feed(lines.join("\r\n"))
+    assert_equal cap, t.scrollback_size
+  end
+
+  def test_partial_scroll_region_does_not_pollute_scrollback
+    t = Muxr::Terminal.new(rows: 4, cols: 3)
+    # \e[1;3r sets DECSTBM scroll region to rows 1..3 (1-based); CSI r also
+    # homes the cursor. Then four LFs would scroll within rows 0..2 — nothing
+    # should reach scrollback.
+    t.feed("\e[1;3r")
+    4.times { t.feed("a\r\n") }
+    assert_equal 0, t.scrollback_size
+  end
+
+  def test_visible_cell_falls_back_to_blank_for_narrow_scrollback_row
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("aa\r\nbb\r\ncc")
+    t.scroll_back(1)
+    # The scrollback row is 3 cols wide; reading past it should still work.
+    cell = t.visible_cell(0, 2)
+    assert_equal " ", cell.char
+  end
 end

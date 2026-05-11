@@ -212,6 +212,40 @@ module Muxr
       invalidate
     end
 
+    def enter_scrollback
+      target = focused_target
+      return unless target
+      return if target.terminal.scrollback_size.zero?
+      @input.enter_scrollback_mode
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def exit_scrollback
+      target = focused_target
+      target&.terminal&.scroll_to_bottom
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def scroll_focused(action)
+      target = focused_target
+      return unless target
+      term = target.terminal
+      rows = term.rows
+      case action
+      when :line_back     then term.scroll_back(1)
+      when :line_forward  then term.scroll_forward(1)
+      when :half_back     then term.scroll_back([rows / 2, 1].max)
+      when :half_forward  then term.scroll_forward([rows / 2, 1].max)
+      when :full_back     then term.scroll_back([rows - 1, 1].max)
+      when :full_forward  then term.scroll_forward([rows - 1, 1].max)
+      when :top           then term.scroll_to_top
+      when :bottom        then term.scroll_to_bottom
+      end
+      invalidate
+    end
+
     def flash(msg)
       @message = msg
       @message_expires = Time.now + 2.5
