@@ -20,6 +20,27 @@ the active layout decides geometry.
  [default] panes:3 layout:tall focused:#1 drawer:shown     muxr ^a ?
 ```
 
+## Screenshots
+
+The three built-in layouts (cycle with `C-a Tab`):
+
+<table>
+  <tr>
+    <td align="center"><strong>tall</strong><br/>master + stacked slaves</td>
+    <td align="center"><strong>grid</strong><br/>even tiling</td>
+    <td align="center"><strong>monocle</strong><br/>focused pane fullscreen</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/01-layout-tall.png" alt="tall layout"></td>
+    <td><img src="docs/screenshots/02-layout-grid.png" alt="grid layout"></td>
+    <td><img src="docs/screenshots/03-layout-monocle.png" alt="monocle layout"></td>
+  </tr>
+</table>
+
+The Quake-style drawer overlay (`C-a ~`):
+
+![drawer overlay](docs/screenshots/04-drawer.png)
+
 ## Install / run
 
 ```bash
