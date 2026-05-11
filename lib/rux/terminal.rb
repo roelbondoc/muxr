@@ -229,6 +229,23 @@ module Rux
     end
 
     def handle_csi(final)
+      # Private / extended CSI sequences share final bytes with the standard
+      # ones but mean entirely different things. The most damaging example:
+      # `\e[>4;2m` (xterm modifyOtherKeys mode 2) shares its final `m` with
+      # SGR. If we stripped the `>` and dispatched into apply_sgr, the `4`
+      # would latch underline ON globally — Claude Code emits this sequence
+      # once at startup and never clears underline afterward, which made the
+      # entire UI underlined. Same shape for `\e[<u` (kitty kbd pop),
+      # `\e[=...`, `\e[?...r/s` (XTRESTORE/XTSAVE), `\e[!p` (DECSTR).
+      case @parser_params[0]
+      when ">", "<", "=", "!"
+        return
+      when "?"
+        # DEC private modes — we treat `h`/`l` as no-ops anyway, so dropping
+        # everything is safe and avoids `\e[?Nr` colliding with DECSTBM.
+        return
+      end
+
       pms = csi_params
       case final
       when "A"
@@ -302,8 +319,8 @@ module Rux
       when "u"
         @cursor_row, @cursor_col = @saved_cursor
       when "h", "l"
-        # Modes (?25 cursor visibility, ?1049 alt screen, etc.) — ignored;
-        # rux already owns the host terminal's alt screen.
+        # Non-private mode set/reset — nothing we need to honor. (DEC private
+        # `?`-prefixed mode sequences are short-circuited above.)
       end
     end
 

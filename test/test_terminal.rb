@@ -102,6 +102,30 @@ class TestTerminal < Minitest::Test
     assert_equal 0, t.cell(0, 0).attrs
   end
 
+  def test_modify_other_keys_does_not_leak_into_sgr
+    # `\e[>4;2m` is xterm's modifyOtherKeys mode set. The `>` prefix marks
+    # it as a private/extended CSI, NOT standard SGR. If we strip the `>`
+    # and route to apply_sgr, the `4` latches UNDERLINE on globally — which
+    # is exactly what was making every character in the Claude Code UI
+    # underlined.
+    t = Rux::Terminal.new(rows: 1, cols: 4)
+    t.feed("\e[>4;2mABCD")
+    4.times do |c|
+      assert_equal 0, t.cell(0, c).attrs, "cell #{c} should have no attrs"
+    end
+  end
+
+  def test_private_mode_r_does_not_set_scroll_region
+    # `\e[?2026r` is XTRESTORE for DEC private mode 2026 (synchronized
+    # output). The `?` prefix must keep it out of DECSTBM's lap.
+    t = Rux::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e[?2026r")
+    t.feed("X")
+    # Cursor should still be at (0, 0) writing X, not relocated by a
+    # spurious scroll-region reset.
+    assert_equal "X", t.cell(0, 0).char
+  end
+
   def test_sgr_colon_extended_foreground_color
     t = Rux::Terminal.new(rows: 1, cols: 2)
     t.feed("\e[38:5:9mA")
