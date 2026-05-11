@@ -6,6 +6,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-05-11
+
+### Fixed
+- `muxr --list` now reports sessions whose server is actually running
+  (live sockets in `~/.muxr/sockets/`) instead of `~/.muxr/sessions/*.json`,
+  which only exist after an explicit `:save` and so missed every live
+  session. The saved-snapshot enumeration is still available internally
+  via `Muxr::Session.list`.
+
 ## [0.1.0] - 2026-05-11
 
 Initial release.
@@ -42,5 +51,6 @@ Initial release.
   boundaries.
 - Renderer that composes one frame and diff-emits ANSI to STDOUT.
 
-[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.1
 [0.1.0]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.0
