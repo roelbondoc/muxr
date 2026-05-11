@@ -402,4 +402,96 @@ class TestTerminal < Minitest::Test
     t.anchor_selection!
     refute t.selection_active?
   end
+
+  def test_word_forward_skips_to_next_word_start
+    t = Muxr::Terminal.new(rows: 1, cols: 20)
+    t.feed("hello world foo")
+    t.place_selection_cursor(0, 0)
+    t.selection_cursor_word_forward
+    assert_equal [0, 6], t.selection_cursor_visible # 'w' of "world"
+    t.selection_cursor_word_forward
+    assert_equal [0, 12], t.selection_cursor_visible # 'f' of "foo"
+  end
+
+  def test_word_forward_stops_at_punctuation_boundary
+    t = Muxr::Terminal.new(rows: 1, cols: 20)
+    t.feed("foo,bar baz")
+    t.place_selection_cursor(0, 0)
+    t.selection_cursor_word_forward
+    assert_equal [0, 3], t.selection_cursor_visible # comma is its own word
+    t.selection_cursor_word_forward
+    assert_equal [0, 4], t.selection_cursor_visible # 'b' of "bar"
+  end
+
+  def test_word_forward_big_treats_punct_and_alnum_as_one_word
+    t = Muxr::Terminal.new(rows: 1, cols: 20)
+    t.feed("foo,bar baz")
+    t.place_selection_cursor(0, 0)
+    t.selection_cursor_word_forward(big: true)
+    assert_equal [0, 8], t.selection_cursor_visible # 'b' of "baz"
+  end
+
+  def test_word_end_moves_to_end_of_word
+    t = Muxr::Terminal.new(rows: 1, cols: 20)
+    t.feed("hello world")
+    t.place_selection_cursor(0, 0)
+    t.selection_cursor_word_end
+    assert_equal [0, 4], t.selection_cursor_visible # 'o' of "hello"
+    t.selection_cursor_word_end
+    assert_equal [0, 10], t.selection_cursor_visible # 'd' of "world"
+  end
+
+  def test_word_backward_returns_to_word_start
+    t = Muxr::Terminal.new(rows: 1, cols: 20)
+    t.feed("hello world foo")
+    t.place_selection_cursor(0, 14) # on the last 'o' of "foo"
+    t.selection_cursor_word_backward
+    assert_equal [0, 12], t.selection_cursor_visible # 'f'
+    t.selection_cursor_word_backward
+    assert_equal [0, 6], t.selection_cursor_visible # 'w'
+    t.selection_cursor_word_backward
+    assert_equal [0, 0], t.selection_cursor_visible # 'h'
+  end
+
+  def test_word_backward_big_skips_punctuation
+    t = Muxr::Terminal.new(rows: 1, cols: 20)
+    t.feed("foo,bar baz")
+    t.place_selection_cursor(0, 10) # 'z' of "baz"
+    t.selection_cursor_word_backward(big: true)
+    assert_equal [0, 8], t.selection_cursor_visible # 'b' of "baz"
+    t.selection_cursor_word_backward(big: true)
+    assert_equal [0, 0], t.selection_cursor_visible # 'f' of "foo,bar" (one WORD)
+  end
+
+  def test_first_non_blank_skips_leading_whitespace
+    t = Muxr::Terminal.new(rows: 1, cols: 10)
+    t.feed("   hello")
+    t.place_selection_cursor(0, 0)
+    t.selection_cursor_to_first_non_blank
+    assert_equal [0, 3], t.selection_cursor_visible
+  end
+
+  def test_viewport_jump_places_cursor_on_visible_lines
+    t = Muxr::Terminal.new(rows: 3, cols: 5)
+    t.feed("aaaaa\r\n bbbb\r\n  ccc")
+    t.place_selection_cursor(0, 4)
+    t.selection_cursor_to_viewport(:top)
+    assert_equal [0, 0], t.selection_cursor_visible
+    t.selection_cursor_to_viewport(:middle)
+    assert_equal [1, 1], t.selection_cursor_visible # first non-blank of " bbbb"
+    t.selection_cursor_to_viewport(:bottom)
+    assert_equal [2, 2], t.selection_cursor_visible # first non-blank of "  ccc"
+  end
+
+  def test_word_forward_crosses_row_boundary
+    # "hello" fills the full row, no internal whitespace, so the next word
+    # start is the 'w' that starts on the row below.
+    t = Muxr::Terminal.new(rows: 3, cols: 5)
+    t.feed("hello\r\nworld\r\nbye")
+    t.place_selection_cursor(0, 0)
+    t.selection_cursor_word_forward
+    assert_equal [1, 0], t.selection_cursor_visible
+    t.selection_cursor_word_forward
+    assert_equal [2, 0], t.selection_cursor_visible
+  end
 end

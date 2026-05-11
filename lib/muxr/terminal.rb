@@ -184,6 +184,96 @@ module Muxr
       selection_cursor_to(timeline_size - 1, @cols - 1)
     end
 
+    def selection_cursor_to_first_non_blank
+      return unless @selection_cursor
+      tr = @selection_cursor[0]
+      selection_cursor_to(tr, first_non_blank_col(tr))
+    end
+
+    # Jump to top/middle/bottom of the visible viewport (vim H/M/L), landing
+    # on the first non-blank column of the destination line.
+    def selection_cursor_to_viewport(where)
+      return unless @selection_cursor
+      vr = case where
+           when :top    then 0
+           when :middle then @rows / 2
+           when :bottom then @rows - 1
+           end
+      return if vr.nil?
+      tr = timeline_row_for_visible(vr).clamp(0, timeline_size - 1)
+      selection_cursor_to(tr, first_non_blank_col(tr))
+    end
+
+    def selection_cursor_word_forward(big: false)
+      return unless @selection_cursor
+      tr, tc = @selection_cursor
+      prev_cls = char_class_at(tr, tc, big: big)
+      loop do
+        nxt = step_forward(tr, tc)
+        break unless nxt
+        ntr, ntc = nxt
+        cur_cls = char_class_at(ntr, ntc, big: big)
+        # Row boundaries act as whitespace breaks even when the row is fully
+        # packed (no trailing pad) — visually the user sees a new line.
+        effective_prev = (ntr != tr) ? :space : prev_cls
+        if effective_prev != cur_cls && cur_cls != :space
+          selection_cursor_to(ntr, ntc)
+          return
+        end
+        tr, tc = ntr, ntc
+        prev_cls = cur_cls
+      end
+      selection_cursor_to(timeline_size - 1, @cols - 1)
+    end
+
+    def selection_cursor_word_end(big: false)
+      return unless @selection_cursor
+      tr, tc = @selection_cursor
+      pos = step_forward(tr, tc)
+      return unless pos
+      tr, tc = pos
+      while char_class_at(tr, tc, big: big) == :space
+        pos = step_forward(tr, tc)
+        break unless pos
+        tr, tc = pos
+      end
+      return if char_class_at(tr, tc, big: big) == :space
+      cls = char_class_at(tr, tc, big: big)
+      loop do
+        pos = step_forward(tr, tc)
+        if pos.nil? || pos[0] != tr || char_class_at(pos[0], pos[1], big: big) != cls
+          selection_cursor_to(tr, tc)
+          return
+        end
+        tr, tc = pos
+      end
+    end
+
+    def selection_cursor_word_backward(big: false)
+      return unless @selection_cursor
+      tr, tc = @selection_cursor
+      pos = step_backward(tr, tc)
+      return unless pos
+      tr, tc = pos
+      while char_class_at(tr, tc, big: big) == :space
+        pos = step_backward(tr, tc)
+        unless pos
+          selection_cursor_to(tr, tc)
+          return
+        end
+        tr, tc = pos
+      end
+      cls = char_class_at(tr, tc, big: big)
+      loop do
+        pos = step_backward(tr, tc)
+        if pos.nil? || pos[0] != tr || char_class_at(pos[0], pos[1], big: big) != cls
+          selection_cursor_to(tr, tc)
+          return
+        end
+        tr, tc = pos
+      end
+    end
+
     def clear_selection
       return unless @selection_anchor
       @selection_anchor = nil
@@ -593,6 +683,44 @@ module Muxr
 
     def timeline_row_for_visible(r)
       @scrollback.size - @view_offset + r
+    end
+
+    def first_non_blank_col(tr)
+      row = timeline_row(tr)
+      return 0 unless row
+      @cols.times do |c|
+        ch = row[c]&.char
+        return c if ch && ch != " " && ch != "\t"
+      end
+      0
+    end
+
+    def char_class_at(tr, tc, big:)
+      row = timeline_row(tr)
+      classify_char(row && row[tc] && row[tc].char, big: big)
+    end
+
+    # vim "word" = run of \w (alnum + _); "WORD" = any run of non-whitespace.
+    def classify_char(ch, big:)
+      return :space if ch.nil? || ch == " " || ch == "\t" || ch == ""
+      return :word if big
+      ch.match?(/\A\w\z/) ? :word : :punct
+    end
+
+    def step_forward(tr, tc)
+      if tc + 1 < @cols
+        [tr, tc + 1]
+      elsif tr + 1 < timeline_size
+        [tr + 1, 0]
+      end
+    end
+
+    def step_backward(tr, tc)
+      if tc > 0
+        [tr, tc - 1]
+      elsif tr > 0
+        [tr - 1, @cols - 1]
+      end
     end
 
     def ordered_selection

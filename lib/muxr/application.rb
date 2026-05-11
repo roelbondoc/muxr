@@ -302,6 +302,7 @@ module Muxr
     def exit_selection(yank:)
       target = focused_target
       term = target&.terminal
+      yanked = false
       if yank
         # No anchor → no-op. User is still positioning; they can press v
         # first, then yank. Esc/q is the way to exit from navigation.
@@ -311,10 +312,18 @@ module Muxr
           @paste_buffer = text
           spawn_pbcopy(text)
           flash("yanked #{text.bytesize} bytes")
+          yanked = true
         end
       end
       term&.clear_selection
-      @input.enter_scrollback_mode
+      if yanked
+        # vim-style: yanking drops you straight back to "normal" (idle),
+        # not back into scrollback navigation.
+        term&.scroll_to_bottom
+        @input.enter_idle_mode
+      else
+        @input.enter_scrollback_mode
+      end
       @renderer.reset_frame!
       invalidate
     end
@@ -336,8 +345,18 @@ module Muxr
       when :full_down  then term.move_selection_cursor_by([rows - 1, 1].max, 0)
       when :line_start then term.selection_cursor_to_line_start
       when :line_end   then term.selection_cursor_to_line_end
-      when :top        then term.selection_cursor_to_top
-      when :bottom     then term.selection_cursor_to_bottom
+      when :line_first_nonblank then term.selection_cursor_to_first_non_blank
+      when :top              then term.selection_cursor_to_top
+      when :bottom           then term.selection_cursor_to_bottom
+      when :screen_top       then term.selection_cursor_to_viewport(:top)
+      when :screen_middle    then term.selection_cursor_to_viewport(:middle)
+      when :screen_bottom    then term.selection_cursor_to_viewport(:bottom)
+      when :word_forward      then term.selection_cursor_word_forward(big: false)
+      when :word_forward_big  then term.selection_cursor_word_forward(big: true)
+      when :word_end          then term.selection_cursor_word_end(big: false)
+      when :word_end_big      then term.selection_cursor_word_end(big: true)
+      when :word_backward     then term.selection_cursor_word_backward(big: false)
+      when :word_backward_big then term.selection_cursor_word_backward(big: true)
       end
       invalidate
     end

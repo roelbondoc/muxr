@@ -48,8 +48,19 @@ module Muxr
       "k"    => :up,
       "0"    => :line_start,
       "$"    => :line_end,
+      "^"    => :line_first_nonblank,
       "g"    => :top,
       "G"    => :bottom,
+      "H"    => :screen_top,
+      "M"    => :screen_middle,
+      "L"    => :screen_bottom,
+      "w"    => :word_forward,
+      "W"    => :word_forward_big,
+      "e"    => :word_end,
+      "E"    => :word_end_big,
+      # `b` is vim word-back here; the tmux-style page-back alias lives on Ctrl-b.
+      "b"    => :word_backward,
+      "B"    => :word_backward_big,
       "\x04" => :half_down, # Ctrl-d
       "\x15" => :half_up,   # Ctrl-u
       "d"    => :half_down,
@@ -57,7 +68,6 @@ module Muxr
       "\x06" => :full_down, # Ctrl-f
       "\x02" => :full_up,   # Ctrl-b
       "f"    => :full_down,
-      "b"    => :full_up,
       " "    => :full_down
     }.freeze
 

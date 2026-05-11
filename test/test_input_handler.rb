@@ -122,7 +122,8 @@ class TestInputHandler < Minitest::Test
     app = FakeApp.new
     h = Muxr::InputHandler.new(app)
     h.enter_selection_mode
-    h.feed("dufbgG0$")
+    # `b` is now vim word-back; page-back is Ctrl-b (\x02).
+    h.feed("duf\x02gG0$")
     actions = app.calls.map { |c| c.is_a?(Array) ? c[1] : c }
     assert_equal %i[half_down half_up full_down full_up top bottom line_start line_end], actions
   end

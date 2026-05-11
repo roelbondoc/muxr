@@ -70,17 +70,33 @@ the pane title gains `[scrollback N/M]`.
 |-------------------------|-------------------------------------|
 | `j` / `k`               | scroll one line                     |
 | `d` / `u` (or `C-d`/`C-u`) | half page                        |
-| `f` / `b` / Space (or `C-f`/`C-b`) | full page                |
+| `f` / Space (or `C-f`/`C-b`) | full page                      |
 | `g` / `G`               | top / bottom                        |
 | `q` / `Esc` / `C-c`     | exit back to live view              |
 
-Press `v` inside scrollback to enter a movable-cursor selection mode
-(`h j k l`, `0`/`$`, `g`/`G`, `C-d`/`C-u`, `C-f`/`C-b`, Space). Press `v`
-again to anchor a character selection or `C-v` to anchor a block
-(rectangular) selection — toggling between the two preserves the anchor.
-`y` or Enter yanks the selection into an internal buffer and pipes it to
-`pbcopy` in the background (silent no-op when `pbcopy` is unavailable).
-`C-a ]` writes the yank buffer back into the focused pane.
+Press `v` inside scrollback to enter a movable-cursor selection mode.
+Vim-style motions are supported:
+
+| Keys                    | Action                              |
+|-------------------------|-------------------------------------|
+| `h` / `j` / `k` / `l`   | left / down / up / right            |
+| `0` / `^` / `$`         | line start / first non-blank / line end |
+| `w` / `W`               | next word / WORD start              |
+| `e` / `E`               | next word / WORD end                |
+| `b` / `B`               | previous word / WORD start          |
+| `g` / `G`               | top / bottom of timeline            |
+| `H` / `M` / `L`         | top / middle / bottom of viewport   |
+| `C-d`/`C-u`, `C-f`/`C-b`, Space | half / full page             |
+| `v` / `C-v`             | anchor char / block selection (toggle) |
+| `y` or Enter            | yank and exit to live shell         |
+| `q` / `Esc` / `C-c`     | cancel back to scrollback           |
+
+`v` and `C-v` toggle between character and block (rectangular) selection
+— switching between the two preserves the anchor. `y` or Enter yanks the
+selection into an internal buffer, pipes it to `pbcopy` in the background
+(silent no-op when `pbcopy` is unavailable), and drops you straight back
+to the live shell. `C-a ]` writes the yank buffer back into the focused
+pane.
 
 ## Commands (typed after `C-a :`)
 
