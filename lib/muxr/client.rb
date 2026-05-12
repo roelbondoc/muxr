@@ -152,12 +152,17 @@ module Muxr
     def enter_terminal_mode
       STDIN.raw!
       STDIN.echo = false
-      STDOUT.write("\e[?1049h\e[?25l\e[2J\e[H\e[0m")
+      # Enable bracketed paste on the outer terminal so iTerm/Terminal/etc.
+      # wrap pastes with \e[200~...\e[201~. Those markers flow through
+      # untouched to the focused pane's PTY, which lets Claude Code, vim,
+      # modern bash, etc. recognise the input as a paste and collapse it
+      # instead of typing it out character-by-character.
+      STDOUT.write("\e[?1049h\e[?25l\e[2J\e[H\e[0m\e[?2004h")
       STDOUT.flush
     end
 
     def leave_terminal_mode
-      STDOUT.write("\e[0m\e[?25h\e[?1049l")
+      STDOUT.write("\e[?2004l\e[0m\e[?25h\e[?1049l")
       STDOUT.flush
       begin
         STDIN.cooked!

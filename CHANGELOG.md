@@ -20,6 +20,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   both directions of the unix-socket kernel buffer at once (vim and
   Claude Code both reproduced this).
 
+### Added
+- Enable bracketed paste mode (`\e[?2004h`) on the outer terminal when
+  the client attaches. The terminal emulator now wraps pastes with
+  `\e[200~...\e[201~`, those markers flow through muxr to the focused
+  pane, and apps that opt in (Claude Code, vim, modern readline) again
+  recognise the input as a paste — Claude Code collapses it to
+  `[Pasted text +N lines]` instead of typing the whole thing out.
+
 ## [0.1.2] - 2026-05-11
 
 ### Added
