@@ -371,7 +371,13 @@ module Muxr
     end
 
     def emit_frame(frame, session, input_state:, command_buffer:)
-      out = String.new("\e[0m")
+      # \e[?2026h enters synchronized-output mode so terminals that support it
+      # (Ghostty, kitty, iTerm2 ≥3.5, WezTerm, Alacritty ≥0.13, foot) present
+      # the whole frame atomically instead of repainting incrementally as bytes
+      # arrive. \e[?25l hides the cursor for the duration of the diff so it
+      # doesn't smear across every \e[y;xH position; cursor_position turns it
+      # back on at the final spot.
+      out = String.new("\e[?2026h\e[?25l\e[0m")
       same_size = @prev && @prev_w == frame[0].length && @prev_h == frame.length
       cur_fg = :unset
       cur_bg = :unset
@@ -400,6 +406,7 @@ module Muxr
       end
       out << "\e[0m"
       out << cursor_position(session, input_state: input_state, command_buffer: command_buffer)
+      out << "\e[?2026l"
       @out.write(out)
       @out.flush
       @prev = frame.map { |row| row.map(&:dup) }

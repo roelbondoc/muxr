@@ -16,6 +16,11 @@ module Muxr
   # attach via Renderer#reset_frame!.
   class Application
     SELECT_TIMEOUT = 0.05
+    # ~60 Hz cap on full repaints. Keystrokes in fzf or vim navigation can
+    # trigger PTY bursts faster than the terminal can usefully display them;
+    # the cap collapses those bursts and stops intermediate frames from
+    # showing through.
+    MIN_FRAME_INTERVAL = 1.0 / 60
     SOCKETS_DIR    = File.join(Dir.home, ".muxr", "sockets").freeze
     DEFAULT_WIDTH  = 80
     DEFAULT_HEIGHT = 24
@@ -61,6 +66,7 @@ module Muxr
       @listening_socket = nil
       @socket_path = self.class.socket_path_for(@session_name)
       @paste_buffer = +""
+      @last_render_at = nil
     end
 
     attr_reader :paste_buffer
@@ -513,6 +519,20 @@ module Muxr
         write_ios << @current_client if @current_client && !@client_write_buffer.empty?
 
         timeout = @message ? 0.25 : SELECT_TIMEOUT
+        # If a render is queued but we're inside the frame-rate budget, wake
+        # up as soon as the budget expires so the deferred paint lands on time.
+        if @current_client && @needs_render && @last_render_at
+          budget = MIN_FRAME_INTERVAL - (monotonic_now - @last_render_at)
+          timeout = budget.clamp(0, timeout) if budget < timeout
+        end
+        # If a pane is mid-synchronized-output (DEC 2026), wake up no later
+        # than its safety deadline so a crashed inner program can't wedge
+        # rendering past Terminal::SYNC_TIMEOUT.
+        deadline = nearest_sync_deadline
+        if deadline
+          remaining = deadline - monotonic_now
+          timeout = remaining.clamp(0, timeout) if remaining < timeout
+        end
         ready_r, ready_w, = IO.select(read_ios, write_ios, nil, timeout)
 
         ready_r&.each do |io|
@@ -542,11 +562,36 @@ module Muxr
           break
         end
 
-        if @current_client && @needs_render
-          render
-          @needs_render = false
+        if @current_client && @needs_render && !any_pane_syncing?
+          now = monotonic_now
+          if @last_render_at.nil? || (now - @last_render_at) >= MIN_FRAME_INTERVAL
+            render
+            @last_render_at = now
+            @needs_render = false
+          end
         end
       end
+    end
+
+    def monotonic_now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    # True iff any pane (or the drawer) has opened a DEC 2026 synchronized
+    # output block that hasn't yet closed or timed out. Used to defer the
+    # outer paint so it lands on a fully-formed inner frame.
+    def any_pane_syncing?
+      return true if @session.window.panes.any? { |p| p.terminal.sync_pending? }
+      drawer = @session.drawer&.pane
+      return true if drawer && drawer.terminal.sync_pending?
+      false
+    end
+
+    def nearest_sync_deadline
+      deadlines = @session.window.panes.filter_map { |p| p.terminal.sync_deadline }
+      d = @session.drawer&.pane&.terminal&.sync_deadline
+      deadlines << d if d
+      deadlines.min
     end
 
     def accept_client

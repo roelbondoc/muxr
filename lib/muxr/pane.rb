@@ -36,11 +36,22 @@ module Muxr
       @process.write(data)
     end
 
+    # Drain everything currently in the PTY's kernel read buffer, feeding
+    # each chunk to the Terminal. Coalescing reads here means we render once
+    # per fully-formed output burst (fzf re-render, vim cursor+status redraw,
+    # etc.) instead of once per ~8 KiB chunk — the latter shows intermediate
+    # frames and is the main source of in-pane flicker. Bounded by a byte cap
+    # so a runaway producer can't starve other panes on a single tick.
+    READ_BUDGET = 1 << 20 # 1 MiB
     def read_from_pty
-      data = @process.read_nonblock
-      return nil unless data
-      @terminal.feed(data)
-      data
+      total = 0
+      while total < READ_BUDGET
+        chunk = @process.read_nonblock
+        break unless chunk
+        @terminal.feed(chunk)
+        total += chunk.bytesize
+      end
+      total.positive? ? total : nil
     end
 
     def resize(rows, cols)

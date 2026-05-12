@@ -12,6 +12,14 @@ module Muxr
 
     SCROLLBACK_MAX = 5000
 
+    # Inner programs (fzf ≥ 0.41, neovim, helix, …) bracket coherent screen
+    # updates with `\e[?2026h … \e[?2026l` (DECSET 2026 — "Synchronized
+    # Output"). When we see the open, we know more bytes are coming that
+    # belong to the same logical frame; rendering before the close shows a
+    # half-painted state. SYNC_TIMEOUT is the safety cap so a crashed inner
+    # program (which left ?2026h open) cannot wedge the pane indefinitely.
+    SYNC_TIMEOUT = 0.2
+
     Cell = Struct.new(:char, :fg, :bg, :attrs) do
       def reset!
         self.char = " "
@@ -52,6 +60,27 @@ module Muxr
       @selection_anchor = nil
       @selection_cursor = nil
       @selection_mode = :linear
+      @sync_pending = false
+      @sync_started_at = nil
+    end
+
+    # True iff the inner program has opened a synchronized-output block
+    # (\e[?2026h) and not yet closed it, and the safety timeout has not
+    # elapsed. The Application uses this to defer rendering so the diff lands
+    # on a fully-formed frame instead of a half-painted one.
+    def sync_pending?
+      return false unless @sync_pending
+      if @sync_started_at && (Process.clock_gettime(Process::CLOCK_MONOTONIC) - @sync_started_at) > SYNC_TIMEOUT
+        @sync_pending = false
+        @sync_started_at = nil
+        return false
+      end
+      true
+    end
+
+    def sync_deadline
+      return nil unless @sync_pending && @sync_started_at
+      @sync_started_at + SYNC_TIMEOUT
     end
 
     attr_reader :selection_mode
@@ -527,8 +556,20 @@ module Muxr
       when ">", "<", "=", "!"
         return
       when "?"
-        # DEC private modes — we treat `h`/`l` as no-ops anyway, so dropping
-        # everything is safe and avoids `\e[?Nr` colliding with DECSTBM.
+        # DEC private modes — most we treat as no-ops, but mode 2026
+        # (Synchronized Output) is a render-timing hint we honor so the
+        # outer paint lands on fully-formed frames from fzf/nvim/helix.
+        if final == "h" || final == "l"
+          if csi_params.include?(2026)
+            if final == "h"
+              @sync_pending = true
+              @sync_started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+            else
+              @sync_pending = false
+              @sync_started_at = nil
+            end
+          end
+        end
         return
       end
 
