@@ -57,6 +57,7 @@ module Muxr
       @help_visible = false
       @next_pane_id = 0
       @current_client = nil
+      @client_write_buffer = +"".b
       @listening_socket = nil
       @socket_path = self.class.socket_path_for(@session_name)
       @paste_buffer = +""
@@ -401,12 +402,29 @@ module Muxr
       end
     end
 
-    # Called by the FramedOutput adapter; ships one OUTPUT frame to the
-    # currently attached client. No-op when nobody is attached.
+    # Called by the FramedOutput adapter; queues one OUTPUT frame to the
+    # currently attached client and tries to push as much as the socket
+    # will take without blocking. Anything left over stays in
+    # @client_write_buffer and gets flushed by the event loop when the
+    # socket reports writable. This prevents a slow client (or slow
+    # terminal upstream of the client) from deadlocking the server when
+    # the server is also trying to read from that same client.
     def deliver_output(bytes)
-      sock = @current_client
-      return unless sock
-      Protocol.write(sock, Protocol::OUTPUT, bytes)
+      return unless @current_client
+      @client_write_buffer << Protocol.frame(Protocol::OUTPUT, bytes)
+      drain_client_writes
+    end
+
+    def drain_client_writes
+      return unless @current_client
+      return if @client_write_buffer.empty?
+      loop do
+        n = @current_client.write_nonblock(@client_write_buffer)
+        @client_write_buffer = @client_write_buffer.byteslice(n..-1) || +"".b
+        break if @client_write_buffer.empty?
+      end
+    rescue IO::WaitWritable
+      # Socket send buffer is full; the rest stays queued.
     rescue Errno::EPIPE, Errno::ECONNRESET, IOError
       drop_client_silently
     end
@@ -492,6 +510,7 @@ module Muxr
         if drawer_pane&.alive? && drawer_pane.pending_write?
           write_ios << drawer_pane.writer_io
         end
+        write_ios << @current_client if @current_client && !@client_write_buffer.empty?
 
         timeout = @message ? 0.25 : SELECT_TIMEOUT
         ready_r, ready_w, = IO.select(read_ios, write_ios, nil, timeout)
@@ -507,8 +526,12 @@ module Muxr
         end
 
         ready_w&.each do |io|
-          pane = pane_for_writer_io(io)
-          pane&.drain_writes
+          if io == @current_client
+            drain_client_writes
+          else
+            pane = pane_for_writer_io(io)
+            pane&.drain_writes
+          end
         end
 
         prune_dead_panes
@@ -629,6 +652,11 @@ module Muxr
 
     def disconnect_client(reason: nil)
       return unless @current_client
+      # Best-effort: drop any queued OUTPUT (the client is going away),
+      # send a final BYE, then close. BYE is small enough that one
+      # blocking write won't meaningfully wedge anything even if the
+      # client's recv is sluggish.
+      @client_write_buffer = +"".b
       safe_protocol_write(@current_client, Protocol::BYE, reason || "")
       @current_client.close rescue nil
       @current_client = nil
@@ -638,6 +666,7 @@ module Muxr
       return unless @current_client
       @current_client.close rescue nil
       @current_client = nil
+      @client_write_buffer = +"".b
     end
 
     def safe_protocol_write(io, type, payload = "")

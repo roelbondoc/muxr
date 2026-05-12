@@ -39,9 +39,20 @@ module Muxr
 
     # Writes one framed message. +payload+ is treated as raw bytes (binary).
     def self.write(io, type, payload = "")
+      io.write(frame(type, payload))
+    end
+
+    # Builds the on-the-wire bytes for a single frame without writing them.
+    # Lets callers append to an outgoing buffer (for non-blocking flushes
+    # later) instead of doing a synchronous io.write.
+    def self.frame(type, payload = "")
       raise ArgumentError, "type must be a single byte" unless type.is_a?(String) && type.bytesize == 1
       bytes = payload.to_s.b
-      io.write(type + [bytes.bytesize].pack("N") + bytes)
+      buf = +"".b
+      buf << type.b
+      buf << [bytes.bytesize].pack("N")
+      buf << bytes
+      buf
     end
 
     # Encodes a "ROWS COLS" string for HELLO / RESIZE payloads.

@@ -24,6 +24,7 @@ module Muxr
       @resize_pending = false
       @exit_code = 0
       @bye_reason = nil
+      @write_buffer = +"".b
     end
 
     # Opens the socket. Returns true on success. Raises Errno::ENOENT /
@@ -62,25 +63,52 @@ module Muxr
           send_resize
         end
 
-        ready, = IO.select([STDIN, @sock], nil, nil, SELECT_TIMEOUT)
-        next unless ready
+        write_ios = @write_buffer.empty? ? nil : [@sock]
+        ready_r, ready_w, = IO.select([STDIN, @sock], write_ios, nil, SELECT_TIMEOUT)
+        next unless ready_r || ready_w
 
-        ready.each do |io|
+        ready_r&.each do |io|
           if io == STDIN
             forward_stdin
           else
             consume_server_frame
           end
         end
+
+        drain_writes if ready_w&.include?(@sock)
       end
     end
 
     def forward_stdin
       data = STDIN.read_nonblock(4096)
-      Protocol.write(@sock, Protocol::INPUT, data)
+      queue_frame(Protocol::INPUT, data)
     rescue IO::WaitReadable
       # spurious wake-up; nothing to do.
     rescue EOFError, Errno::EPIPE, Errno::ECONNRESET, IOError
+      @running = false
+    end
+
+    def queue_frame(type, payload)
+      @write_buffer << Protocol.frame(type, payload)
+      drain_writes
+    end
+
+    # Push as much of @write_buffer to the server as the socket will
+    # accept without blocking. Anything left over stays queued and the
+    # event loop picks it back up when select reports the socket
+    # writable. Mirrors the server-side OUTPUT drain — without it, a
+    # busy server (rendering large vim/Claude-code redraws) could fill
+    # this socket's send buffer and wedge the client mid-paste.
+    def drain_writes
+      return if @write_buffer.empty?
+      loop do
+        n = @sock.write_nonblock(@write_buffer)
+        @write_buffer = @write_buffer.byteslice(n..-1) || +"".b
+        break if @write_buffer.empty?
+      end
+    rescue IO::WaitWritable
+      # Socket send buffer full; remainder stays queued.
+    rescue Errno::EPIPE, Errno::ECONNRESET, IOError
       @running = false
     end
 
@@ -106,7 +134,7 @@ module Muxr
 
     def send_resize
       rows, cols = terminal_size
-      Protocol.write(@sock, Protocol::RESIZE, Protocol.encode_size(rows, cols))
+      queue_frame(Protocol::RESIZE, Protocol.encode_size(rows, cols))
     rescue Errno::EPIPE, Errno::ECONNRESET, IOError
       @running = false
     end

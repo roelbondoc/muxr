@@ -13,6 +13,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (e.g. Claude Code processing a multi-KB paste) can't deadlock the
   single-threaded server. Idle pass-through input is also batched into a
   single `send_to_focused` chunk instead of one call per byte.
+- Client↔server socket writes are now non-blocking too, with per-side
+  outgoing buffers and the socket added to `IO.select`'s write set when
+  there's queued data. The previous blocking `Protocol.write` could
+  deadlock both ends when a paste produced enough redraw traffic to fill
+  both directions of the unix-socket kernel buffer at once (vim and
+  Claude Code both reproduced this).
 
 ## [0.1.2] - 2026-05-11
 
