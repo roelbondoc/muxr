@@ -85,19 +85,32 @@ module Muxr
     end
 
     def feed(data)
-      data.each_char do |ch|
+      remaining = data
+      until remaining.empty?
+        if @state == :idle
+          # Fast path for pass-through: forward everything up to the next
+          # Ctrl-a as a single chunk so a large paste doesn't turn into one
+          # PTY write per byte. PREFIX is single-byte ASCII (\x01) and never
+          # appears mid-UTF-8, so byte/char index match.
+          idx = remaining.index(PREFIX)
+          if idx.nil?
+            @app.send_to_focused(remaining)
+            return
+          end
+          @app.send_to_focused(remaining[0...idx]) if idx > 0
+          @state = :prefix
+          remaining = remaining[(idx + 1)..] || ""
+          next
+        end
+
+        ch = remaining[0]
+        remaining = remaining[1..] || ""
         case @state
         when :help
           @app.dismiss_help
           @state = :idle
         when :confirm_quit
           handle_confirm_quit(ch)
-        when :idle
-          if ch == PREFIX
-            @state = :prefix
-          else
-            @app.send_to_focused(ch)
-          end
         when :prefix
           handle_prefix(ch)
         when :command

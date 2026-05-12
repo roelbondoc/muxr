@@ -479,26 +479,36 @@ module Muxr
 
     def loop_forever
       while @running
-        ready_ios = [@listening_socket]
-        ready_ios << @current_client if @current_client
-        @session.window.panes.each { |p| ready_ios << p.io if p.alive? }
-        if @session.drawer&.pane && @session.drawer.pane.alive?
-          ready_ios << @session.drawer.pane.io
+        read_ios  = [@listening_socket]
+        read_ios << @current_client if @current_client
+        @session.window.panes.each { |p| read_ios << p.io if p.alive? }
+        drawer_pane = @session.drawer&.pane
+        read_ios << drawer_pane.io if drawer_pane&.alive?
+
+        write_ios = []
+        @session.window.panes.each do |p|
+          write_ios << p.writer_io if p.alive? && p.pending_write?
+        end
+        if drawer_pane&.alive? && drawer_pane.pending_write?
+          write_ios << drawer_pane.writer_io
         end
 
         timeout = @message ? 0.25 : SELECT_TIMEOUT
-        ready, = IO.select(ready_ios, nil, nil, timeout)
+        ready_r, ready_w, = IO.select(read_ios, write_ios, nil, timeout)
 
-        if ready
-          ready.each do |io|
-            if io == @listening_socket
-              accept_client
-            elsif io == @current_client
-              consume_client_frame
-            else
-              consume_pane_io(io)
-            end
+        ready_r&.each do |io|
+          if io == @listening_socket
+            accept_client
+          elsif io == @current_client
+            consume_client_frame
+          else
+            consume_pane_io(io)
           end
+        end
+
+        ready_w&.each do |io|
+          pane = pane_for_writer_io(io)
+          pane&.drain_writes
         end
 
         prune_dead_panes
@@ -576,6 +586,13 @@ module Muxr
       pane = @session.window.panes.find { |p| p.io == io }
       return pane if pane
       return @session.drawer.pane if @session.drawer&.pane && @session.drawer.pane.io == io
+      nil
+    end
+
+    def pane_for_writer_io(io)
+      pane = @session.window.panes.find { |p| p.writer_io == io }
+      return pane if pane
+      return @session.drawer.pane if @session.drawer&.pane && @session.drawer.pane.writer_io == io
       nil
     end
 

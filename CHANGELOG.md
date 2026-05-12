@@ -6,6 +6,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Large pastes into a pane no longer hang the server. PTY writes are now
+  non-blocking and buffered per pane, with the writer fd added to the
+  event loop's `IO.select` write set so back-pressure from a slow reader
+  (e.g. Claude Code processing a multi-KB paste) can't deadlock the
+  single-threaded server. Idle pass-through input is also batched into a
+  single `send_to_focused` chunk instead of one call per byte.
+
 ## [0.1.2] - 2026-05-11
 
 ### Added

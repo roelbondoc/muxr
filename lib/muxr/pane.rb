@@ -20,6 +20,18 @@ module Muxr
       @process.io
     end
 
+    def writer_io
+      @process.writer_io
+    end
+
+    def pending_write?
+      @process.pending_write?
+    end
+
+    def drain_writes
+      @process.drain
+    end
+
     def write(data)
       @process.write(data)
     end

@@ -91,11 +91,30 @@ class TestInputHandler < Minitest::Test
     assert_equal :scrollback, h.state
   end
 
-  def test_idle_passes_input_through_to_focused_pane
+  def test_idle_passes_input_through_to_focused_pane_as_one_chunk
+    # Batching the whole pass-through in one send_to_focused call is what
+    # keeps large pastes from turning into one syscall per byte (the cause
+    # of the 0.1.3 hang).
     app = FakeApp.new
     h = Muxr::InputHandler.new(app)
-    h.feed("hi")
-    assert_equal [[:send_to_focused, "h"], [:send_to_focused, "i"]], app.calls
+    h.feed("hello")
+    assert_equal [[:send_to_focused, "hello"]], app.calls
+  end
+
+  def test_idle_splits_around_embedded_prefix
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed("hi\x01cmore")
+    assert_equal [[:send_to_focused, "hi"], :new_pane, [:send_to_focused, "more"]], app.calls
+    assert_equal :idle, h.state
+  end
+
+  def test_ctrl_a_ctrl_a_sends_literal_prefix
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed("\x01\x01")
+    assert_equal [[:send_to_focused, "\x01"]], app.calls
+    assert_equal :idle, h.state
   end
 
   def test_scrollback_v_enters_selection

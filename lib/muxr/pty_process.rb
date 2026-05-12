@@ -10,6 +10,7 @@ module Muxr
       @rows = rows
       @cols = cols
       @exited = false
+      @write_buffer = +"".b
 
       shell = command || ENV["SHELL"] || "/bin/sh"
       env = ENV.to_h.merge("TERM" => "xterm-256color").merge(env_overrides)
@@ -23,11 +24,42 @@ module Muxr
       resize(rows, cols)
     end
 
+    # Appends bytes to the per-process outgoing buffer and tries to flush as
+    # many as the PTY will accept right now. Any remainder stays buffered;
+    # the event loop drains it later when the writer fd is reported writable.
+    # This avoids deadlocking the single-threaded server when the inner
+    # program is slow to read (large pastes were the original motivating
+    # case — see CHANGELOG 0.1.3).
     def write(data)
-      @writer.write(data)
-      @writer.flush
+      return if @exited
+      return if data.nil? || data.empty?
+      @write_buffer << data.b
+      drain
+    end
+
+    # Push as much of @write_buffer through the PTY as it'll take without
+    # blocking. Safe to call repeatedly — both from write() and from the
+    # event loop when select reports the writer fd writable.
+    def drain
+      return if @exited || @write_buffer.empty?
+      loop do
+        n = @writer.write_nonblock(@write_buffer)
+        @write_buffer = @write_buffer.byteslice(n..-1) || +"".b
+        break if @write_buffer.empty?
+      end
+    rescue IO::WaitWritable
+      # Kernel buffer full; the rest stays queued.
     rescue Errno::EIO, IOError, Errno::EPIPE
       @exited = true
+      @write_buffer.clear
+    end
+
+    def pending_write?
+      !@write_buffer.empty?
+    end
+
+    def writer_io
+      @writer
     end
 
     def read_nonblock(max = 8192)
