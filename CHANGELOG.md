@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-05-11
+
 ### Fixed
 - Large pastes into a pane no longer hang the server. PTY writes are now
   non-blocking and buffered per pane, with the writer fd added to the
