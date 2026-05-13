@@ -51,6 +51,16 @@ module Muxr
         @terminal.feed(chunk)
         total += chunk.bytesize
       end
+      # The emulator may owe the inner program a reply (DSR / CPR — see
+      # Terminal#take_pending_replies!). Ship it back through the PTY's
+      # input side as if it had been typed. Failure here is non-fatal: the
+      # process can have exited between read and write.
+      if (reply = @terminal.take_pending_replies!)
+        begin
+          @process.write(reply)
+        rescue Errno::EIO, Errno::EPIPE
+        end
+      end
       total.positive? ? total : nil
     end
 

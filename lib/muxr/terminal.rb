@@ -62,6 +62,19 @@ module Muxr
       @selection_mode = :linear
       @sync_pending = false
       @sync_started_at = nil
+      @pending_replies = +"".b
+    end
+
+    # Bytes the emulator owes back to the inner program in response to a
+    # query (currently DSR / Device Status Report — `\e[5n` and `\e[6n`).
+    # The Pane drains this after each feed and writes it to the PTY's input
+    # side. Without it, programs like the AWS CLI fall back with a warning
+    # ("your terminal doesn't support cursor position requests (CPR)").
+    def take_pending_replies!
+      return nil if @pending_replies.empty?
+      data = @pending_replies
+      @pending_replies = +"".b
+      data
     end
 
     # True iff the inner program has opened a synchronized-output block
@@ -645,6 +658,16 @@ module Muxr
         @saved_cursor = [@cursor_row, @cursor_col]
       when "u"
         @cursor_row, @cursor_col = @saved_cursor
+      when "n"
+        # DSR — Device Status Report. `\e[5n` asks if the terminal is OK,
+        # `\e[6n` (CPR) asks for the cursor position. The reply rides back
+        # through the PTY's input side; see take_pending_replies!.
+        case pms[0] || 0
+        when 5
+          @pending_replies << "\e[0n".b
+        when 6
+          @pending_replies << "\e[#{@cursor_row + 1};#{@cursor_col + 1}R".b
+        end
       when "h", "l"
         # Non-private mode set/reset — nothing we need to honor. (DEC private
         # `?`-prefixed mode sequences are short-circuited above.)

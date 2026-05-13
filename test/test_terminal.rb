@@ -32,6 +32,22 @@ class TestTerminal < Minitest::Test
     assert_equal "X", t.cell(2, 4).char
   end
 
+  def test_dsr_cursor_position_report
+    # `\e[6n` (CPR) is how programs like the AWS CLI probe terminal
+    # geometry. Without a reply they print "your terminal doesn't support
+    # cursor position requests (CPR)" and fall back.
+    t = Muxr::Terminal.new(rows: 5, cols: 10)
+    t.feed("\e[3;5H\e[6n")
+    assert_equal "\e[3;5R", t.take_pending_replies!
+    assert_nil t.take_pending_replies!
+  end
+
+  def test_dsr_device_status_ok
+    t = Muxr::Terminal.new(rows: 5, cols: 10)
+    t.feed("\e[5n")
+    assert_equal "\e[0n", t.take_pending_replies!
+  end
+
   def test_erase_display_to_end
     t = Muxr::Terminal.new(rows: 4, cols: 5)
     t.feed("abcd\r\nfghi\r\nklmn")
