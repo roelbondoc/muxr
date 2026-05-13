@@ -6,6 +6,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-05-13
+
+### Fixed
+- Render flicker on large screens and during fzf-style redraws. Each
+  Renderer frame is now wrapped in DEC 2026 synchronized output (with
+  the cursor hidden for the duration of the diff), so terminals that
+  support it (Ghostty, kitty, iTerm2 ≥3.5, WezTerm, Alacritty ≥0.13,
+  foot) present the frame atomically instead of repainting cell by
+  cell. `Pane#read_from_pty` now drains the PTY to `EAGAIN` per tick,
+  collapsing multi-chunk bursts (vim cursor+status redraw, fzf
+  candidate list) into a single render, and the event loop caps
+  repaints at ~60 Hz while trimming `IO.select`'s timeout so deferred
+  frames still land on time. The Terminal emulator also honors
+  `\e[?2026h` / `\e[?2026l` from inner programs (fzf ≥0.41, neovim,
+  helix) as a render-timing hint — the outer paint is held until the
+  close sequence arrives or a 200 ms safety timeout expires.
+
 ## [0.1.3] - 2026-05-11
 
 ### Fixed
@@ -91,7 +108,9 @@ Initial release.
   boundaries.
 - Renderer that composes one frame and diff-emits ANSI to STDOUT.
 
-[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.4
+[0.1.3]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.3
 [0.1.2]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.2
 [0.1.1]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.1
 [0.1.0]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.0
