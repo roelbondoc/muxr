@@ -16,6 +16,8 @@ module Muxr
       case cmd
       when "layout"  then handle_layout(args)
       when "drawer"  then handle_drawer(args)
+      when "claude"  then @app.toggle_claude_drawer
+      when "private" then @app.toggle_private_focused
       when "save"    then @app.save_session
       when "restore" then @app.restore_session
       when "sessions", "ls" then @app.list_sessions

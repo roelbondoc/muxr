@@ -1,19 +1,56 @@
+require "securerandom"
+
 module Muxr
   # A Pane bundles a Terminal emulator buffer with the PTYProcess running the
   # shell that feeds it. The Window keeps a list of panes; the Renderer asks
   # each pane for its current grid contents and cursor position.
+  #
+  # Each pane has a stable 6-hex id generated at creation. The id survives
+  # promote_to_master and other array reshuffles (since it lives on the Pane,
+  # not on the index) and is persisted in the session JSON so it also survives
+  # a full cold restart. The drawer pane uses the symbol `:drawer` as its id;
+  # the MCP control surface treats it specially and never lists it under
+  # `panes.list`.
   class Pane
     attr_reader :id, :terminal, :process
     attr_accessor :rect
 
-    def initialize(id:, rows: 24, cols: 80, cwd: nil, command: nil, process: nil)
-      @id = id
+    def initialize(id: nil, rows: 24, cols: 80, cwd: nil, command: nil, env_overrides: nil, process: nil)
+      @id = id || SecureRandom.hex(3)
       @rows = rows
       @cols = cols
       @terminal = Terminal.new(rows: rows, cols: cols)
-      @process = process || PTYProcess.new(rows: rows, cols: cols, cwd: cwd, command: command)
+      @process = process || PTYProcess.new(
+        rows: rows,
+        cols: cols,
+        cwd: cwd,
+        command: command,
+        env_overrides: env_overrides || {}
+      )
       @rect = nil
       @initial_cwd = cwd || @process.cwd
+      @private_flag = false
+    end
+
+    # Private panes are invisible to the MCP control surface — their cwd is
+    # stripped from panes.list and pane.read/send_input/run/subscribe/kill
+    # all refuse. Toggled by the human via Ctrl-a P or `:private`. Never
+    # settable from the control surface itself (so a misbehaving MCP client
+    # can't unmark a pane it shouldn't see).
+    def private?
+      @private_flag
+    end
+
+    def mark_private!
+      @private_flag = true
+    end
+
+    def mark_public!
+      @private_flag = false
+    end
+
+    def toggle_private!
+      @private_flag = !@private_flag
     end
 
     def io

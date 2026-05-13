@@ -1,0 +1,398 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# muxr-mcp — Model Context Protocol bridge for muxr.
+#
+# Speaks MCP JSON-RPC over stdio (one JSON object per line) and translates
+# tool calls into NDJSON requests on the muxr control socket at
+# ~/.muxr/sockets/<name>.ctrl.sock. Connection target is determined by:
+#
+#   1. $MUXR_CONTROL_SOCKET (absolute path) — exact override
+#   2. $MUXR_SESSION (session name)         — resolved to standard path
+#   3. otherwise: error
+#
+# Both env vars are injected automatically when claude is launched from the
+# muxr Claude-drawer (Ctrl-a C), so end users almost never set them by hand.
+#
+# Typical claude-code mcp config:
+#
+#   {
+#     "mcpServers": {
+#       "muxr": { "command": "/abs/path/to/bin/muxr-mcp" }
+#     }
+#   }
+
+require "json"
+require "socket"
+
+class MuxrMcpBridge
+  PROTOCOL_VERSION = "2024-11-05"  # MCP protocol revision the bridge speaks.
+  SERVER_NAME      = "muxr-mcp"
+  SERVER_VERSION   = "0.1.0"
+
+  # Map each exposed MCP tool name to the underlying muxr control method.
+  # The tool surface is intentionally a flat one-to-one — every method shipped
+  # by the control server gets a tool. Names are snake_case and prefixed with
+  # `muxr_` so they sit cleanly in Claude's tool list alongside other servers.
+  TOOL_TO_MUXR_METHOD = {
+    "muxr_ping"             => "ping",
+    "muxr_session_get"      => "session.get",
+    "muxr_session_save"     => "session.save",
+    "muxr_panes_list"       => "panes.list",
+    "muxr_pane_read"        => "pane.read",
+    "muxr_pane_send_input"  => "pane.send_input",
+    "muxr_pane_focus"       => "pane.focus",
+    "muxr_pane_new"         => "pane.new",
+    "muxr_pane_kill"        => "pane.kill",
+    "muxr_pane_promote"     => "pane.promote",
+    "muxr_pane_run"         => "pane.run",
+    "muxr_layout_set"       => "layout.set",
+    "muxr_layout_cycle"     => "layout.cycle",
+    "muxr_drawer_toggle"    => "drawer.toggle",
+    "muxr_drawer_show"      => "drawer.show",
+    "muxr_drawer_hide"      => "drawer.hide",
+    "muxr_drawer_reset"     => "drawer.reset",
+    "muxr_drawer_send_input"=> "drawer.send_input",
+    "muxr_drawer_read"      => "drawer.read"
+  }.freeze
+
+  # Reusable JSON schema fragment: pane identifier. We expose only the
+  # string-id form via MCP (slot-as-integer would have required `oneOf`,
+  # which the Anthropic tool-use API doesn't accept). The id-only contract
+  # matches the skill's "always use ids" guidance anyway. Callers get the
+  # ids from muxr_panes_list.
+  PANE_REF = {
+    "type" => "string",
+    "description" => "Stable 6-hex pane id from muxr_panes_list (e.g. \"a3f9b2\"). Ids survive splits, kills, and promote_to_master — always prefer them over the positional slot numbers shown in the status bar."
+  }.freeze
+
+  TOOL_SCHEMAS = [
+    {
+      "name" => "muxr_session_get",
+      "description" => "Get a summary of the muxr session: name, layout, focused pane, drawer visibility, dimensions, pane count. Call this first to ground yourself in the current state.",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_panes_list",
+      "description" => "List every pane with its stable id, 1-based slot number, focused/master flags, cwd, and grid dimensions. Always reference panes by id in subsequent calls (slots shift on split/kill).",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_pane_read",
+      "description" => "Read the currently-visible terminal contents of a pane as plain text (one row per line, trailing whitespace trimmed). Cheap and idempotent.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => { "pane" => PANE_REF },
+        "required" => ["pane"],
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_pane_send_input",
+      "description" => "Send raw bytes to a pane's PTY without waiting. For full commands prefer muxr_pane_run, which sends + waits for output to settle. Set bracketed=true when sending multi-line text into an editor or REPL.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => {
+          "pane" => PANE_REF,
+          "data" => { "type" => "string", "description" => "Bytes to send (literal — no \\r appended)." },
+          "bracketed" => { "type" => "boolean", "description" => "Wrap in bracketed-paste markers (\\e[200~ … \\e[201~)." }
+        },
+        "required" => ["pane", "data"],
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_pane_run",
+      "description" => "Send input to a pane and wait for the PTY to go idle before returning. The killer tool for driving shells: returns the pane's full visible text after the command settles, plus a timed_out flag. By default appends \\r and waits 500ms of idle. Bump idle_ms to ~800 for bursty commands (test runners) or timeout_ms for long builds.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => {
+          "pane"        => PANE_REF,
+          "input"       => { "type" => "string", "description" => "Command text. Omit/empty to just wait." },
+          "append_enter"=> { "type" => "boolean", "description" => "Append \\r after input (default true)." },
+          "bracketed"   => { "type" => "boolean", "description" => "Wrap input in bracketed-paste markers (default false)." },
+          "idle_ms"     => { "type" => "integer", "minimum" => 50, "maximum" => 60000, "description" => "Idle window before considering the command settled. Default 500." },
+          "timeout_ms"  => { "type" => "integer", "minimum" => 100, "maximum" => 300000, "description" => "Absolute timeout for the wait. Default 30000." }
+        },
+        "required" => ["pane"],
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_pane_focus",
+      "description" => "Focus a pane (moves the human's cursor to it). Mostly used to set up state before the human takes over.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => { "pane" => PANE_REF },
+        "required" => ["pane"],
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_pane_new",
+      "description" => "Create a new pane, optionally in a specific cwd. Returns the new pane's id and slot. Use sparingly — the human usually controls layout.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => {
+          "cwd" => { "type" => "string", "description" => "Working directory for the new shell. Defaults to the focused pane's cwd." }
+        },
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_pane_kill",
+      "description" => "Close a pane. Destructive — only call when the user has named the specific pane to kill.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => { "pane" => PANE_REF },
+        "required" => ["pane"],
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_pane_promote",
+      "description" => "Promote a pane to the master slot (position 0). Useful for setting up a tall-layout focal pane.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => { "pane" => PANE_REF },
+        "required" => ["pane"],
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_layout_set",
+      "description" => "Switch to a specific layout: tall, grid, or monocle.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => { "layout" => { "type" => "string", "enum" => ["tall", "grid", "monocle"] } },
+        "required" => ["layout"],
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_layout_cycle",
+      "description" => "Cycle to the next layout (tall → grid → monocle → tall).",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_drawer_toggle",
+      "description" => "Toggle the persistent Quake-style drawer overlay.",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_drawer_show",
+      "description" => "Show the drawer if it's hidden.",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_drawer_hide",
+      "description" => "Hide the drawer (its shell keeps running).",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_drawer_reset",
+      "description" => "Tear down the drawer's shell process. Next show recreates it fresh.",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_drawer_read",
+      "description" => "Read the drawer pane's current text (works even when hidden — the PTY survives).",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_drawer_send_input",
+      "description" => "Send bytes to the drawer pane.",
+      "inputSchema" => {
+        "type" => "object",
+        "properties" => {
+          "data" => { "type" => "string" },
+          "bracketed" => { "type" => "boolean" }
+        },
+        "required" => ["data"],
+        "additionalProperties" => false
+      }
+    },
+    {
+      "name" => "muxr_session_save",
+      "description" => "Persist the structural session (layout, indices, cwds, drawer state) to ~/.muxr/sessions/<name>.json. Shell history is not saved.",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    },
+    {
+      "name" => "muxr_ping",
+      "description" => "Health check — returns {pong: true} if the muxr server is responsive.",
+      "inputSchema" => { "type" => "object", "properties" => {}, "additionalProperties" => false }
+    }
+  ].freeze
+
+  def initialize
+    @socket = nil
+    @next_request_id = 0
+    @read_buffer = +""
+    @in_drawer = ENV["MUXR_DRAWER_SELF"] == "1"
+  end
+
+  def run
+    connect_to_muxr
+    loop do
+      line = $stdin.gets
+      break if line.nil?
+      handle_message(line.chomp)
+    end
+  rescue Interrupt
+    # graceful exit
+  ensure
+    @socket&.close
+  end
+
+  private
+
+  def handle_message(line)
+    return if line.empty?
+    msg = JSON.parse(line)
+  rescue JSON::ParserError
+    return  # silently drop unparsable input — stdio is best-effort
+  else
+    id = msg["id"]
+    method = msg["method"]
+    params = msg["params"] || {}
+
+    case method
+    when "initialize"
+      respond(id, {
+        "protocolVersion" => PROTOCOL_VERSION,
+        "capabilities"    => { "tools" => {} },
+        "serverInfo"      => { "name" => SERVER_NAME, "version" => SERVER_VERSION }
+      })
+    when "initialized", "notifications/initialized"
+      # notification, no reply
+    when "tools/list"
+      respond(id, { "tools" => TOOL_SCHEMAS })
+    when "tools/call"
+      handle_tool_call(id, params)
+    when "ping"
+      respond(id, {})
+    when nil
+      # bare notification or invalid — ignore
+    else
+      respond_error(id, -32601, "Method not found: #{method}") if id
+    end
+  end
+
+  def handle_tool_call(id, params)
+    tool_name = params["name"].to_s
+    args = params["arguments"] || {}
+
+    muxr_method = TOOL_TO_MUXR_METHOD[tool_name]
+    if muxr_method.nil?
+      respond_tool_error(id, "Unknown tool: #{tool_name}")
+      return
+    end
+
+    # When the bridge is running inside the muxr drawer itself, calling any
+    # drawer.* method would either recurse into our own pty or yank the
+    # drawer out from under us. Refuse those instead.
+    if @in_drawer && muxr_method.start_with?("drawer.")
+      respond_tool_error(id, "drawer.* methods are unavailable from inside the drawer (MUXR_DRAWER_SELF=1).")
+      return
+    end
+
+    response = send_muxr_request(muxr_method, args)
+    if response.nil?
+      respond_tool_error(id, "muxr server closed the connection")
+    elsif response["error"]
+      err = response["error"]
+      respond_tool_error(id, "muxr error #{err["code"]}: #{err["message"]}")
+    else
+      result = response["result"]
+      respond(id, {
+        "content" => [{ "type" => "text", "text" => JSON.pretty_generate(result) }]
+      })
+    end
+  rescue StandardError => e
+    respond_tool_error(id, "#{e.class}: #{e.message}")
+  end
+
+  # Send one NDJSON request to the muxr control socket and block until the
+  # response with the matching id arrives. Server-pushed events (no id, or
+  # id mismatch) are silently dropped — the v1 bridge doesn't forward them.
+  def send_muxr_request(method, params)
+    @next_request_id += 1
+    rid = @next_request_id
+    payload = JSON.generate({ "id" => rid, "method" => method, "params" => params }) + "\n"
+    @socket.write(payload)
+
+    loop do
+      line = read_muxr_line
+      return nil unless line  # EOF
+      msg = JSON.parse(line)
+      next unless msg["id"] == rid
+      return msg
+    end
+  end
+
+  # Line-oriented read on the muxr socket. Reads in chunks and emits one
+  # JSON line at a time as they accumulate in @read_buffer.
+  def read_muxr_line
+    loop do
+      nl = @read_buffer.index("\n")
+      if nl
+        line = @read_buffer.slice!(0..nl)
+        return line.chomp
+      end
+      chunk = @socket.readpartial(64 * 1024)
+      @read_buffer << chunk
+    end
+  rescue EOFError, IOError
+    nil
+  end
+
+  def connect_to_muxr
+    path = ENV["MUXR_CONTROL_SOCKET"] || derive_socket_from_session
+    if path.nil? || path.empty?
+      die("set MUXR_CONTROL_SOCKET to the path of the muxr control socket, " \
+          "or MUXR_SESSION to the session name (the drawer-launched claude sets these for you).")
+    end
+    unless File.exist?(path)
+      die("muxr control socket not found at #{path} — is the server running? " \
+          "Start it with `muxr <session>`.")
+    end
+    @socket = UNIXSocket.new(path)
+  end
+
+  def derive_socket_from_session
+    name = ENV["MUXR_SESSION"]
+    return nil unless name && !name.empty?
+    File.join(Dir.home, ".muxr", "sockets", "#{name}.ctrl.sock")
+  end
+
+  # ---- JSON-RPC plumbing ----
+
+  def respond(id, result)
+    return if id.nil?
+    write_message({ "jsonrpc" => "2.0", "id" => id, "result" => result })
+  end
+
+  def respond_error(id, code, message)
+    return if id.nil?
+    write_message({ "jsonrpc" => "2.0", "id" => id, "error" => { "code" => code, "message" => message } })
+  end
+
+  def respond_tool_error(id, text)
+    respond(id, {
+      "content" => [{ "type" => "text", "text" => text }],
+      "isError" => true
+    })
+  end
+
+  def write_message(obj)
+    $stdout.write(JSON.generate(obj) + "\n")
+    $stdout.flush
+  end
+
+  def die(msg)
+    $stderr.puts "muxr-mcp: #{msg}"
+    exit 1
+  end
+end
+
+MuxrMcpBridge.new.run if $PROGRAM_NAME == __FILE__

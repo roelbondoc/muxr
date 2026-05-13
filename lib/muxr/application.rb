@@ -25,10 +25,14 @@ module Muxr
     DEFAULT_WIDTH  = 80
     DEFAULT_HEIGHT = 24
 
-    attr_reader :session, :renderer, :input, :session_name
+    attr_reader :session, :renderer, :input, :session_name, :control_server
 
     def self.socket_path_for(name)
       File.join(SOCKETS_DIR, "#{name}.sock")
+    end
+
+    def self.control_socket_path_for(name)
+      File.join(SOCKETS_DIR, "#{name}.ctrl.sock")
     end
 
     # Names of sessions whose server socket is currently accepting connections.
@@ -60,11 +64,12 @@ module Muxr
       @message = nil
       @message_expires = nil
       @help_visible = false
-      @next_pane_id = 0
       @current_client = nil
       @client_write_buffer = +"".b
       @listening_socket = nil
       @socket_path = self.class.socket_path_for(@session_name)
+      @control_socket_path = self.class.control_socket_path_for(@session_name)
+      @control_server = nil
       @paste_buffer = +""
       @last_render_at = nil
     end
@@ -87,12 +92,14 @@ module Muxr
       target&.write(data)
     end
 
-    def new_pane
-      cwd = focused_pane&.cwd
-      @session.window.add_pane(make_pane(cwd: cwd))
+    def new_pane(cwd: nil)
+      cwd ||= focused_pane&.cwd
+      pane = make_pane(cwd: cwd)
+      @session.window.add_pane(pane)
       @session.focus_drawer = false
       @session.window.focused_index = @session.window.panes.length - 1
       invalidate
+      pane
     end
 
     def focus_next
@@ -156,13 +163,28 @@ module Muxr
       invalidate
     end
 
-    def toggle_drawer
-      ensure_drawer
-      @session.drawer.toggle!
-      @session.focus_drawer = @session.drawer.visible?
-      @session.focus_drawer = false unless @session.drawer.visible?
-      renderer.reset_frame!
+    # Toggle the privacy flag on the focused pane. Private panes are
+    # redacted from the MCP control surface (panes.list strips cwd; read /
+    # send_input / run / subscribe / kill all refuse). Only the human can
+    # flip this — there is intentionally no control method to do it.
+    def toggle_private_focused
+      pane = focused_pane
+      return unless pane
+      pane.toggle_private!
+      flash(pane.private? ? "pane #{pane.id} marked private (hidden from MCP)" : "pane #{pane.id} unmarked private")
       invalidate
+    end
+
+    def toggle_drawer
+      toggle_drawer_kind(command: nil)
+    end
+
+    # Ctrl-a C / :claude — opens a drawer whose shell is `claude`, with
+    # MUXR_SESSION + MUXR_CONTROL_SOCKET + MUXR_FOCUSED_PANE in the env so
+    # the muxr-mcp bridge inside that claude process auto-attaches to this
+    # session.
+    def toggle_claude_drawer
+      toggle_drawer_kind(command: "claude")
     end
 
     def show_drawer
@@ -477,20 +499,30 @@ module Muxr
       @listening_socket = UNIXServer.new(@socket_path)
       File.chmod(0o600, @socket_path) rescue nil
 
+      # Sibling control socket — multi-client, NDJSON, used by bin/muxr-mcp
+      # and any other programmatic driver. Connected control clients do not
+      # count as "attached", so a Claude Code session can poke the muxr
+      # server without contending with the human's TTY client.
+      @control_server = ControlServer.new(self, @control_socket_path)
+      @control_server.start
+
       @session  = Session.new(name: @session_name, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT)
       @renderer = Renderer.new(out: FramedOutput.new(self))
       @input    = InputHandler.new(self)
 
-      first_pane = make_pane
-      @session.window.add_pane(first_pane)
+      saved = Session.load(@session_name)
+      first_id = saved && saved.dig("panes", 0, "id")
+      @session.window.add_pane(make_pane(id: first_id))
 
-      restore_panes_if_saved
+      restore_panes_if_saved(saved) if saved
 
       @running = true
     end
 
     def teardown
       disconnect_client
+      @control_server&.stop
+      @control_server = nil
       if @listening_socket
         @listening_socket.close rescue nil
       end
@@ -508,6 +540,7 @@ module Muxr
         @session.window.panes.each { |p| read_ios << p.io if p.alive? }
         drawer_pane = @session.drawer&.pane
         read_ios << drawer_pane.io if drawer_pane&.alive?
+        read_ios.concat(@control_server.read_ios) if @control_server
 
         write_ios = []
         @session.window.panes.each do |p|
@@ -517,6 +550,7 @@ module Muxr
           write_ios << drawer_pane.writer_io
         end
         write_ios << @current_client if @current_client && !@client_write_buffer.empty?
+        write_ios.concat(@control_server.write_ios) if @control_server
 
         timeout = @message ? 0.25 : SELECT_TIMEOUT
         # If a render is queued but we're inside the frame-rate budget, wake
@@ -540,6 +574,8 @@ module Muxr
             accept_client
           elsif io == @current_client
             consume_client_frame
+          elsif @control_server&.owns?(io)
+            @control_server.handle_read(io)
           else
             consume_pane_io(io)
           end
@@ -548,13 +584,18 @@ module Muxr
         ready_w&.each do |io|
           if io == @current_client
             drain_client_writes
+          elsif @control_server&.owns?(io)
+            @control_server.handle_write(io)
           else
             pane = pane_for_writer_io(io)
             pane&.drain_writes
           end
         end
 
+        @control_server&.tick
+
         prune_dead_panes
+        prune_dead_drawer
         expire_message
 
         if @session.window.panes.empty?
@@ -647,7 +688,14 @@ module Muxr
       pane = pane_for_io(io)
       return unless pane
       data = pane.read_from_pty
-      invalidate if data
+      if data
+        invalidate
+        # Notify the control surface so any pending pane.run waiters reset
+        # their idle window and any pane.subscribe clients get a new frame.
+        # read_from_pty already fed the bytes into the Terminal; the control
+        # server pulls the resulting text out of pane.terminal.dump_text.
+        @control_server&.on_pane_output(pane.id, data) if pane.id.is_a?(String)
+      end
     end
 
     def pane_for_io(io)
@@ -668,6 +716,25 @@ module Muxr
       dead = @session.window.panes.reject(&:alive?)
       return if dead.empty?
       dead.each { |p| @session.window.remove_pane(p) }
+      invalidate
+    end
+
+    # When the shell (or claude) inside the drawer exits, tear the drawer
+    # down so the next Ctrl-a ~ / Ctrl-a C spawns a fresh one. Without this
+    # the drawer pane stays mounted around a dead PTY and looks like the
+    # multiplexer is wedged.
+    def prune_dead_drawer
+      drawer = @session.drawer
+      return unless drawer
+      pane = drawer.pane
+      return unless pane
+      return if pane.alive?
+      kind = drawer.command ? "#{drawer.command} drawer" : "drawer"
+      drawer.close
+      @session.drawer = nil
+      @session.focus_drawer = false
+      renderer.reset_frame!
+      flash("#{kind} exited")
       invalidate
     end
 
@@ -738,20 +805,62 @@ module Muxr
       end
     end
 
-    def make_pane(cwd: nil)
-      @next_pane_id += 1
-      Pane.new(id: @next_pane_id, rows: 24, cols: 80, cwd: cwd)
+    def make_pane(cwd: nil, id: nil)
+      Pane.new(id: id, rows: 24, cols: 80, cwd: cwd)
     end
 
-    def ensure_drawer
+    def ensure_drawer(command: nil)
       return if @session.drawer
       cwd = focused_pane&.cwd
-      pane = Pane.new(id: :drawer, rows: 10, cols: 80, cwd: cwd)
-      @session.drawer = Drawer.new(pane: pane, origin_cwd: cwd)
+      pane = Pane.new(
+        id: :drawer,
+        rows: 10,
+        cols: 80,
+        cwd: cwd,
+        command: command,
+        env_overrides: drawer_env
+      )
+      @session.drawer = Drawer.new(pane: pane, origin_cwd: cwd, command: command)
     end
 
-    def restore_panes_if_saved
-      data = Session.load(@session_name)
+    # Toggle the drawer; if a different kind is currently up, tear it down
+    # and replace it with the requested kind. Keeps the drawer slot a single
+    # PTY so users don't end up with a confusing menagerie of overlays.
+    def toggle_drawer_kind(command:)
+      current = @session.drawer
+      if current.nil?
+        ensure_drawer(command: command)
+        @session.drawer.show!
+        @session.focus_drawer = true
+      elsif current.command == command
+        current.toggle!
+        @session.focus_drawer = current.visible?
+      else
+        current.close
+        @session.drawer = nil
+        ensure_drawer(command: command)
+        @session.drawer.show!
+        @session.focus_drawer = true
+      end
+      renderer.reset_frame!
+      invalidate
+    end
+
+    # Env vars exposed to every drawer PTY. The MCP bridge reads these to
+    # auto-connect to the right session; MUXR_DRAWER_SELF lets it refuse
+    # drawer.* methods so a claude drawer can't recurse into its own PTY.
+    def drawer_env
+      env = {
+        "MUXR_SESSION"        => @session_name.to_s,
+        "MUXR_CONTROL_SOCKET" => @control_socket_path.to_s,
+        "MUXR_DRAWER_SELF"    => "1"
+      }
+      focused = focused_pane
+      env["MUXR_FOCUSED_PANE"] = focused.id.to_s if focused&.id.is_a?(String)
+      env
+    end
+
+    def restore_panes_if_saved(data)
       return unless data
 
       if data["layout"] && Window::LAYOUTS.include?(data["layout"].to_sym)
@@ -759,15 +868,30 @@ module Muxr
       end
 
       panes_data = data["panes"] || []
+      # Restore privacy flag for the already-created first pane.
+      if panes_data[0] && panes_data[0]["private"] && @session.window.panes[0]
+        @session.window.panes[0].mark_private!
+      end
       panes_data[1..]&.each do |entry|
         cwd = entry["cwd"]
-        @session.window.add_pane(make_pane(cwd: cwd))
+        id  = entry["id"]
+        pane = make_pane(cwd: cwd, id: id)
+        pane.mark_private! if entry["private"]
+        @session.window.add_pane(pane)
       end
 
       if data["drawer"]
         cwd = data["drawer"]["cwd"]
-        pane = Pane.new(id: :drawer, rows: 10, cols: 80, cwd: cwd)
-        drawer = Drawer.new(pane: pane, origin_cwd: cwd)
+        command = data["drawer"]["command"]
+        pane = Pane.new(
+          id: :drawer,
+          rows: 10,
+          cols: 80,
+          cwd: cwd,
+          command: command,
+          env_overrides: drawer_env
+        )
+        drawer = Drawer.new(pane: pane, origin_cwd: cwd, command: command)
         drawer.visible = !!data["drawer"]["visible"]
         @session.drawer = drawer
         @session.focus_drawer = drawer.visible?

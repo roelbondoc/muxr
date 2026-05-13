@@ -16,6 +16,8 @@ module Muxr
       "\r"   => :promote_master,
       "\n"   => :promote_master,
       "~"    => :toggle_drawer,
+      "C"    => :toggle_claude_drawer,
+      "P"    => :toggle_private_focused,
       "d"    => :detach,
       "?"    => :show_help,
       "q"    => :quit_immediate,

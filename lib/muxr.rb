@@ -10,6 +10,7 @@ require_relative "muxr/renderer"
 require_relative "muxr/input_handler"
 require_relative "muxr/command_dispatcher"
 require_relative "muxr/protocol"
+require_relative "muxr/control_server"
 require_relative "muxr/application"
 require_relative "muxr/client"
 

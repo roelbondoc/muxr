@@ -102,6 +102,20 @@ module Muxr
       @buffer[r][c]
     end
 
+    # Return the currently-visible grid as a text string (rows joined by "\n",
+    # trailing whitespace stripped on each row). Used by the control surface
+    # to expose pane contents to programmatic clients (the MCP bridge in
+    # particular). This walks visible_cell so callers see whatever the user
+    # is currently looking at, including scrollback.
+    def dump_text
+      lines = Array.new(@rows) do |r|
+        row = String.new(capacity: @cols)
+        @cols.times { |c| row << visible_cell(r, c).char }
+        row.rstrip
+      end
+      lines.join("\n")
+    end
+
     # Returns the Cell that should be visible at (r, c) given the current
     # scrollback view_offset. When view_offset == 0 this is the live grid.
     # When view_offset > 0, rows in the top of the visible area are sourced

@@ -6,6 +6,41 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- MCP (Model Context Protocol) integration so Claude Code can drive a
+  muxr session as a tool. A second listener at
+  `~/.muxr/sockets/<name>.ctrl.sock` accepts multiple concurrent NDJSON
+  clients and exposes read-only and mutating methods over a small
+  JSON-RPC surface (`session.get`, `panes.list`, `pane.read`,
+  `pane.send_input`, `pane.run`, `pane.subscribe`, `layout.set`,
+  `drawer.*`, etc.). The control socket does not interfere with TTY
+  attach — programmatic clients never count as "attached", so a Claude
+  session and a human can use the multiplexer concurrently.
+- `pane.run` waits for the PTY to go idle before responding. Sends the
+  input, polls for output, and returns once no bytes have arrived for
+  `idle_ms` (default 500). Server-side idle detection avoids the
+  send-then-poll race that plagues naive client-side automation.
+- Stable per-pane ids: every pane carries a 6-hex `SecureRandom` id that
+  survives splits, kills, promote_to_master, detach/reattach, and
+  cold-restart from the session JSON. The status bar now reads
+  `#1 a3f9b2` so users see both the slot (positional, what `Ctrl-a 1`
+  targets) and the id (stable, what the MCP client should reference).
+- `bin/muxr-mcp` — standalone MCP-over-stdio bridge that translates
+  Claude Code tool calls into NDJSON requests on the control socket.
+  Auto-detects the target session from `MUXR_CONTROL_SOCKET` or
+  `MUXR_SESSION` env vars.
+- `Ctrl-a C` (also `:claude`) opens a drawer whose shell is `claude`,
+  with `MUXR_SESSION`, `MUXR_CONTROL_SOCKET`, `MUXR_FOCUSED_PANE`, and
+  `MUXR_DRAWER_SELF=1` injected into its environment. The bridge picks
+  those up automatically; the human gets a Quake-style Claude Code
+  overlay that already knows what session it's in. The
+  `MUXR_DRAWER_SELF` guard makes the bridge refuse `drawer.*` methods
+  so a claude drawer can't recurse into its own PTY.
+- Skill bundle at `skills/muxr-control/SKILL.md` teaching Claude how to
+  drive muxr via the MCP. Installable via `muxr --install-skill`, which
+  symlinks the skill into `~/.claude/skills/muxr-control` and prints
+  the bridge-registration snippet.
+
 ## [0.1.4] - 2026-05-13
 
 ### Fixed

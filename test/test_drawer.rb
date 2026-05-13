@@ -57,4 +57,14 @@ class TestDrawer < Minitest::Test
     refute drawer.visible?
     assert_nil drawer.pane
   end
+
+  def test_command_attribute_defaults_to_nil
+    drawer = Muxr::Drawer.new(pane: FakePane.new("/tmp"))
+    assert_nil drawer.command
+  end
+
+  def test_command_attribute_captures_constructor_value
+    drawer = Muxr::Drawer.new(pane: FakePane.new("/tmp"), command: "claude")
+    assert_equal "claude", drawer.command
+  end
 end

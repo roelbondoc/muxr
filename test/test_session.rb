@@ -90,6 +90,30 @@ class TestSession < Minitest::Test
     assert_nil data["drawer"]
   end
 
+  def test_serialize_includes_drawer_command
+    session = build_session
+    session.drawer = Muxr::Drawer.new(pane: FakeDrawerPane.new("/tmp/drawer"), origin_cwd: "/tmp/drawer", command: "claude")
+    data = session.serialize
+    assert_equal "claude", data["drawer"]["command"]
+  end
+
+  class FakePrivatePane < FakePane
+    def initialize(cwd, private_flag: false)
+      super(cwd)
+      @private_flag = private_flag
+    end
+    def private?; @private_flag; end
+  end
+
+  def test_serialize_includes_private_flag_per_pane
+    session = Muxr::Session.new(name: "spec", width: 80, height: 24)
+    session.window.add_pane(FakePrivatePane.new("/tmp/a", private_flag: false))
+    session.window.add_pane(FakePrivatePane.new("/tmp/b", private_flag: true))
+    data = session.serialize
+    refute data["panes"][0]["private"]
+    assert data["panes"][1]["private"]
+  end
+
   def test_exists_check
     with_isolated_sessions_dir do
       refute Muxr::Session.exists?("missing")

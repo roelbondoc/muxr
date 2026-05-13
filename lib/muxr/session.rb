@@ -45,7 +45,7 @@ module Muxr
         "focused_index"  => @window.focused_index,
         "master_index"   => @window.master_index,
         "focus_drawer"   => @focus_drawer,
-        "panes"          => @window.panes.map { |p| { "cwd" => safe_cwd(p) } },
+        "panes"          => @window.panes.map { |p| { "id" => safe_id(p), "cwd" => safe_cwd(p), "private" => safe_private(p) } },
         "drawer"         => serialize_drawer
       }
     end
@@ -76,11 +76,22 @@ module Muxr
       pane.respond_to?(:cwd) ? pane.cwd : nil
     end
 
+    def safe_id(pane)
+      return nil unless pane.respond_to?(:id)
+      id = pane.id
+      id.is_a?(String) ? id : nil
+    end
+
+    def safe_private(pane)
+      pane.respond_to?(:private?) && pane.private?
+    end
+
     def serialize_drawer
       return nil unless @drawer
       {
         "visible" => @drawer.visible?,
-        "cwd"     => @drawer.cwd
+        "cwd"     => @drawer.cwd,
+        "command" => @drawer.respond_to?(:command) ? @drawer.command : nil
       }
     end
   end

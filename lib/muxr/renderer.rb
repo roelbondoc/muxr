@@ -93,6 +93,11 @@ module Muxr
         focused = (i == win.focused_index) && !(session.focus_drawer && session.drawer&.visible?)
         title = "##{i + 1}"
         title += "/#{win.panes.length}" if monocle
+        # Stable id sits after the slot number so monocle reads "#1/3 a3f9b2".
+        # respond_to? guard keeps renderer tests (which use simple struct fakes)
+        # from blowing up when a pane stand-in doesn't implement #id.
+        title += " #{pane.id}" if pane.respond_to?(:id) && pane.id.is_a?(String)
+        title += " [P]" if pane.respond_to?(:private?) && pane.private?
         title += " ★" if i == win.master_index
         title += " (" + win.layout.to_s + ")" if i == win.focused_index
         if pane.terminal.scrolled_back?
@@ -263,7 +268,9 @@ module Muxr
       "  C-a k       close focused pane",
       "  C-a Tab     cycle layout (tall → grid → monocle)",
       "  C-a Enter   promote focused pane to master",
-      "  C-a ~       toggle drawer",
+      "  C-a ~       toggle drawer (shell)",
+      "  C-a C       toggle Claude Code drawer (MCP-aware)",
+      "  C-a P       toggle private flag on focused pane (hides from MCP)",
       "  C-a [       enter scrollback (j/k d/u f g/G C-b/C-f; v→cursor, q quits)",
       "              cursor: v select, C-v block, y yank, q cancel",
       "              motions: h/j/k/l 0/^/$ w/e/b W/E/B H/M/L g/G",
@@ -274,7 +281,7 @@ module Muxr
       "  C-a ?       toggle this help",
       "  C-a C-a     send literal C-a",
       "",
-      "Commands: layout {tall|grid|monocle}, drawer {toggle|show|hide|reset},",
+      "Commands: layout {tall|grid|monocle}, drawer {toggle|show|hide|reset}, claude,",
       "          save, restore, sessions, quit, new, close, next, prev",
       "",
       "press any key to dismiss"

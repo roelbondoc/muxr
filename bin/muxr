@@ -18,6 +18,65 @@ if ARGV.include?("-l") || ARGV.include?("--list")
   exit 0
 end
 
+if ARGV.include?("--install-skill")
+  # Copies skills/muxr-control into ~/.claude/skills/muxr-control so the
+  # claude CLI loads it from anywhere. We *copy* rather than symlink so the
+  # install survives a RubyGems upgrade (which deletes the old versioned
+  # gem path that a symlink would have pointed at). Idempotent: re-running
+  # this after a `gem update muxr` is the supported way to refresh the
+  # skill content.
+  src = File.expand_path("../skills/muxr-control", __dir__)
+  unless File.directory?(src)
+    $stderr.puts "muxr: skill source not found at #{src} (was the gem packaged without skills/?)"
+    exit 1
+  end
+  claude_skills = File.expand_path("~/.claude/skills")
+  dst = File.join(claude_skills, "muxr-control")
+  FileUtils.mkdir_p(claude_skills)
+  # Wipe any prior install — symlink (from older dev installs) or directory.
+  if File.symlink?(dst) || File.exist?(dst)
+    FileUtils.rm_rf(dst)
+  end
+  FileUtils.mkdir_p(dst)
+  FileUtils.cp_r(File.join(src, "."), dst)
+
+  # Pick the most stable absolute path we can point claude's mcp config at:
+  #
+  #  - Installed gem: $GEM_HOME/bin/muxr-mcp is a wrapper bin stub that
+  #    survives version upgrades (RubyGems repoints it on `gem update`).
+  #    Always prefer it when present.
+  #  - Source checkout: no bin stub exists; fall back to the script that
+  #    sits next to the running `muxr` binary.
+  bin_stub = File.join(Gem.bindir, "muxr-mcp") rescue nil
+  bridge = (bin_stub && File.exist?(bin_stub)) ? bin_stub : File.expand_path("muxr-mcp", __dir__)
+  puts <<~MSG
+    ✓ Copied skill to: #{dst}
+      (source: #{src})
+
+    Re-run `muxr --install-skill` after `gem update muxr` to refresh the
+    skill contents.
+
+    Next, register the muxr MCP bridge with Claude Code at USER scope
+    (so every claude session sees it, not just ones started from your
+    home directory):
+
+        claude mcp add muxr #{bridge} --scope user
+
+    If you omit `--scope user`, `claude mcp add` defaults to local scope
+    and the MCP is only loaded when claude starts from your current cwd —
+    a common first-run gotcha.
+
+    If your gem bin directory is on $PATH, `muxr-mcp` works as a bare name too:
+
+        claude mcp add muxr muxr-mcp --scope user
+
+    Then restart any running Claude Code sessions so they pick up the new
+    config, and launch claude from inside a muxr drawer (Ctrl-a C) — the
+    bridge auto-detects the session via MUXR_SESSION / MUXR_CONTROL_SOCKET.
+  MSG
+  exit 0
+end
+
 if ARGV.include?("-h") || ARGV.include?("--help")
   puts <<~USAGE
     muxr #{Muxr::VERSION} — a tiling terminal multiplexer
@@ -27,6 +86,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       muxr <name>          attach (or start) the named session
       muxr -s <name>       same as above
       muxr --list          list running sessions and exit
+      muxr --install-skill symlink the MCP skill into ~/.claude/skills and exit
       muxr --version       print version and exit
       muxr --help          this help
 
@@ -35,6 +95,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       C-a a   toggle last pane    C-a 1..9    jump to pane by number
       C-a k   close pane          C-a Tab     cycle layout
       C-a ~   toggle drawer       C-a Enter   promote to master
+      C-a C   Claude drawer       (MCP-aware; needs `muxr --install-skill` + bridge configured)
       C-a :   command prompt      C-a ?       toggle help
       C-a d   detach (server stays running)
       C-a q   kill session (with y/n confirmation)

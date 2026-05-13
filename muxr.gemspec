@@ -26,10 +26,12 @@ Gem::Specification.new do |spec|
   }
 
   spec.bindir        = "bin"
-  spec.executables   = ["muxr"]
+  spec.executables   = ["muxr", "muxr-mcp"]
   spec.files         = Dir[
     "lib/**/*.rb",
     "bin/muxr",
+    "bin/muxr-mcp",
+    "skills/**/*",
     "README.md",
     "CHANGELOG.md",
     "LICENSE.txt",
