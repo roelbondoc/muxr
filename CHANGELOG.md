@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-13
+
 ### Added
 - MCP (Model Context Protocol) integration so Claude Code can drive a
   muxr session as a tool. A second listener at
@@ -36,10 +38,36 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   overlay that already knows what session it's in. The
   `MUXR_DRAWER_SELF` guard makes the bridge refuse `drawer.*` methods
   so a claude drawer can't recurse into its own PTY.
+- Private panes (`Ctrl-a P` / `:private`) hide a pane from programmatic
+  callers: `panes.list` strips cwd/rows/cols, and `pane.read`,
+  `pane.send_input`, `pane.run`, `pane.subscribe`, and `pane.kill`
+  refuse with an error message pointing the human at `Ctrl-a P` to
+  expose it. The flag is persisted in session JSON, shown as `[P]` in
+  the status bar, and intentionally one-way — there is no control
+  method to flip it.
+- Named keys on `pane.send_input`, `pane.run`, and `drawer.send_input`.
+  A `keys` array accepts vim-style `<name>` tokens (`<esc>`, `<c-c>`,
+  `<cr>`, arrows, etc.) interleaved with literal text, so MCP callers
+  no longer have to remember that Escape is `"\e"` and Ctrl-C is
+  `"\x03"`. Bracketed-paste wrapping still applies to literal segments
+  only.
 - Skill bundle at `skills/muxr-control/SKILL.md` teaching Claude how to
   drive muxr via the MCP. Installable via `muxr --install-skill`, which
-  symlinks the skill into `~/.claude/skills/muxr-control` and prints
-  the bridge-registration snippet.
+  copies the skill into `~/.claude/skills/muxr-control` (survives
+  `gem update`) and prints the `claude mcp add` registration line.
+
+### Fixed
+- Honor DSR cursor-position queries (`\e[5n`, `\e[6n`). The Terminal
+  emulator now buffers a `\e[0n` OK reply or a `\e[<row>;<col>R` CPR
+  reply into a pending-replies queue; the Pane drains it back through
+  the PTY input side after each feed. AWS CLI and other programs that
+  probe geometry this way no longer log "your terminal doesn't support
+  cursor position requests (CPR)" and fall back to a degraded mode.
+- Drawer height now has a floor of 16 rows. The old 35%-of-screen rule
+  degraded badly on short terminals — a 24-row terminal gave only ~8
+  rows of drawer, barely enough for one prompt and a few lines of
+  output. The 35% growth still applies above the floor, so tall
+  terminals are unaffected.
 
 ## [0.1.4] - 2026-05-13
 
@@ -143,7 +171,8 @@ Initial release.
   boundaries.
 - Renderer that composes one frame and diff-emits ANSI to STDOUT.
 
-[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.5
 [0.1.4]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.4
 [0.1.3]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.3
 [0.1.2]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.2
