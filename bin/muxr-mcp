@@ -89,28 +89,38 @@ class MuxrMcpBridge
     },
     {
       "name" => "muxr_pane_send_input",
-      "description" => "Send raw bytes to a pane's PTY without waiting. For full commands prefer muxr_pane_run, which sends + waits for output to settle. Set bracketed=true when sending multi-line text into an editor or REPL.",
+      "description" => "Send raw bytes to a pane's PTY without waiting. For full commands prefer muxr_pane_run, which sends + waits for output to settle. Set bracketed=true when sending multi-line text into an editor or REPL. When the sequence needs any special key (Escape, Enter-as-terminator, arrows, Ctrl-*), use `keys` instead of `data` — sending \"\\n\" or \"\\e\" through `data` is a footgun that easily leaves vim in insert mode.",
       "inputSchema" => {
         "type" => "object",
         "properties" => {
           "pane" => PANE_REF,
-          "data" => { "type" => "string", "description" => "Bytes to send (literal — no \\r appended)." },
-          "bracketed" => { "type" => "boolean", "description" => "Wrap in bracketed-paste markers (\\e[200~ … \\e[201~)." }
+          "data" => { "type" => "string", "description" => "Literal bytes to send, sent exactly as-is (no \\r appended). Lower-level than `keys` — use `keys` whenever any named special key is involved. Mutually exclusive with `keys`." },
+          "keys" => {
+            "type" => "array",
+            "items" => { "type" => "string" },
+            "description" => "Mixed array of literal text and vim-style named keys. Each element is either literal text or a single `<name>`. Supported names (case-insensitive): <esc>, <enter>/<cr>, <tab>, <s-tab>, <bs>, <space>, <up>/<down>/<left>/<right>, <home>, <end>, <pageup>, <pagedown>, <c-a>..<c-z>, <f1>..<f12>. Mutually exclusive with `data`. Example for vim open-paste-save: [\"G\", \"o\", \"hello world\", \"<esc>\", \":w\", \"<enter>\"]."
+          },
+          "bracketed" => { "type" => "boolean", "description" => "Wrap literal text in bracketed-paste markers (\\e[200~ … \\e[201~). Named keys in `keys` are never bracketed." }
         },
-        "required" => ["pane", "data"],
+        "required" => ["pane"],
         "additionalProperties" => false
       }
     },
     {
       "name" => "muxr_pane_run",
-      "description" => "Send input to a pane and wait for the PTY to go idle before returning. The killer tool for driving shells: returns the pane's full visible text after the command settles, plus a timed_out flag. By default appends \\r and waits 500ms of idle. Bump idle_ms to ~800 for bursty commands (test runners) or timeout_ms for long builds.",
+      "description" => "Send input to a pane and wait for the PTY to go idle before returning. The killer tool for driving shells: returns the pane's full visible text after the command settles, plus a timed_out flag. By default appends \\r and waits 500ms of idle. Bump idle_ms to ~800 for bursty commands (test runners) or timeout_ms for long builds. When the sequence needs any special key (Escape, arrows, Ctrl-*), use `keys` instead of `input`.",
       "inputSchema" => {
         "type" => "object",
         "properties" => {
           "pane"        => PANE_REF,
-          "input"       => { "type" => "string", "description" => "Command text. Omit/empty to just wait." },
-          "append_enter"=> { "type" => "boolean", "description" => "Append \\r after input (default true)." },
-          "bracketed"   => { "type" => "boolean", "description" => "Wrap input in bracketed-paste markers (default false)." },
+          "input"       => { "type" => "string", "description" => "Command text. Omit/empty to just wait. Use `keys` instead when any named special key is needed. Mutually exclusive with `keys`." },
+          "keys"        => {
+            "type" => "array",
+            "items" => { "type" => "string" },
+            "description" => "Mixed array of literal text and vim-style named keys (see muxr_pane_send_input for the full list). Preferred over `input` whenever Escape/arrows/Ctrl-* are involved. Mutually exclusive with `input`."
+          },
+          "append_enter"=> { "type" => "boolean", "description" => "Append \\r after input/keys (default true)." },
+          "bracketed"   => { "type" => "boolean", "description" => "Wrap literal text in bracketed-paste markers (default false). Named keys in `keys` are never bracketed." },
           "idle_ms"     => { "type" => "integer", "minimum" => 50, "maximum" => 60000, "description" => "Idle window before considering the command settled. Default 500." },
           "timeout_ms"  => { "type" => "integer", "minimum" => 100, "maximum" => 300000, "description" => "Absolute timeout for the wait. Default 30000." }
         },
@@ -201,14 +211,18 @@ class MuxrMcpBridge
     },
     {
       "name" => "muxr_drawer_send_input",
-      "description" => "Send bytes to the drawer pane.",
+      "description" => "Send bytes to the drawer pane. When the sequence needs any special key (Escape, Enter-as-terminator, arrows, Ctrl-*), use `keys` instead of `data`.",
       "inputSchema" => {
         "type" => "object",
         "properties" => {
-          "data" => { "type" => "string" },
-          "bracketed" => { "type" => "boolean" }
+          "data" => { "type" => "string", "description" => "Literal bytes. Mutually exclusive with `keys`." },
+          "keys" => {
+            "type" => "array",
+            "items" => { "type" => "string" },
+            "description" => "Mixed literal text and vim-style named keys (see muxr_pane_send_input for the full list). Mutually exclusive with `data`."
+          },
+          "bracketed" => { "type" => "boolean", "description" => "Wrap literal text in bracketed-paste markers. Named keys in `keys` are never bracketed." }
         },
-        "required" => ["data"],
         "additionalProperties" => false
       }
     },

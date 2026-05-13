@@ -1,6 +1,7 @@
 require "json"
 require "socket"
 require "set"
+require "muxr/key_parser"
 
 module Muxr
   # ControlServer is the second listener on the muxr server: it accepts
@@ -453,10 +454,9 @@ module Muxr
     def pane_send_input(params)
       pane = find_pane(params)
       ensure_not_private!(pane, "pane.send_input")
-      data = require_string(params, "data")
-      payload = wrap_bracketed(data, !!params["bracketed"])
+      raw, payload = build_input_payload(params, text_key: "data", required: true, bracketed: !!params["bracketed"])
       pane.write(payload)
-      { "pane" => pane.id.to_s, "bytes" => data.bytesize }
+      { "pane" => pane.id.to_s, "bytes" => raw.bytesize }
     end
 
     def pane_focus(params)
@@ -502,16 +502,14 @@ module Muxr
       raise Error.new("pane.run: missing request id (notifications cannot wait)") unless request_id
       pane = find_pane(params)
       ensure_not_private!(pane, "pane.run")
-      input = params["input"].to_s
       append_enter = params.fetch("append_enter", true)
       bracketed = !!params["bracketed"]
       idle_ms = clamp_int(params["idle_ms"], min: 50, max: 60_000, default: DEFAULT_IDLE_MS)
       timeout_ms = clamp_int(params["timeout_ms"], min: 100, max: MAX_TIMEOUT_MS, default: DEFAULT_TIMEOUT_MS)
 
+      _raw, body = build_input_payload(params, text_key: "input", required: false, bracketed: bracketed)
       payload = +"".b
-      unless input.empty?
-        payload << wrap_bracketed(input, bracketed)
-      end
+      payload << body
       payload << "\r".b if append_enter
       pane.write(payload) unless payload.empty?
 
@@ -567,10 +565,9 @@ module Muxr
     def drawer_send_input(params)
       drawer = @app.session.drawer
       raise Error.new("drawer.send_input: no drawer (toggle one open first)") unless drawer&.pane
-      data = require_string(params, "data")
-      payload = wrap_bracketed(data, !!params["bracketed"])
+      raw, payload = build_input_payload(params, text_key: "data", required: true, bracketed: !!params["bracketed"])
       drawer.pane.write(payload)
-      { "bytes" => data.bytesize }
+      { "bytes" => raw.bytesize }
     end
 
     def require_string(params, key)
@@ -582,6 +579,36 @@ module Muxr
     def wrap_bracketed(data, bracketed)
       return data.b unless bracketed
       BRACKET_PASTE_START + data.b + BRACKET_PASTE_END
+    end
+
+    # Build the bytes to write to a PTY from either a `keys` array (mixed
+    # literal text + vim-style named keys) or a plain text field. Returns
+    # [raw_bytes, wire_bytes]: raw is the unwrapped concatenation (used for
+    # reporting back `bytes`); wire is the same stream with bracketed-paste
+    # markers wrapped around literal segments only (named keys are never
+    # bracketed — they aren't paste content).
+    #
+    # text_key — which scalar param to fall back to ("data" or "input").
+    # required — when true, raise if both `keys` and text_key are missing.
+    def build_input_payload(params, text_key:, required:, bracketed:)
+      if params.key?("keys")
+        raise Error.new("provide either `#{text_key}` or `keys`, not both") if params[text_key]
+        segments = KeyParser.translate(params["keys"])
+        raw  = +"".b
+        wire = +"".b
+        segments.each do |kind, bytes|
+          raw  << bytes
+          wire << (kind == :literal && bracketed ? BRACKET_PASTE_START + bytes + BRACKET_PASTE_END : bytes)
+        end
+        [raw, wire]
+      elsif params[text_key].is_a?(String)
+        text = params[text_key]
+        [text.b, wrap_bracketed(text, bracketed)]
+      elsif required
+        raise Error.new("missing #{text_key} (or `keys`)")
+      else
+        ["".b, "".b]
+      end
     end
 
     def clamp_int(value, min:, max:, default:)

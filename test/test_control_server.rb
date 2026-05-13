@@ -189,6 +189,107 @@ class TestControlServer < Minitest::Test
     assert_equal "\e[200~x\e[201~".b, target.process.writes
   end
 
+  # ---- keys parameter ----
+
+  def test_pane_send_input_keys_translates_named_keys
+    app = build_app
+    target = app.session.window.panes[0]
+    # vim "open, paste, save" pattern — the original footgun from the
+    # task description, now expressible as a single keys sequence.
+    dispatch(app, "pane.send_input", {
+      "pane" => target.id,
+      "keys" => ["G", "o", "hello world", "<esc>", ":w", "<enter>"]
+    })
+    assert_equal "Gohello world\e:w\r".b, target.process.writes
+  end
+
+  def test_pane_send_input_keys_ctrl_c_and_ctrl_d
+    app = build_app
+    target = app.session.window.panes[0]
+    dispatch(app, "pane.send_input", { "pane" => target.id, "keys" => ["<c-c>"] })
+    assert_equal "\x03".b, target.process.writes
+    target.process.writes.clear
+    dispatch(app, "pane.send_input", { "pane" => target.id, "keys" => ["<c-d>"] })
+    assert_equal "\x04".b, target.process.writes
+  end
+
+  def test_pane_send_input_keys_arrow_sequence
+    app = build_app
+    target = app.session.window.panes[0]
+    dispatch(app, "pane.send_input", {
+      "pane" => target.id,
+      "keys" => ["<down>", "<down>", "<enter>"]
+    })
+    assert_equal "\e[B\e[B\r".b, target.process.writes
+  end
+
+  def test_pane_send_input_keys_bracketed_wraps_only_literal_segments
+    # bracketed: true wraps each literal segment in \e[200~..\e[201~ but
+    # leaves named keys bare — they aren't paste content.
+    app = build_app
+    target = app.session.window.panes[0]
+    dispatch(app, "pane.send_input", {
+      "pane" => target.id,
+      "keys" => ["hello", "<esc>", "world"],
+      "bracketed" => true
+    })
+    assert_equal "\e[200~hello\e[201~\e\e[200~world\e[201~".b, target.process.writes
+  end
+
+  def test_pane_send_input_keys_and_data_together_raises
+    app = build_app
+    target = app.session.window.panes[0]
+    err = assert_raises(Muxr::Dispatcher::Error) do
+      dispatch(app, "pane.send_input", { "pane" => target.id, "data" => "x", "keys" => ["y"] })
+    end
+    assert_match(/either `data` or `keys`/, err.message)
+  end
+
+  def test_pane_send_input_keys_unknown_named_key_raises
+    app = build_app
+    target = app.session.window.panes[0]
+    assert_raises(Muxr::Dispatcher::Error) do
+      dispatch(app, "pane.send_input", { "pane" => target.id, "keys" => ["<bogus>"] })
+    end
+    assert_equal "".b, target.process.writes
+  end
+
+  def test_pane_send_input_missing_both_raises
+    app = build_app
+    target = app.session.window.panes[0]
+    assert_raises(Muxr::Dispatcher::Error) do
+      dispatch(app, "pane.send_input", { "pane" => target.id })
+    end
+  end
+
+  def test_pane_run_keys_translates_named_keys
+    app = build_app
+    target = app.session.window.panes[0]
+    dispatch(app, "pane.run", {
+      "pane" => target.id,
+      "keys" => ["i", "hi", "<esc>"],
+      "append_enter" => false
+    })
+    assert_equal "ihi\e".b, target.process.writes
+  end
+
+  def test_pane_run_keys_appends_enter_by_default
+    app = build_app
+    target = app.session.window.panes[0]
+    dispatch(app, "pane.run", { "pane" => target.id, "keys" => [":q"] })
+    assert_equal ":q\r".b, target.process.writes
+  end
+
+  def test_drawer_send_input_keys_translates
+    app = build_app
+    # Stand up a drawer with a fake pane so drawer_send_input has somewhere
+    # to write. The FakeApp doesn't auto-create one.
+    drawer_pane = Muxr::Pane.new(process: FakeProcess.new)
+    app.session.drawer = Muxr::Drawer.new(pane: drawer_pane)
+    dispatch(app, "drawer.send_input", { "keys" => ["<c-c>"] })
+    assert_equal "\x03".b, drawer_pane.process.writes
+  end
+
   def test_pane_focus_changes_focused_index
     app = build_app
     target = app.session.window.panes[2]
