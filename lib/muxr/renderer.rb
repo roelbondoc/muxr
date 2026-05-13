@@ -118,7 +118,11 @@ module Muxr
 
       w = session.width
       h = session.height
-      dh = (h * 0.35).round.clamp(5, h - 2)
+      # Drawer height is the larger of "16 rows" or 35% of the screen — the
+      # 35% rule is fine on tall terminals but uselessly small on short ones,
+      # so we floor it at 16 to keep the drawer practical. Final clamp keeps
+      # room for panes + status bar on very small terminals.
+      dh = [16, (h * 0.35).round].max.clamp(5, h - 2)
       dy = h - 1 - dh
       rect = LayoutManager::Rect.new(0, dy, w, dh)
       drawer.pane.rect = rect
