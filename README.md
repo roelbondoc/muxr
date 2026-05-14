@@ -51,23 +51,33 @@ The Quake-style drawer overlay (`C-a ~`):
 ## Install / run
 
 ```bash
-git clone https://github.com/roelbondoc/muxr
-cd muxr
-bin/muxr                 # attach the "default" session (auto-spawn if needed)
-bin/muxr work            # attach (or start) a named session
-bin/muxr --list          # list running sessions and exit
-bin/muxr --install-skill # install the MCP skill into ~/.claude/skills
-bin/muxr --help
+gem install muxr
+muxr                     # attach the "default" session (auto-spawn if needed)
+muxr work                # attach (or start) a named session
+muxr --list              # list running sessions and exit
+muxr --install-skill     # install the MCP skill into ~/.claude/skills
+muxr --help
 ```
 
 Requires **Ruby ≥ 3.4**. No runtime gems — just `PTY`, `IO.console`, `JSON`,
 `Socket`, and `FileUtils` from stdlib.
 
-`bin/muxr` is the client. The first invocation for a session daemonizes a
+`muxr` is the client. The first invocation for a session daemonizes a
 server in the background; subsequent invocations attach to it over a Unix
 socket. `Ctrl-a d` detaches the client and leaves the server (and every
 shell it owns) running, so reattaching gives you back the exact same panes
 with their full history.
+
+### From source
+
+To run the latest unreleased code or hack on muxr locally, clone the repo
+and use `bin/muxr` directly — it puts `lib/` on `$LOAD_PATH` itself:
+
+```bash
+git clone https://github.com/roelbondoc/muxr
+cd muxr
+bin/muxr                 # same flags as the installed `muxr` executable
+```
 
 ## Keybindings (Ctrl-a prefix)
 
