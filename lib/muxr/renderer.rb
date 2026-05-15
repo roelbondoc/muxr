@@ -53,7 +53,7 @@ module Muxr
 
       frame = Array.new(h) { Array.new(w) { Cell.new(" ", nil, nil, 0) } }
 
-      compose_panes(frame, session)
+      compose_panes(frame, session, input_state: input_state)
       compose_drawer(frame, session) if session.drawer&.visible?
       compose_status_bar(frame, session, input_state: input_state, command_buffer: command_buffer, message: message)
       compose_help(frame, session) if help
@@ -63,7 +63,7 @@ module Muxr
 
     private
 
-    def compose_panes(frame, session)
+    def compose_panes(frame, session, input_state: :normal)
       win = session.window
       content_area = LayoutManager::Rect.new(0, 0, session.width, session.height - 1)
       rects = LayoutManager.compute(
@@ -99,7 +99,11 @@ module Muxr
         title += " #{pane.id}" if pane.respond_to?(:id) && pane.id.is_a?(String)
         title += " [P]" if pane.respond_to?(:private?) && pane.private?
         title += " ★" if i == win.master_index
-        title += " (" + win.layout.to_s + ")" if i == win.focused_index
+        # Show the active input mode next to the focused pane so the user
+        # doesn't have to glance down at the status bar to know whether a
+        # keystroke will reach the shell or be intercepted by muxr. The
+        # layout name lives in the status bar.
+        title += " [" + mode_label(input_state) + "]" if i == win.focused_index
         if pane.terminal.scrolled_back?
           title += " [scrollback #{pane.terminal.view_offset}/#{pane.terminal.scrollback_size}]"
         end

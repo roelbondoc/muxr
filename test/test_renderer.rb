@@ -55,11 +55,13 @@ class TestRenderer < Minitest::Test
     refute_includes output, "BBB"
   end
 
-  def test_monocle_title_shows_position_and_layout_hint
+  def test_monocle_title_shows_position_and_mode
     session = build_session(layout: :monocle, focused_index: 1)
     output = render(session)
     assert_includes output, "#2/3"
-    assert_includes output, "(monocle)"
+    # The layout name lives in the status bar now; the focused-pane title
+    # carries the mode indicator instead.
+    assert_includes output, "[NORMAL]"
   end
 
   def test_non_focused_panes_still_get_resized_in_monocle
