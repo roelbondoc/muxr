@@ -4,12 +4,29 @@ module Muxr
   # new frame against the previous one and only repositions/redraws cells
   # whose contents changed, keeping output volume low between ticks.
   class Renderer
-    BORDER_FOCUSED      = [:c256, 11].freeze  # yellow
+    BORDER_FOCUSED      = [:c256, 11].freeze  # yellow (fallback when no mode color)
     BORDER_UNFOCUSED    = [:c256, 8].freeze   # grey
     BORDER_DRAWER_FOCUS = [:c256, 13].freeze  # magenta
     BORDER_DRAWER_IDLE  = [:c256, 5].freeze   # dark magenta
     STATUS_BG           = [:c256, 236].freeze
     STATUS_FG           = [:c256, 252].freeze
+
+    # Vim-style mode palette. Used in two places: the focused pane border
+    # (so the user can see at a glance what mode they're in) and the
+    # [MODE] chip in the status bar (same color, smaller real estate).
+    # :prefix maps to the same green as :passthrough because :prefix is a
+    # transient sub-state under passthrough — sharing the color avoids a
+    # one-frame border flicker when pressing Ctrl-a.
+    MODE_COLOR = {
+      normal:       [:c256, 51].freeze,   # cyan
+      passthrough:  [:c256, 42].freeze,   # green
+      prefix:       [:c256, 42].freeze,   # green (passthrough sub-state)
+      command:      [:c256, 226].freeze,  # yellow
+      scrollback:   [:c256, 214].freeze,  # orange
+      selection:    [:c256, 201].freeze,  # magenta
+      confirm_quit: [:c256, 196].freeze,  # red
+      help:         [:c256, 39].freeze    # blue
+    }.freeze
 
     HORIZONTAL = "─".freeze
     VERTICAL   = "│".freeze
@@ -108,7 +125,7 @@ module Muxr
           title += " [scrollback #{pane.terminal.view_offset}/#{pane.terminal.scrollback_size}]"
         end
         draw_box(frame, rect,
-                 border: focused ? BORDER_FOCUSED : BORDER_UNFOCUSED,
+                 border: focused ? mode_color(input_state) : BORDER_UNFOCUSED,
                  bold_border: focused,
                  title: title,
                  title_focused: focused)
@@ -155,6 +172,10 @@ module Muxr
                title: title,
                title_focused: focused)
       copy_terminal(frame, drawer.pane, rect.x + 1, rect.y + 1)
+    end
+
+    def mode_color(input_state)
+      MODE_COLOR[input_state] || BORDER_FOCUSED
     end
 
     # Two-letter-ish mode label shown in the leftmost slot of the status bar.
@@ -210,6 +231,21 @@ module Muxr
         c.fg = STATUS_FG
         c.bg = STATUS_BG
         c.attrs = 0
+      end
+
+      # Recolor the leading "[MODE]" chip in the mode's accent color. The
+      # chip lives at offset 1 (after one leading space) and runs for
+      # bracket+label+bracket characters. Full-row overlays below will
+      # overwrite this when active (command/scrollback/selection) — that's
+      # fine, those modes already convey themselves loudly.
+      chip = "[#{mode_label(input_state)}]"
+      chip_color = mode_color(input_state)
+      chip_start = 1
+      chip_end = [chip_start + chip.length, w].min
+      (chip_start...chip_end).each do |x|
+        c = frame[y][x]
+        c.fg = chip_color
+        c.attrs |= Terminal::BOLD
       end
 
       if input_state == :command
