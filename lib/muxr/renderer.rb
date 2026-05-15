@@ -35,9 +35,9 @@ module Muxr
     BL         = "└".freeze
     BR         = "┘".freeze
 
-    Cell = Struct.new(:char, :fg, :bg, :attrs) do
+    Cell = Struct.new(:char, :fg, :bg, :attrs, :hyperlink) do
       def ==(other)
-        other.is_a?(Cell) && char == other.char && fg == other.fg && bg == other.bg && attrs == other.attrs
+        other.is_a?(Cell) && char == other.char && fg == other.fg && bg == other.bg && attrs == other.attrs && hyperlink == other.hyperlink
       end
     end
 
@@ -49,7 +49,10 @@ module Muxr
     end
 
     def enter_alt_screen
-      @out.write("\e[?1049h\e[?25l\e[2J\e[H\e[0m")
+      # Close any stale OSC 8 hyperlink the outer terminal might be carrying
+      # from before we attached, so the first frame's run-tracker matches
+      # reality.
+      @out.write("\e[?1049h\e[?25l\e[2J\e[H\e[0m\e]8;;\e\\")
       @out.flush
       @prev = nil
     end
@@ -68,7 +71,7 @@ module Muxr
       h = session.height
       return if w < 4 || h < 3
 
-      frame = Array.new(h) { Array.new(w) { Cell.new(" ", nil, nil, 0) } }
+      frame = Array.new(h) { Array.new(w) { Cell.new(" ", nil, nil, 0, nil) } }
 
       compose_panes(frame, session, input_state: input_state)
       compose_drawer(frame, session, input_state: input_state) if session.drawer&.visible?
@@ -314,7 +317,7 @@ module Muxr
           mode = focused.terminal.selection_mode == :block ? "BLOCK" : "CHAR"
         end
         label = mode ? "SELECTION/#{mode}" : "SELECTION (cursor)"
-        overlay = " #{label}  h/j/k/l move  v char  C-v block  y/Enter yank  q cancel "
+        overlay = " #{label}  h/j/k/l move  v/space char  C-v block  y/Enter yank  q cancel "
         overlay = overlay[0, w]
         overlay.each_char.with_index do |ch, x|
           c = frame[y][x]
@@ -455,6 +458,7 @@ module Muxr
           dst.bg = src.bg
           dst.attrs = src.attrs
           dst.attrs |= Terminal::REVERSE if selection && term.selected_at_visible?(r, c)
+          dst.hyperlink = src.hyperlink
         end
       end
     end
@@ -481,6 +485,9 @@ module Muxr
       cur_fg = :unset
       cur_bg = :unset
       cur_attrs = :unset
+      # We close any open hyperlink at end-of-frame, so the outer terminal
+      # always starts a new frame in the "no hyperlink" state.
+      cur_hyperlink = nil
       last_y = nil
       last_x = nil
 
@@ -498,11 +505,17 @@ module Muxr
             cur_bg = cell.bg
             cur_attrs = cell.attrs
           end
+          if cell.hyperlink != cur_hyperlink
+            out << "\e]8;;\e\\" if cur_hyperlink
+            out << "\e]#{cell.hyperlink}\e\\" if cell.hyperlink
+            cur_hyperlink = cell.hyperlink
+          end
           out << cell.char
           last_y = y
           last_x = x + cell.char.length
         end
       end
+      out << "\e]8;;\e\\" if cur_hyperlink
       out << "\e[0m"
       out << cursor_position(session, input_state: input_state, command_buffer: command_buffer)
       out << "\e[?2026l"

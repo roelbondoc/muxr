@@ -112,8 +112,10 @@ module Muxr
       "u"    => :half_up,
       "\x06" => :full_down, # Ctrl-f
       "\x02" => :full_up,   # Ctrl-b
-      "f"    => :full_down,
-      " "    => :full_down
+      "f"    => :full_down
+      # NOTE: space is intentionally absent here — it's a top-level toggle
+      # for linear selection (see handle_selection_input), mirroring vim's
+      # `v` so the right thumb has a one-key way to anchor/release.
     }.freeze
 
     SELECTION_YANK = ["\r", "\n", "y"].freeze
@@ -309,7 +311,7 @@ module Muxr
         return
       end
       case ch
-      when "v"
+      when "v", " "
         @app.toggle_selection(:linear)
         return
       when "\x16" # Ctrl-v

@@ -327,6 +327,16 @@ class TestInputHandler < Minitest::Test
     assert_equal :selection, h.state
   end
 
+  def test_selection_mode_space_toggles_linear
+    # Mirror of `v` so the right thumb can anchor/release without the index
+    # finger jumping off h/j/k/l.
+    h = build_passthrough
+    h.enter_selection_mode
+    h.feed(" ")
+    assert_equal [[:toggle_selection, :linear]], h.instance_variable_get(:@app).calls
+    assert_equal :selection, h.state
+  end
+
   # enter_idle_mode is kept as a legacy alias for the selection-yank
   # exit path in Application; verify it lands the handler back in :normal.
   def test_enter_idle_mode_is_alias_for_normal

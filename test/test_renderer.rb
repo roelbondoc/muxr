@@ -112,4 +112,27 @@ class TestRenderer < Minitest::Test
     assert_equal 38, other.terminal.cols
     assert_equal 9, other.terminal.rows
   end
+
+  # Tiny pane that feeds a wrapping OSC 8 link into its terminal — the
+  # canonical "long URL spans multiple rows" case the passthrough exists for.
+  class WrappedLinkPane < FakePane
+    def initialize
+      super(label: "")
+      @terminal.feed("\e]8;;https://example.com/longpath\e\\AAAAAAAAA\e]8;;\e\\")
+    end
+  end
+
+  def test_osc_8_hyperlink_passthrough_wraps_run_with_one_open_and_close
+    session = Muxr::Session.new(name: "spec", width: 40, height: 12)
+    session.window.add_pane(WrappedLinkPane.new)
+    session.window.set_layout(:monocle)
+    session.window.focused_index = 0
+    output = render(session)
+    # One open with the original payload, exactly one close. Both Ghostty and
+    # kitty merge a wrapped run into a single clickable URL when the
+    # hyperlink stays open across the cursor-positioning emits between cells.
+    assert_includes output, "\e]8;;https://example.com/longpath\e\\"
+    assert_equal 1, output.scan("\e]8;;https://example.com/longpath\e\\").length
+    assert_equal 1, output.scan("\e]8;;\e\\").length
+  end
 end

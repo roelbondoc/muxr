@@ -510,4 +510,56 @@ class TestTerminal < Minitest::Test
     t.selection_cursor_word_forward
     assert_equal [2, 0], t.selection_cursor_visible
   end
+
+  def test_osc_8_hyperlink_stamps_cells_with_payload
+    t = Muxr::Terminal.new(rows: 1, cols: 5)
+    t.feed("\e]8;;https://example.com\e\\link\e]8;;\e\\")
+    payload = t.cell(0, 0).hyperlink
+    assert_equal "8;;https://example.com", payload
+    # All four chars of "link" share the same interned payload object.
+    assert_same payload, t.cell(0, 1).hyperlink
+    assert_same payload, t.cell(0, 2).hyperlink
+    assert_same payload, t.cell(0, 3).hyperlink
+    # Outside the link, no hyperlink is attached.
+    assert_nil t.cell(0, 4).hyperlink
+  end
+
+  def test_osc_8_hyperlink_survives_autowrap
+    # The defining bug: a URL that wraps across rows. After autowrap, the
+    # cells on the second row must still carry the hyperlink so the renderer
+    # can re-wrap them in one OSC 8 region.
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("\e]8;;https://example.com/longpath\e\\abcdef\e]8;;\e\\")
+    assert_equal "8;;https://example.com/longpath", t.cell(0, 0).hyperlink
+    assert_equal t.cell(0, 0).hyperlink, t.cell(1, 0).hyperlink
+    assert_equal "f", t.cell(1, 2).char
+    assert_equal t.cell(0, 0).hyperlink, t.cell(1, 2).hyperlink
+  end
+
+  def test_osc_8_bel_terminator_is_accepted
+    # OSC may be closed by BEL (0x07) instead of ST (ESC \). Older tools
+    # commonly emit the BEL form.
+    t = Muxr::Terminal.new(rows: 1, cols: 3)
+    t.feed("\e]8;;https://x\x07ab\e]8;;\x07c")
+    assert_equal "8;;https://x", t.cell(0, 0).hyperlink
+    assert_equal "8;;https://x", t.cell(0, 1).hyperlink
+    assert_nil t.cell(0, 2).hyperlink
+  end
+
+  def test_osc_8_empty_uri_closes_link
+    t = Muxr::Terminal.new(rows: 1, cols: 3)
+    t.feed("\e]8;;https://x\e\\a\e]8;;\e\\bc")
+    assert_equal "8;;https://x", t.cell(0, 0).hyperlink
+    assert_nil t.cell(0, 1).hyperlink
+    assert_nil t.cell(0, 2).hyperlink
+  end
+
+  def test_osc_8_with_id_preserves_full_payload
+    # An `id=` parameter is the hint terminals use to merge spans across
+    # gaps. Round-trip the whole body so Ghostty (and friends) see what the
+    # source emitted.
+    t = Muxr::Terminal.new(rows: 1, cols: 1)
+    t.feed("\e]8;id=42;https://x\e\\a")
+    assert_equal "8;id=42;https://x", t.cell(0, 0).hyperlink
+  end
 end

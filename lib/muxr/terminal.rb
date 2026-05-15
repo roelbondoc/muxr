@@ -12,6 +12,11 @@ module Muxr
 
     SCROLLBACK_MAX = 5000
 
+    # Cap on the OSC payload we buffer before parsing. URLs in OSC 8 can be
+    # long but rarely exceed a few hundred bytes; 4 KiB lets the parser stay
+    # tolerant of weird inputs without giving an attacker an unbounded sink.
+    OSC_MAX_LEN = 4096
+
     # Inner programs (fzf ≥ 0.41, neovim, helix, …) bracket coherent screen
     # updates with `\e[?2026h … \e[?2026l` (DECSET 2026 — "Synchronized
     # Output"). When we see the open, we know more bytes are coming that
@@ -20,12 +25,13 @@ module Muxr
     # program (which left ?2026h open) cannot wedge the pane indefinitely.
     SYNC_TIMEOUT = 0.2
 
-    Cell = Struct.new(:char, :fg, :bg, :attrs) do
+    Cell = Struct.new(:char, :fg, :bg, :attrs, :hyperlink) do
       def reset!
         self.char = " "
         self.fg = nil
         self.bg = nil
         self.attrs = 0
+        self.hyperlink = nil
       end
 
       def copy_from(other)
@@ -33,6 +39,7 @@ module Muxr
         self.fg = other.fg
         self.bg = other.bg
         self.attrs = other.attrs
+        self.hyperlink = other.hyperlink
       end
     end
 
@@ -53,7 +60,14 @@ module Muxr
       @scroll_bottom = rows - 1
       @parser_state = :ground
       @parser_params = +""
+      @parser_osc = +""
       @feed_remainder = +"".b
+      # Currently-active OSC 8 hyperlink body (the "8;params;URI" payload that
+      # we'll wrap back around runs of cells when rendering), or nil when no
+      # hyperlink is open. Interned via @hyperlink_intern so repeated identical
+      # links share one frozen string for fast equality and small memory.
+      @current_hyperlink = nil
+      @hyperlink_intern = {}
       @dirty = true
       @scrollback = []
       @view_offset = 0
@@ -448,7 +462,25 @@ module Muxr
     private
 
     def blank_cell
-      Cell.new(" ", nil, nil, 0)
+      Cell.new(" ", nil, nil, 0, nil)
+    end
+
+    # Parse the just-completed OSC payload. We only care about OSC 8
+    # (hyperlinks): `8;params;URI`. An empty URI closes the active link.
+    # Anything else (window-title OSC 0/1/2, palette OSC 4, …) is silently
+    # consumed — the emulator doesn't model it.
+    def finalize_osc
+      payload = @parser_osc
+      @parser_osc = +""
+      return if payload.empty?
+      return unless payload.start_with?("8;")
+      parts = payload.split(";", 3)
+      uri = parts[2]
+      if uri.nil? || uri.empty?
+        @current_hyperlink = nil
+      else
+        @current_hyperlink = (@hyperlink_intern[payload] ||= payload.dup.freeze)
+      end
     end
 
     def process_char(ch)
@@ -462,11 +494,18 @@ module Muxr
         csi_char(ch, b)
       when :osc
         if b == 0x07 || b == 0x9c
+          finalize_osc
           @parser_state = :ground
         elsif b == 0x1b
           @parser_state = :osc_esc
+        elsif @parser_osc.bytesize < OSC_MAX_LEN
+          @parser_osc << ch
         end
       when :osc_esc
+        # ST is `ESC \`. Anything else is malformed but we still flush — most
+        # terminals are lenient here, and being strict would swallow the
+        # payload on slightly buggy emitters.
+        finalize_osc
         @parser_state = :ground
       when :charset
         @parser_state = :ground
@@ -505,6 +544,7 @@ module Muxr
         @parser_params = +""
       when 0x5d # ]
         @parser_state = :osc
+        @parser_osc = +""
       when 0x28, 0x29, 0x2a, 0x2b # ( ) * +
         @parser_state = :charset
       when 0x37 # 7  save cursor
@@ -699,6 +739,7 @@ module Muxr
       cell.fg = @fg
       cell.bg = @bg
       cell.attrs = @attrs
+      cell.hyperlink = @current_hyperlink
       if @cursor_col >= @cols - 1
         @autowrap_pending = true
       else
@@ -1020,6 +1061,7 @@ module Muxr
       @scroll_top = 0
       @scroll_bottom = @rows - 1
       @autowrap_pending = false
+      @current_hyperlink = nil
     end
   end
 end
