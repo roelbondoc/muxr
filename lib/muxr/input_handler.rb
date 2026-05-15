@@ -1,17 +1,60 @@
 module Muxr
-  # Translates raw keystrokes into either commands (when the Ctrl-a prefix is
-  # active) or passthrough bytes to the focused pane. The handler is a small
-  # state machine: :idle → :prefix → :idle, with a separate :command branch
-  # for the ":"-driven mini-command line.
+  # Translates raw keystrokes into either commands or pane input. Two top-level
+  # modes:
+  #
+  #   :normal       Default. Single-key bindings (hjkl navigation, t/g/m for
+  #                 layouts, c/K for create/kill, etc.) act directly without
+  #                 any prefix. `i` drops into passthrough.
+  #
+  #   :passthrough  Historical mode: every key is forwarded to the focused
+  #                 pane unless prefixed by Ctrl-a. `Ctrl-a Esc` returns to
+  #                 normal mode.
+  #
+  # Plus the sub-states pre-existing from before modes existed:
+  #   :prefix, :command, :confirm_quit, :help, :scrollback, :selection.
+  #
+  # One-shot sub-states (prefix, command, confirm_quit, help) return to
+  # @base_mode (whichever of :normal/:passthrough is active) when they
+  # finish. :scrollback and :selection always return to :normal because the
+  # spec says scrollback exits to normal regardless of where you entered it.
   class InputHandler
     PREFIX = "\x01".freeze # Ctrl-a
+
+    # Single-key bindings in normal mode. Same actions as their Ctrl-a-
+    # prefixed counterparts in passthrough, just without the prefix.
+    # Value forms:
+    #   :symbol            → @app.public_send(:symbol)
+    #   [:symbol, *args]   → @app.public_send(:symbol, *args)
+    NORMAL_BINDINGS = {
+      "c"  => :new_pane,
+      "K"  => :close_focused,
+      "t"  => [:set_layout, :tall],
+      "g"  => [:set_layout, :grid],
+      "m"  => [:set_layout, :monocle],
+      "\t" => :cycle_layout,
+      "\r" => :promote_master,
+      "\n" => :promote_master,
+      "h"  => [:focus_direction, :left],
+      "j"  => [:focus_direction, :down],
+      "k"  => [:focus_direction, :up],
+      "l"  => [:focus_direction, :right],
+      "a"  => :focus_last,
+      "~"  => :toggle_drawer,
+      "C"  => :toggle_claude_drawer,
+      "P"  => :toggle_private_focused,
+      "d"  => :detach,
+      "?"  => :show_help,
+      "q"  => :quit_immediate,
+      "s"  => :enter_scrollback,
+      "]"  => :paste_from_buffer
+    }.freeze
 
     PREFIX_BINDINGS = {
       "c"    => :new_pane,
       "n"    => :focus_next,
       "p"    => :focus_prev,
       "a"    => :focus_last,
-      "k"    => :close_focused,
+      "K"    => :close_focused,
       "\t"   => :cycle_layout,
       "\r"   => :promote_master,
       "\n"   => :promote_master,
@@ -78,22 +121,22 @@ module Muxr
 
     DIGIT_RE = /\A[1-9]\z/.freeze
 
-    attr_reader :state, :command_buffer
+    attr_reader :state, :command_buffer, :base_mode
 
     def initialize(app)
       @app = app
-      @state = :idle
+      @state = :normal
+      @base_mode = :normal
       @command_buffer = +""
     end
 
     def feed(data)
       remaining = data
       until remaining.empty?
-        if @state == :idle
-          # Fast path for pass-through: forward everything up to the next
-          # Ctrl-a as a single chunk so a large paste doesn't turn into one
-          # PTY write per byte. PREFIX is single-byte ASCII (\x01) and never
-          # appears mid-UTF-8, so byte/char index match.
+        if @state == :passthrough
+          # Fast path: batch everything up to the next Ctrl-a as one chunk so
+          # a large paste doesn't turn into one PTY write per byte. PREFIX is
+          # single-byte ASCII (\x01) and never appears mid-UTF-8.
           idx = remaining.index(PREFIX)
           if idx.nil?
             @app.send_to_focused(remaining)
@@ -108,9 +151,11 @@ module Muxr
         ch = remaining[0]
         remaining = remaining[1..] || ""
         case @state
+        when :normal
+          handle_normal(ch)
         when :help
           @app.dismiss_help
-          @state = :idle
+          @state = @base_mode
         when :confirm_quit
           handle_confirm_quit(ch)
         when :prefix
@@ -141,40 +186,96 @@ module Muxr
       @state = :selection
     end
 
+    # Drop into passthrough — every key reaches the focused pane until the
+    # user issues Ctrl-a Esc.
+    def enter_passthrough_mode
+      @state = :passthrough
+      @base_mode = :passthrough
+    end
+
+    # Return to normal mode. Used by:
+    #   * the `Ctrl-a Esc` binding from passthrough,
+    #   * scrollback/selection exits (spec: scrollback returns to normal),
+    #   * a successful yank from selection (via the legacy enter_idle_mode alias).
+    def enter_normal_mode
+      @state = :normal
+      @base_mode = :normal
+    end
+
+    # Legacy alias kept so Application#exit_selection(yank: true) doesn't
+    # need to change. Semantically equivalent to enter_normal_mode.
     def enter_idle_mode
-      @state = :idle
+      enter_normal_mode
     end
 
     def cancel
-      @state = :idle
+      @state = @base_mode
       @command_buffer = +""
     end
 
     private
 
+    def handle_normal(ch)
+      if ch == "i"
+        # Internal state flip happens here so a bare FakeApp in tests still
+        # transitions; the Application callback redundantly flips state
+        # (idempotent) and adds the user-visible flash.
+        enter_passthrough_mode
+        @app.enter_passthrough_mode
+        return
+      end
+      if ch == ":"
+        @state = :command
+        @command_buffer = +""
+        return
+      end
+      if DIGIT_RE.match?(ch)
+        @app.focus_pane_number(ch.to_i)
+        return
+      end
+
+      action = NORMAL_BINDINGS[ch]
+      case action
+      when Symbol
+        @app.public_send(action)
+      when Array
+        @app.public_send(*action)
+      end
+      # Unknown key: ignore. Avoids accidental side-effects when the user
+      # mistypes — same rationale as scrollback mode.
+    end
+
     def handle_prefix(ch)
       action = PREFIX_BINDINGS[ch]
       case
+      when ch == "\e"
+        # Ctrl-a Esc → return to normal mode. Flip state directly so tests
+        # with a bare FakeApp transition; the Application callback is
+        # idempotent and adds the flash message.
+        enter_normal_mode
+        @app.enter_normal_mode
       when ch == ":"
         @state = :command
         @command_buffer = +""
       when ch == PREFIX
         @app.send_to_focused(PREFIX)
-        @state = :idle
+        @state = @base_mode
       when DIGIT_RE.match?(ch)
         @app.focus_pane_number(ch.to_i)
-        @state = :idle
+        @state = @base_mode
       when action
         @app.public_send(action)
-        @state = :idle if @state == :prefix
+        # The action may have set a new state (confirm_quit, scrollback,
+        # help). Only revert to base mode if we're still in :prefix.
+        @state = @base_mode if @state == :prefix
       else
-        # Unknown prefix-key: return to idle silently.
-        @state = :idle
+        # Unknown prefix key: return to base mode silently.
+        @state = @base_mode
       end
     end
 
     def handle_confirm_quit(ch)
-      @state = :idle
+      @state = @base_mode
       if ch == "y" || ch == "Y"
         @app.confirm_quit
       else
@@ -184,7 +285,7 @@ module Muxr
 
     def handle_scrollback_input(ch)
       if SCROLLBACK_EXITS.include?(ch)
-        @state = :idle
+        enter_normal_mode
         @app.exit_scrollback
         return
       end
@@ -225,11 +326,11 @@ module Muxr
       when "\r", "\n"
         cmd = @command_buffer.dup
         @command_buffer = +""
-        @state = :idle
+        @state = @base_mode
         @app.run_command(cmd)
       when "\e"
         @command_buffer = +""
-        @state = :idle
+        @state = @base_mode
         @app.invalidate
       when "\x7f", "\b"
         @command_buffer.chop!

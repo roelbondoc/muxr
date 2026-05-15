@@ -87,5 +87,64 @@ module Muxr
     def monocle(count, area, _focused_index = 0)
       Array.new(count) { Rect.new(area.x, area.y, area.w, area.h) }
     end
+
+    # Return the index of the closest pane in `direction` (:left/:right/:up/:down)
+    # from the focused pane. Pure function over the rect list — does not know
+    # about the layout that produced the rects.
+    #
+    # Selection rule: among panes strictly on the requested side, prefer the
+    # one with the largest perpendicular overlap with the focused pane;
+    # tie-break by smallest axis-distance, then by smallest center offset.
+    # Returns nil when nothing qualifies (e.g. focused is the rightmost pane
+    # and direction is :right, or monocle where every rect is identical).
+    def neighbor(rects, focused_index, direction)
+      return nil if rects.nil? || rects.empty?
+      return nil unless focused_index.is_a?(Integer)
+      return nil unless focused_index.between?(0, rects.length - 1)
+      focused = rects[focused_index]
+      return nil unless focused
+
+      best = nil
+      rects.each_with_index do |rect, idx|
+        next if idx == focused_index || rect.nil?
+
+        case direction
+        when :right
+          next unless rect.x >= focused.x + focused.w
+          axis_dist = rect.x - (focused.x + focused.w)
+          overlap   = overlap_extent(focused.y, focused.h, rect.y, rect.h)
+          center    = ((rect.y + rect.h / 2.0) - (focused.y + focused.h / 2.0)).abs
+        when :left
+          next unless rect.x + rect.w <= focused.x
+          axis_dist = focused.x - (rect.x + rect.w)
+          overlap   = overlap_extent(focused.y, focused.h, rect.y, rect.h)
+          center    = ((rect.y + rect.h / 2.0) - (focused.y + focused.h / 2.0)).abs
+        when :down
+          next unless rect.y >= focused.y + focused.h
+          axis_dist = rect.y - (focused.y + focused.h)
+          overlap   = overlap_extent(focused.x, focused.w, rect.x, rect.w)
+          center    = ((rect.x + rect.w / 2.0) - (focused.x + focused.w / 2.0)).abs
+        when :up
+          next unless rect.y + rect.h <= focused.y
+          axis_dist = focused.y - (rect.y + rect.h)
+          overlap   = overlap_extent(focused.x, focused.w, rect.x, rect.w)
+          center    = ((rect.x + rect.w / 2.0) - (focused.x + focused.w / 2.0)).abs
+        else
+          return nil
+        end
+
+        score = [-overlap, axis_dist, center]
+        if best.nil? || (score <=> best[0]) < 0
+          best = [score, idx]
+        end
+      end
+      best && best[1]
+    end
+
+    def overlap_extent(a_start, a_size, b_start, b_size)
+      finish = [a_start + a_size, b_start + b_size].min
+      start  = [a_start, b_start].max
+      [finish - start, 0].max
+    end
   end
 end

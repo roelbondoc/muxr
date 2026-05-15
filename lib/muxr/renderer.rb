@@ -46,7 +46,7 @@ module Muxr
       @prev = nil
     end
 
-    def render(session, input_state: :idle, command_buffer: "", message: nil, help: false)
+    def render(session, input_state: :normal, command_buffer: "", message: nil, help: false)
       w = session.width
       h = session.height
       return if w < 4 || h < 3
@@ -153,6 +153,23 @@ module Muxr
       copy_terminal(frame, drawer.pane, rect.x + 1, rect.y + 1)
     end
 
+    # Two-letter-ish mode label shown in the leftmost slot of the status bar.
+    # Lets the user see at a glance whether single-key bindings are active
+    # (NORMAL) or every key passes through to the focused pane (PASS).
+    def mode_label(input_state)
+      case input_state
+      when :normal       then "NORMAL"
+      when :passthrough  then "PASS"
+      when :prefix       then "^A"
+      when :command      then "CMD"
+      when :scrollback   then "SCROLL"
+      when :selection    then "SEL"
+      when :confirm_quit then "QUIT?"
+      when :help         then "HELP"
+      else                    "?"
+      end
+    end
+
     def compose_status_bar(frame, session, input_state:, command_buffer:, message:)
       y = session.height - 1
       w = session.width
@@ -163,7 +180,8 @@ module Muxr
         else                                  "hidden"
         end
 
-      left = " [#{session.name}]"
+      left = " [#{mode_label(input_state)}]"
+      left << " [#{session.name}]"
       left << " panes:#{win.panes.length}"
       left << " layout:#{win.layout}"
       focused_label =
@@ -265,28 +283,33 @@ module Muxr
     HELP_LINES = [
       "muxr — keybindings",
       "",
-      "  C-a c       new pane",
-      "  C-a n / p   next / prev pane",
-      "  C-a a       toggle to previously focused pane",
-      "  C-a 1..9    jump to pane by number",
-      "  C-a k       close focused pane",
-      "  C-a Tab     cycle layout (tall → grid → monocle)",
-      "  C-a Enter   promote focused pane to master",
-      "  C-a ~       toggle drawer (shell)",
-      "  C-a C       toggle Claude Code drawer (MCP-aware)",
-      "  C-a P       toggle private flag on focused pane (hides from MCP)",
-      "  C-a [       enter scrollback (j/k d/u f g/G C-b/C-f; v→cursor, q quits)",
-      "              cursor: v select, C-v block, y yank, q cancel",
-      "              motions: h/j/k/l 0/^/$ w/e/b W/E/B H/M/L g/G",
-      "  C-a ]       paste internal copy buffer",
-      "  C-a d       detach (server keeps running)",
-      "  C-a q       kill session (asks y/n)",
-      "  C-a :       command prompt",
-      "  C-a ?       toggle this help",
-      "  C-a C-a     send literal C-a",
+      "NORMAL mode (default; no prefix)",
+      "  h / j / k / l   focus pane left / down / up / right",
+      "  i               drop into passthrough mode",
+      "  c / K           new / close pane",
+      "  t / g / m       layout: tall / grid / monocle",
+      "  Tab / Enter     cycle layout / promote to master",
+      "  a / 1..9        last pane / jump by number",
+      "  s               enter scrollback",
+      "  ~ / C / P       drawer / Claude drawer / toggle private",
+      "  : / ?           command prompt / toggle this help",
+      "  ] / d / q       paste buffer / detach / kill session",
       "",
-      "Commands: layout {tall|grid|monocle}, drawer {toggle|show|hide|reset}, claude,",
-      "          save, restore, sessions, quit, new, close, next, prev",
+      "PASSTHROUGH mode (keys reach the focused pane; prefix is Ctrl-a)",
+      "  C-a Esc         return to normal mode",
+      "  C-a c K t g m   same as normal-mode bindings",
+      "  C-a Tab Enter   cycle layout / promote master",
+      "  C-a n / p / a   next / prev / last pane",
+      "  C-a [ ]         scrollback / paste buffer",
+      "  C-a C-a         send literal Ctrl-a to focused pane",
+      "",
+      "SCROLLBACK mode (exits to NORMAL)",
+      "  j/k d/u f/b g/G  scroll  C-b/C-f page  v→cursor",
+      "  cursor: h/j/k/l 0/^/$ w/e/b W/E/B H/M/L g/G",
+      "          v select, C-v block, y/Enter yank, q/Esc cancel",
+      "",
+      "Commands: layout {tall|grid|monocle}, drawer {toggle|show|hide|reset},",
+      "          claude, save, restore, sessions, quit, new, close, next, prev",
       "",
       "press any key to dismiss"
     ].freeze

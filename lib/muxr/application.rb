@@ -141,6 +141,60 @@ module Muxr
       invalidate
     end
 
+    # Move focus to the pane spatially adjacent in `direction` (:left/:right/
+    # :up/:down). Called by the normal-mode hjkl bindings. Pulling the live
+    # layout rects keeps this in sync with whatever the renderer is showing.
+    # Monocle has no meaningful direction (every rect is identical) so we
+    # fall back to linear nav so hjkl still does something.
+    def focus_direction(direction)
+      return if @session.window.panes.empty?
+      if @session.focus_drawer && @session.drawer&.visible?
+        @session.focus_drawer = false
+        invalidate
+        return
+      end
+
+      win = @session.window
+      idx = LayoutManager.neighbor(current_pane_rects, win.focused_index, direction)
+      if idx.nil? && win.layout == :monocle
+        case direction
+        when :right, :down then win.focus_next
+        when :left, :up    then win.focus_prev
+        end
+        invalidate
+        return
+      end
+
+      return unless idx
+      win.focus_index(idx)
+      invalidate
+    end
+
+    # Explicit layout set, used by the normal-mode t/g/m bindings and the
+    # `:layout <name>` command.
+    def set_layout(layout)
+      @session.window.set_layout(layout)
+      flash("layout: #{@session.window.layout}")
+      invalidate
+    rescue ArgumentError => e
+      flash(e.message)
+    end
+
+    # Bound to `i` in normal mode — drops the user into the historical
+    # Ctrl-a-prefixed multiplexer mode.
+    def enter_passthrough_mode
+      @input.enter_passthrough_mode
+      flash("passthrough mode (^a esc to return)")
+      invalidate
+    end
+
+    # Bound to `Ctrl-a Esc` from passthrough — return to normal mode.
+    def enter_normal_mode
+      @input.enter_normal_mode
+      flash("normal mode")
+      invalidate
+    end
+
     def close_focused
       if @session.focus_drawer && @session.drawer&.visible?
         hide_drawer
@@ -484,6 +538,20 @@ module Muxr
       else
         focused_pane
       end
+    end
+
+    # Live pane rects for the current layout/size, computed the same way the
+    # Renderer does so spatial neighbor lookup matches what the user sees.
+    def current_pane_rects
+      win = @session.window
+      area = LayoutManager::Rect.new(0, 0, @session.width, @session.height - 1)
+      LayoutManager.compute(
+        win.layout,
+        win.panes.length,
+        area,
+        focused_index: win.focused_index,
+        master_index: win.master_index
+      )
     end
 
     def focused_pane

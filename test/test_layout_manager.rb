@@ -83,4 +83,71 @@ class TestLayoutManager < Minitest::Test
       Muxr::LayoutManager.compute(:tabbed, 2, @area)
     end
   end
+
+  # ---------- spatial neighbor lookup (powers hjkl in normal mode) ----------
+
+  def test_neighbor_returns_nil_for_empty_or_missing_focused
+    assert_nil Muxr::LayoutManager.neighbor([], 0, :right)
+    assert_nil Muxr::LayoutManager.neighbor(nil, 0, :right)
+    rects = Muxr::LayoutManager.compute(:tall, 2, @area)
+    assert_nil Muxr::LayoutManager.neighbor(rects, 99, :right)
+  end
+
+  def test_neighbor_tall_two_panes_master_right_goes_to_slave
+    rects = Muxr::LayoutManager.compute(:tall, 2, @area)
+    assert_equal 1, Muxr::LayoutManager.neighbor(rects, 0, :right)
+    # And the reverse.
+    assert_equal 0, Muxr::LayoutManager.neighbor(rects, 1, :left)
+  end
+
+  def test_neighbor_tall_three_panes_picks_vertically_overlapping_slave
+    # Master full-height; two slaves stacked. From master, :right should
+    # prefer the slave whose y-range overlaps the focused y-range more.
+    # With master at y=0..24, both slaves overlap fully, so tie goes to the
+    # top one (first in the list).
+    rects = Muxr::LayoutManager.compute(:tall, 3, @area)
+    assert_equal 1, Muxr::LayoutManager.neighbor(rects, 0, :right)
+    # j (down) from top slave goes to bottom slave.
+    assert_equal 2, Muxr::LayoutManager.neighbor(rects, 1, :down)
+    # k (up) from bottom slave goes to top slave.
+    assert_equal 1, Muxr::LayoutManager.neighbor(rects, 2, :up)
+    # h (left) from either slave goes back to the master.
+    assert_equal 0, Muxr::LayoutManager.neighbor(rects, 1, :left)
+    assert_equal 0, Muxr::LayoutManager.neighbor(rects, 2, :left)
+  end
+
+  def test_neighbor_returns_nil_at_edges
+    rects = Muxr::LayoutManager.compute(:tall, 2, @area)
+    # Master has no pane to its left.
+    assert_nil Muxr::LayoutManager.neighbor(rects, 0, :left)
+    # Slave has no pane to its right.
+    assert_nil Muxr::LayoutManager.neighbor(rects, 1, :right)
+    # Two-pane tall has nothing above master.
+    assert_nil Muxr::LayoutManager.neighbor(rects, 0, :up)
+  end
+
+  def test_neighbor_grid_2x2
+    # Layout: 0 1 / 2 3 (rows). From 0 right→1, down→2, etc.
+    rects = Muxr::LayoutManager.compute(:grid, 4, @area)
+    assert_equal 1, Muxr::LayoutManager.neighbor(rects, 0, :right)
+    assert_equal 2, Muxr::LayoutManager.neighbor(rects, 0, :down)
+    assert_equal 0, Muxr::LayoutManager.neighbor(rects, 1, :left)
+    assert_equal 3, Muxr::LayoutManager.neighbor(rects, 1, :down)
+    assert_equal 0, Muxr::LayoutManager.neighbor(rects, 2, :up)
+    assert_equal 3, Muxr::LayoutManager.neighbor(rects, 2, :right)
+    assert_equal 2, Muxr::LayoutManager.neighbor(rects, 3, :left)
+    assert_equal 1, Muxr::LayoutManager.neighbor(rects, 3, :up)
+  end
+
+  def test_neighbor_monocle_returns_nil_for_all_directions
+    rects = Muxr::LayoutManager.compute(:monocle, 3, @area)
+    %i[left right up down].each do |dir|
+      assert_nil Muxr::LayoutManager.neighbor(rects, 0, dir), "expected nil for #{dir}"
+    end
+  end
+
+  def test_neighbor_unknown_direction_returns_nil
+    rects = Muxr::LayoutManager.compute(:tall, 2, @area)
+    assert_nil Muxr::LayoutManager.neighbor(rects, 0, :diagonal)
+  end
 end
