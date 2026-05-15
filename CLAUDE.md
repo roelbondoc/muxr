@@ -51,7 +51,7 @@ A few things that are not obvious until you've debugged them:
 
 - **`FramedOutput` (nested in `Application`)** is the Renderer's `out:` sink. It packages each Renderer `write` as one `OUTPUT` frame on the attached client. When no client is attached, render is skipped entirely — PTY data still gets drained so Terminal grids stay current, and the first frame after re-attach is forced to be a full repaint via `Renderer#reset_frame!`.
 
-- **Event loop is single-threaded `IO.select`** over the listening socket, the attached client socket (when present), every pane PTY, and the drawer PTY (when present). All PTY reads feed into the destination pane's `Terminal#feed`. Nothing happens off the main thread.
+- **Event loop is single-threaded `IO.select`** over the listening socket, the attached client socket (when present), every pane PTY, and the drawer PTY (when present). All PTY reads feed into the destination pane's `Terminal#feed`. The only off-main-thread work is `Application#start_foreground_poller`, which polls each pane's foreground command every `FOREGROUND_POLL_INTERVAL` (~750ms) and writes the result back to `pane.foreground_command`. Atomic pointer writes under the GVL mean the renderer's per-frame read needs no lock.
 
 - **`Terminal` is a real VT100 emulator**, not a line buffer. It maintains a `rows × cols` grid of `Cell` (char + fg + bg + attrs) plus cursor and scroll region. It handles CSI cursor movement, SGR (16-color, 256-color, truecolor), erase/insert/delete, autowrap, and scroll regions. UTF-8 bytes are buffered across PTY read boundaries via `@feed_remainder`.
 
@@ -68,6 +68,8 @@ A few things that are not obvious until you've debugged them:
 - **`Window#promote_to_master`** does NOT just swap indices — it moves the focused pane to position 0 in `@panes` and resets both indices to 0. This keeps tall/grid layouts visually stable (master is always `panes[0]`).
 
 - **`PTYProcess#cwd`** uses `/proc/<pid>/cwd` on Linux and falls back to `lsof -a -p PID -d cwd` on macOS/BSD. The lsof path is **synchronous and slow** (~100–300ms on macOS) — it runs on the event-loop thread when creating a new pane or saving a session. Don't add new callers without thinking about it.
+
+- **`ForegroundCommand.lookup(pid)`** is the moral cousin of `PTYProcess#cwd`: Linux reads `/proc/<pid>/stat` cheaply; macOS shells out to `ps -o tpgid=,pgid= -p <pid>` (and another `ps -o comm= -p <tpgid>`). Each macOS call is ~10–20ms × every pane × 750ms tick. It runs on `@foreground_poller` so the event loop is unaffected, but don't move it back to the main thread.
 
 ## Testing patterns
 

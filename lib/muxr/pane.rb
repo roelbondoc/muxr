@@ -14,6 +14,11 @@ module Muxr
   class Pane
     attr_reader :id, :terminal, :process
     attr_accessor :rect
+    # Last value written by Application's foreground poller thread. nil when
+    # the shell itself is foreground (the common empty-prompt case) or when
+    # the lookup hasn't run / couldn't read. Renderer surfaces this in the
+    # pane title.
+    attr_accessor :foreground_command
 
     def initialize(id: nil, rows: 24, cols: 80, cwd: nil, command: nil, env_overrides: nil, process: nil)
       @id = id || SecureRandom.hex(3)
@@ -30,6 +35,11 @@ module Muxr
       @rect = nil
       @initial_cwd = cwd || @process.cwd
       @private_flag = false
+      @foreground_command = nil
+    end
+
+    def pid
+      @process.pid
     end
 
     # Private panes are invisible to the MCP control surface — their cwd is

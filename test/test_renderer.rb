@@ -55,13 +55,50 @@ class TestRenderer < Minitest::Test
     refute_includes output, "BBB"
   end
 
-  def test_monocle_title_shows_position_and_mode
+  def test_monocle_title_shows_position_and_mode_chip
     session = build_session(layout: :monocle, focused_index: 1)
     output = render(session)
     assert_includes output, "#2/3"
-    # The layout name lives in the status bar now; the focused-pane title
-    # carries the mode indicator instead.
-    assert_includes output, "[NORMAL]"
+    # The mode chip lives in the top-right corner of the focused pane,
+    # not in the title. After stripping ANSI escapes, the visual layout
+    # of the top border should put #2/3 on the left and [NORMAL] on the
+    # right (with the mode chip closer to the closing corner).
+    plain = output.gsub(/\e\[[?0-9;]*[a-zA-Z]/, "")
+    top = plain.lines.first
+    pane_idx = top.index("#2/3")
+    chip_idx = top.index("[NORMAL]")
+    refute_nil pane_idx
+    refute_nil chip_idx
+    assert chip_idx > pane_idx, "mode chip should be to the right of the pane label"
+  end
+
+  # The Renderer treats foreground_command as optional (FakePane doesn't
+  # define it); when it IS present, the value should appear after the mode
+  # chip, separated by " · ".
+  class FakePaneWithCommand < FakePane
+    attr_accessor :foreground_command
+    def initialize(label:, command: nil)
+      super(label: label)
+      @foreground_command = command
+    end
+  end
+
+  def test_title_shows_foreground_command_after_mode
+    session = Muxr::Session.new(name: "spec", width: 60, height: 12)
+    session.window.add_pane(FakePaneWithCommand.new(label: "X", command: "npm test"))
+    session.window.set_layout(:monocle)
+    session.window.focused_index = 0
+    output = render(session)
+    assert_includes output, "· npm test"
+  end
+
+  def test_title_omits_separator_when_no_foreground_command
+    session = Muxr::Session.new(name: "spec", width: 60, height: 12)
+    session.window.add_pane(FakePaneWithCommand.new(label: "X", command: nil))
+    session.window.set_layout(:monocle)
+    session.window.focused_index = 0
+    output = render(session)
+    refute_includes output, " · "
   end
 
   def test_non_focused_panes_still_get_resized_in_monocle

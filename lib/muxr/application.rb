@@ -72,7 +72,14 @@ module Muxr
       @control_server = nil
       @paste_buffer = +""
       @last_render_at = nil
+      @foreground_poller = nil
     end
+
+    # Interval for the background thread that refreshes each pane's
+    # foreground-command label. Picked to feel responsive (a long-running
+    # `npm test` shows up within a second of starting) without burning CPU
+    # on macOS, where each tick costs a `ps` fork+exec per pane.
+    FOREGROUND_POLL_INTERVAL = 0.75
 
     attr_reader :paste_buffer
 
@@ -585,9 +592,11 @@ module Muxr
       restore_panes_if_saved(saved) if saved
 
       @running = true
+      start_foreground_poller
     end
 
     def teardown
+      stop_foreground_poller
       disconnect_client
       @control_server&.stop
       @control_server = nil
@@ -864,6 +873,55 @@ module Muxr
     # Fire-and-forget pipe to pbcopy. Runs on its own thread so even a slow
     # macOS pbcopy doesn't stall the event loop. Silent when pbcopy is absent
     # (Linux/headless) — selection still goes to the internal buffer.
+    # Background thread that walks every pane and writes its foreground
+    # command back onto pane.foreground_command. Lives off the event loop
+    # because the macOS `ps` path is fork+exec'y; on Linux the procfs reads
+    # would be fast enough on the main thread but a single code path is
+    # easier to reason about. Atomic pointer writes (MRI GVL) mean we don't
+    # need a lock for the renderer's per-frame read.
+    def start_foreground_poller
+      return if @foreground_poller
+      @foreground_poller = Thread.new do
+        while @running
+          begin
+            poll_foreground_commands
+          rescue StandardError
+            # Never let a poller crash kill the server. If the lookup keeps
+            # failing the titles just won't show commands — that's fine.
+          end
+          sleep FOREGROUND_POLL_INTERVAL
+        end
+      end
+    end
+
+    def stop_foreground_poller
+      thread = @foreground_poller
+      @foreground_poller = nil
+      return unless thread
+      # @running has already been flipped off; the thread exits on its next
+      # wake. join with a small timeout so we don't hang teardown if the
+      # thread is mid-`ps`.
+      thread.join(2.0) || thread.kill
+    end
+
+    def poll_foreground_commands
+      # Snapshot so add/remove on the main thread can't trip us mid-iter.
+      panes = @session.window.panes.dup
+      drawer_pane = @session.drawer&.pane
+      panes << drawer_pane if drawer_pane
+      changed = false
+      panes.each do |pane|
+        next unless pane.alive?
+        next unless pane.respond_to?(:pid) && pane.pid
+        name = ForegroundCommand.lookup(pane.pid)
+        if pane.foreground_command != name
+          pane.foreground_command = name
+          changed = true
+        end
+      end
+      invalidate if changed
+    end
+
     def spawn_pbcopy(text)
       Thread.new do
         IO.popen("pbcopy", "w") { |io| io.write(text) }

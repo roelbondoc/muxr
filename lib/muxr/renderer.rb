@@ -71,7 +71,7 @@ module Muxr
       frame = Array.new(h) { Array.new(w) { Cell.new(" ", nil, nil, 0) } }
 
       compose_panes(frame, session, input_state: input_state)
-      compose_drawer(frame, session) if session.drawer&.visible?
+      compose_drawer(frame, session, input_state: input_state) if session.drawer&.visible?
       compose_status_bar(frame, session, input_state: input_state, command_buffer: command_buffer, message: message)
       compose_help(frame, session) if help
 
@@ -116,11 +116,14 @@ module Muxr
         title += " #{pane.id}" if pane.respond_to?(:id) && pane.id.is_a?(String)
         title += " [P]" if pane.respond_to?(:private?) && pane.private?
         title += " ★" if i == win.master_index
-        # Show the active input mode next to the focused pane so the user
-        # doesn't have to glance down at the status bar to know whether a
-        # keystroke will reach the shell or be intercepted by muxr. The
-        # layout name lives in the status bar.
-        title += " [" + mode_label(input_state) + "]" if i == win.focused_index
+        # Foreground command (e.g. "npm test", "vim"). Set by the poller
+        # thread; nil when the shell itself is foreground. Truncate so a
+        # long invocation doesn't push the title past what draw_box will
+        # render — draw_box silently drops titles that don't fit.
+        if pane.respond_to?(:foreground_command) && pane.foreground_command
+          cmd = pane.foreground_command.to_s[0, 16]
+          title += " · #{cmd}"
+        end
         if pane.terminal.scrolled_back?
           title += " [scrollback #{pane.terminal.view_offset}/#{pane.terminal.scrollback_size}]"
         end
@@ -129,11 +132,16 @@ module Muxr
                  bold_border: focused,
                  title: title,
                  title_focused: focused)
+        # Mode chip lives in the top-right corner of the focused container
+        # (this pane, or the drawer — see compose_drawer). Showing it on
+        # the same edge as the title but on the opposite side keeps both
+        # readable without one crowding the other.
+        draw_mode_chip(frame, rect, input_state, title) if focused
         copy_terminal(frame, pane, rect.x + 1, rect.y + 1)
       end
     end
 
-    def compose_drawer(frame, session)
+    def compose_drawer(frame, session, input_state: :normal)
       drawer = session.drawer
       return unless drawer&.pane
 
@@ -171,11 +179,28 @@ module Muxr
                bold_border: true,
                title: title,
                title_focused: focused)
+      draw_mode_chip(frame, rect, input_state, title) if focused
       copy_terminal(frame, drawer.pane, rect.x + 1, rect.y + 1)
     end
 
     def mode_color(input_state)
       MODE_COLOR[input_state] || BORDER_FOCUSED
+    end
+
+    # Paint the " [MODE] " chip on the top border, hugging the right corner.
+    # Skipped when there isn't at least one column of breathing room between
+    # the title (anchored at the top-left) and the chip — otherwise long
+    # titles + a wide chip would overdraw each other and produce garbage.
+    def draw_mode_chip(frame, rect, input_state, title)
+      chip = " [#{mode_label(input_state)}] "
+      chip_start = rect.x + rect.w - 1 - chip.length
+      title_text = " #{title} "
+      title_end = rect.x + 2 + title_text.length - 1
+      return if chip_start <= title_end + 1
+      chip_color = mode_color(input_state)
+      chip.each_char.with_index do |ch, j|
+        set_cell(frame, rect.y, chip_start + j, ch, fg: chip_color, attrs: Terminal::BOLD)
+      end
     end
 
     # Two-letter-ish mode label shown in the leftmost slot of the status bar.
