@@ -7,17 +7,17 @@ like tiling-window-manager clients — you never resize them by hand;
 the active layout decides geometry.
 
 ```
-┌ #1 a3f9b2 ★ (tall) ───────┬ #2 c2e810 ───────────────────┐
-│ master pane               │ stacked slave pane           │
-│                           │                              │
-│                           ├──────────────────────────────┤
-│                           │ #3 9b1d04 [P]                │
-│                           │ private pane (MCP-hidden)    │
-└───────────────────────────┴──────────────────────────────┘
-┌ Drawer ─────────────────────────────────────────────────┐
-│ persistent overlay shell, opens from the bottom         │
-└─────────────────────────────────────────────────────────┘
- [default] panes:3 layout:tall focused:#1 drawer:shown     muxr ^a ?
+┌─ #1 a3f9b2 ★ · npm test ──── [NORMAL] ─┬─ #2 c2e810 ──────────────┐
+│ master pane (running npm test)         │ stacked slave pane       │
+│                                        │                          │
+│                                        ├──────────────────────────┤
+│                                        │ #3 9b1d04 [P]            │
+│                                        │ private pane (MCP-hidden)│
+└────────────────────────────────────────┴──────────────────────────┘
+┌ Drawer ────────────────────────────────────────────────────────────┐
+│ persistent overlay shell, opens from the bottom                    │
+└────────────────────────────────────────────────────────────────────┘
+ [NORMAL] [default] panes:3 layout:tall focused:#1 drawer:shown   muxr ^a ?
 ```
 
 Each pane shows its slot (`#1`, `#2`, …) plus a stable 6-hex id
@@ -25,11 +25,15 @@ Each pane shows its slot (`#1`, `#2`, …) plus a stable 6-hex id
 killed, or promoted; the id is generated once and survives layout
 changes, detach/reattach, and cold-restart from the session JSON. `[P]`
 marks a private pane that the MCP control surface refuses to read or
-drive (see [MCP control surface](#mcp-control-surface) below).
+drive (see [MCP control surface](#mcp-control-surface) below). The
+focused pane's title shows the foreground command running in its PTY
+(e.g. `· npm test`) when something other than the shell is in the
+foreground, and the `[NORMAL]` chip in the top-right corner — along
+with the border color — tracks the current [input mode](#modes).
 
 ## Screenshots
 
-The three built-in layouts (cycle with `C-a Tab`):
+The three built-in layouts (pick directly with `t`/`g`/`m` in normal mode, or cycle with `Tab` / `C-a Tab`):
 
 <table>
   <tr>
@@ -44,7 +48,7 @@ The three built-in layouts (cycle with `C-a Tab`):
   </tr>
 </table>
 
-The Quake-style drawer overlay (`C-a ~`):
+The Quake-style drawer overlay (`~` in normal mode, `C-a ~` in passthrough):
 
 ![drawer overlay](docs/screenshots/04-drawer.png)
 
@@ -64,9 +68,9 @@ Requires **Ruby ≥ 3.4**. No runtime gems — just `PTY`, `IO.console`, `JSON`,
 
 `muxr` is the client. The first invocation for a session daemonizes a
 server in the background; subsequent invocations attach to it over a Unix
-socket. `Ctrl-a d` detaches the client and leaves the server (and every
-shell it owns) running, so reattaching gives you back the exact same panes
-with their full history.
+socket. `d` (normal mode) / `C-a d` (passthrough) detaches the client
+and leaves the server (and every shell it owns) running, so reattaching
+gives you back the exact same panes with their full history.
 
 ### From source
 
@@ -79,15 +83,58 @@ cd muxr
 bin/muxr                 # same flags as the installed `muxr` executable
 ```
 
-## Keybindings (Ctrl-a prefix)
+## Modes
+
+muxr has two top-level input modes, modeled on vim:
+
+- **Normal** (default at startup) — single keys act on the multiplexer.
+  `hjkl` moves focus between panes, `c`/`K` create/kill panes,
+  `t`/`g`/`m` set the layout, etc. No prefix needed.
+- **Passthrough** (entered with `i`) — every keystroke is forwarded to
+  the focused pane, exactly like a regular terminal. muxr commands are
+  reached via the historical `Ctrl-a` prefix. `Ctrl-a Esc` returns to
+  normal mode.
+
+The active mode appears as a `[MODE]` chip in the top-right corner of
+the focused pane (and the leftmost slot of the status bar). The
+focused pane's border is colored by mode — cyan for normal, green for
+passthrough, orange for scrollback, magenta for selection, yellow for
+the command prompt, red during the kill-session confirmation, blue
+while help is open. Unfocused panes always render with the grey
+unfocused border, regardless of mode.
+
+### Normal mode
+
+| Keys                 | Action                                              |
+|----------------------|-----------------------------------------------------|
+| `h` / `j` / `k` / `l`| focus pane left / down / up / right (spatial)       |
+| `i`                  | drop into passthrough mode                          |
+| `c` / `K`            | new / close focused pane                            |
+| `t` / `g` / `m`      | layout: tall / grid / monocle                       |
+| `Tab` / `Enter`      | cycle layout / promote focused to master            |
+| `a` / `1` … `9`      | toggle last pane / jump to pane by number           |
+| `s`                  | enter scrollback / copy-mode                        |
+| `~` / `C` / `P`      | drawer / Claude drawer / toggle private flag        |
+| `]`                  | paste internal yank buffer into focused pane        |
+| `:` / `?`            | command prompt / help                               |
+| `d` / `q`            | detach / kill session (asks `y/n`)                  |
+
+`h`/`j`/`k`/`l` does true spatial navigation — it inspects the current
+layout's rectangles and picks the closest neighbor in the requested
+direction. In monocle (where every pane occupies the full area) it
+falls back to linear next/previous so the keys still do something
+useful.
+
+### Passthrough mode (`Ctrl-a` prefix)
 
 | Keys           | Action                                                  |
 |----------------|---------------------------------------------------------|
+| `C-a Esc`      | return to normal mode                                   |
 | `C-a c`        | new pane                                                |
-| `C-a n` / `p`  | focus next / previous pane                              |
+| `C-a n` / `p`  | focus next / previous pane (linear)                     |
 | `C-a a`        | toggle last (previously focused) pane                   |
 | `C-a 1` … `9`  | jump to pane by its label                               |
-| `C-a k`        | close focused pane (or hide drawer)                     |
+| `C-a K`        | close focused pane (or hide drawer)                     |
 | `C-a Tab`      | cycle layout (`tall` → `grid` → `monocle`)              |
 | `C-a Enter`    | promote focused pane to master                          |
 | `C-a ~`        | toggle drawer (shell)                                   |
@@ -103,9 +150,10 @@ bin/muxr                 # same flags as the installed `muxr` executable
 
 ### Scrollback and copy-mode
 
-Each pane keeps a bounded (5000-row) scrollback ring. `C-a [` enters
-scrollback with vi-style navigation; the status bar shows a key hint and
-the pane title gains `[scrollback N/M]`.
+Each pane keeps a bounded (5000-row) scrollback ring. `s` in normal
+mode (or `C-a [` in passthrough) enters scrollback with vi-style
+navigation; the status bar shows a key hint and the pane title gains
+`[scrollback N/M]`.
 
 | Keys                    | Action                              |
 |-------------------------|-------------------------------------|
@@ -113,7 +161,7 @@ the pane title gains `[scrollback N/M]`.
 | `d` / `u` (or `C-d`/`C-u`) | half page                        |
 | `f` / Space (or `C-f`/`C-b`) | full page                      |
 | `g` / `G`               | top / bottom                        |
-| `q` / `Esc` / `C-c`     | exit back to live view              |
+| `q` / `Esc` / `C-c`     | exit back to normal mode            |
 
 Press `v` inside scrollback to enter a movable-cursor selection mode.
 Vim-style motions are supported:
@@ -129,17 +177,17 @@ Vim-style motions are supported:
 | `H` / `M` / `L`         | top / middle / bottom of viewport   |
 | `C-d`/`C-u`, `C-f`/`C-b`, Space | half / full page             |
 | `v` / `C-v`             | anchor char / block selection (toggle) |
-| `y` or Enter            | yank and exit to live shell         |
+| `y` or Enter            | yank and return to normal mode      |
 | `q` / `Esc` / `C-c`     | cancel back to scrollback           |
 
 `v` and `C-v` toggle between character and block (rectangular) selection
 — switching between the two preserves the anchor. `y` or Enter yanks the
 selection into an internal buffer, pipes it to `pbcopy` in the background
-(silent no-op when `pbcopy` is unavailable), and drops you straight back
-to the live shell. `C-a ]` writes the yank buffer back into the focused
-pane.
+(silent no-op when `pbcopy` is unavailable), and returns to normal mode.
+`]` (normal) / `C-a ]` (passthrough) writes the yank buffer back into the
+focused pane.
 
-## Commands (typed after `C-a :`)
+## Commands (typed after `:` in normal mode, or `C-a :` in passthrough)
 
 ```
 layout {tall|grid|monocle}     # also: layout (no arg) → cycle
@@ -186,7 +234,7 @@ Claude Code tool calls into NDJSON requests on the control socket. It
 auto-detects the target session from `MUXR_CONTROL_SOCKET` or
 `MUXR_SESSION` env vars.
 
-`Ctrl-a C` (also `:claude`) opens a drawer whose shell is `claude`, with
+`C` (normal) / `C-a C` (passthrough) / `:claude` opens a drawer whose shell is `claude`, with
 `MUXR_SESSION`, `MUXR_CONTROL_SOCKET`, `MUXR_FOCUSED_PANE`, and
 `MUXR_DRAWER_SELF=1` injected into its environment. The bridge picks
 those up automatically; you get a Quake-style Claude Code overlay that
@@ -196,11 +244,11 @@ own PTY.
 
 ### Private panes
 
-`Ctrl-a P` (or `:private`) flips the private flag on the focused pane.
+`P` (normal) / `C-a P` (passthrough) / `:private` flips the private flag on the focused pane.
 Private panes are hidden from programmatic callers: `panes.list` strips
 cwd/rows/cols, and `pane.read`, `pane.send_input`, `pane.run`,
 `pane.subscribe`, and `pane.kill` refuse with an error message pointing
-the human at `Ctrl-a P` to expose it. The flag is persisted in session
+the human at the TTY (`P` / `C-a P`) to expose it. The flag is persisted in session
 JSON and shown as `[P]` in the pane title bar. The MCP surface
 intentionally has no method to flip the flag — only a human at the TTY
 can mark a pane public again.
@@ -218,7 +266,7 @@ Client (foreground, owns the TTY)              Server (daemon, owns the PTYs)
  ├─ SIGWINCH → RESIZE frame                      ├─ Session ─ Window ─ Pane[ ] ─ Terminal + PTYProcess
  │                                               │      └─ Drawer ─ Pane
  └─ Protocol                                     ├─ Renderer        – diff-emits ANSI as OUTPUT frames
-     ◄── OUTPUT bytes ──── Renderer ◄────────────┤   InputHandler    – Ctrl-a state machine
+     ◄── OUTPUT bytes ──── Renderer ◄────────────┤   InputHandler    – normal/passthrough mode state machine
      ──── INPUT bytes ───► InputHandler          ├─ CommandDispatcher – parses ":"-prefixed commands
      ──── HELLO/RESIZE ──► apply_size            ├─ LayoutManager    – pure (layout, count, area) → [Rect]
      ◄── BYE ───────────── disconnect_client     ├─ UNIXServer (TTY socket, one client at a time)
@@ -235,16 +283,20 @@ count as "attached", so they don't lock out the human's TTY client.
 
 The server's event loop is single-threaded `IO.select` over the
 listening sockets, the attached client (when present), every pane PTY,
-the drawer PTY, and every connected control client. Layouts are pure
-— `LayoutManager` has no mutable state, so the renderer recomputes
-geometry on every tick after a resize or pane add/remove without
-bookkeeping.
+the drawer PTY, and every connected control client. A single
+background thread polls each pane's foreground process group every
+750ms (`/proc/<pid>/stat` on Linux, `ps -o tpgid=,pgid=` on macOS) so
+the `· cmd` annotation in the pane title can refresh without blocking
+the render loop. Everything else stays on the main thread. Layouts
+are pure — `LayoutManager` has no mutable state, so the renderer
+recomputes geometry on every tick after a resize or pane add/remove
+without bookkeeping.
 
-`Ctrl-a d` detaches the client but leaves the server (and its shells)
-running; reattaching gives you back the same panes with their full
-history. `Ctrl-a q` and `:quit` flash `kill session? (y/n)` in the status
-bar and only tear the server down on `y` — there is no "kill without
-confirm" keybinding by design.
+`d` (normal) / `C-a d` (passthrough) detaches the client but leaves
+the server (and its shells) running; reattaching gives you back the
+same panes with their full history. `q` / `C-a q` / `:quit` flash
+`kill session? (y/n)` in the status bar and only tear the server down
+on `y` — there is no "kill without confirm" keybinding by design.
 
 The drawer's PTY is **never torn down** when the drawer is hidden — its
 shell process keeps running so the next toggle restores the previous
@@ -281,10 +333,11 @@ cold-restart from the JSON snapshot and a pane that was marked private
 stays private.
 
 The JSON file is mainly a **cold-storage fallback**. Between detaches the
-live session lives inside the running server process, so `Ctrl-a d` then
-`bin/muxr <name>` reattaches to the exact same shells with their full
-history. The JSON only matters once the server is gone (after `Ctrl-a q`
-or a reboot): re-launching `muxr <name>` rebuilds pane and drawer shells
+live session lives inside the running server process, so `d` (normal) /
+`C-a d` (passthrough) then `bin/muxr <name>` reattaches to the exact
+same shells with their full history. The JSON only matters once the
+server is gone (after `q` / `C-a q` or a reboot): re-launching
+`muxr <name>` rebuilds pane and drawer shells
 using the saved working directories. Shell command history within those
 panes is **not** persisted — that's the job of your shell's own history
 file. Run `:save` from inside muxr to write the snapshot.
@@ -293,20 +346,23 @@ file. Run `:save` from inside muxr to write the snapshot.
 
 ```bash
 bundle install      # only minitest and rake
-rake test           # full suite (100+ unit tests)
+rake test           # full suite (200+ unit tests)
 
 # Run a single file or test
 ruby -Ilib -Itest test/test_layout_manager.rb
 ruby -Ilib -Itest test/test_terminal.rb -n test_csi_cursor_position
 ```
 
-Tests cover the layout algorithms, drawer state machine, window pane
-ordering, session JSON round-trip, the client/server framing protocol,
-the input-handler state machine (including scrollback and selection
-modes), the renderer's diff-emit, and the VT100 emulator's cursor
-movement, SGR (including colon-subparameter and underline-color forms),
-erase, scroll-region, and autowrap handling. PTY-dependent code paths
-are exercised via dependency injection so tests don't spawn shells.
+Tests cover the layout algorithms (including spatial neighbor lookup
+for `hjkl`), drawer state machine, window pane ordering, session JSON
+round-trip, the client/server framing protocol, the input-handler
+state machine (normal/passthrough mode transitions, scrollback,
+selection), foreground-command parsing (Linux `/proc` stat format and
+shell-filter rules), the renderer's diff-emit, and the VT100
+emulator's cursor movement, SGR (including colon-subparameter and
+underline-color forms), erase, scroll-region, and autowrap handling.
+PTY-dependent code paths are exercised via dependency injection so
+tests don't spawn shells.
 
 On-disk layout:
 
