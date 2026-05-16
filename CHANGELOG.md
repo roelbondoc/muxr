@@ -6,6 +6,52 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-15
+
+### Added
+- Vim-style `:normal` mode as the default startup state. Single keys
+  (hjkl, c, K, t/g/m, s, etc.) act directly without the Ctrl-a prefix;
+  `i` drops into the historical `:passthrough` mode and `Ctrl-a Esc`
+  returns to normal.
+- Spatial hjkl navigation via a new `LayoutManager.neighbor` that
+  computes pane adjacency from layout rects, so focus moves the way the
+  eye expects in tall and grid layouts (monocle falls back to linear).
+- `[MODE]` chip rendered in the top-right corner of the focused
+  container, plus a per-mode color palette on the focused pane border
+  and status chip (cyan normal, green passthrough, orange scrollback,
+  magenta selection, yellow command, red quit-confirm, blue help). The
+  `:prefix` substate shares the passthrough green so the border doesn't
+  flicker when Ctrl-a is pressed.
+- Foreground-command annotation in pane titles. A 750ms background
+  poller (`Application#start_foreground_poller`) walks each pane's
+  foreground process group and stamps the name onto
+  `pane.foreground_command`; titles now read `#1 abc123 · npm test`
+  when the shell isn't itself in the foreground. Lookup goes through
+  `/proc/<pid>/stat` on Linux and `ps` on macOS, off the event loop.
+- OSC 8 hyperlink passthrough. The Terminal buffers OSC payloads,
+  extracts OSC 8 link bodies (interned per terminal), and stamps the
+  active link onto every cell. The Renderer carries hyperlink through
+  its Cell struct and wraps each contiguous run with one open/close
+  pair, so Ghostty et al. treat a wrapped URL as one clickable link.
+- Space as a thumb-friendly alias for `v` in selection mode (toggle
+  linear anchor).
+
+### Changed
+- Focused pane title now shows the mode label
+  (`[NORMAL]`/`[PASS]`/etc.) instead of the redundant layout name —
+  the status bar already shows the active layout.
+- `[MODE]` chip moved out of the title and into the top-right corner
+  of the focused container, freeing the left-side title for the
+  foreground command.
+- Dropped the old `space → page-down` mapping in scrollback so space
+  is available for the new selection-mode alias.
+
+### Fixed
+- Exiting scrollback now restores the previous base mode (normal or
+  passthrough) instead of always landing in normal. A
+  passthrough → scrollback → exit round-trip now leaves you back in
+  passthrough.
+
 ## [0.1.5] - 2026-05-13
 
 ### Added
