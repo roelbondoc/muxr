@@ -15,8 +15,9 @@ module Muxr
   #
   # One-shot sub-states (prefix, command, confirm_quit, help) return to
   # @base_mode (whichever of :normal/:passthrough is active) when they
-  # finish. :scrollback and :selection always return to :normal because the
-  # spec says scrollback exits to normal regardless of where you entered it.
+  # finish. :scrollback and :selection also return to @base_mode so that
+  # exiting back from a scroll/yank lands you back in passthrough if that's
+  # where you came from.
   class InputHandler
     PREFIX = "\x01".freeze # Ctrl-a
 
@@ -195,19 +196,19 @@ module Muxr
       @base_mode = :passthrough
     end
 
-    # Return to normal mode. Used by:
-    #   * the `Ctrl-a Esc` binding from passthrough,
-    #   * scrollback/selection exits (spec: scrollback returns to normal),
-    #   * a successful yank from selection (via the legacy enter_idle_mode alias).
+    # Return to normal mode. Used by the `Ctrl-a Esc` binding from
+    # passthrough — explicitly resets @base_mode so the user genuinely
+    # leaves passthrough.
     def enter_normal_mode
       @state = :normal
       @base_mode = :normal
     end
 
-    # Legacy alias kept so Application#exit_selection(yank: true) doesn't
-    # need to change. Semantically equivalent to enter_normal_mode.
+    # Exit a sub-state (scrollback, selection-yank) and resume the mode the
+    # user was in before they entered scrollback. Preserves @base_mode so
+    # a passthrough → scrollback → exit round-trip lands back in passthrough.
     def enter_idle_mode
-      enter_normal_mode
+      @state = @base_mode
     end
 
     def cancel
@@ -287,7 +288,7 @@ module Muxr
 
     def handle_scrollback_input(ch)
       if SCROLLBACK_EXITS.include?(ch)
-        enter_normal_mode
+        enter_idle_mode
         @app.exit_scrollback
         return
       end

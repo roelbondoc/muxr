@@ -207,7 +207,7 @@ class TestInputHandler < Minitest::Test
     assert_equal [:paste_from_buffer], h.instance_variable_get(:@app).calls
   end
 
-  # ---------- scrollback / selection (unchanged behavior, exits land in :normal) ----------
+  # ---------- scrollback / selection (exits restore the previous base mode) ----------
 
   def test_scrollback_mode_dispatches_j_and_k
     h = build_passthrough
@@ -231,21 +231,29 @@ class TestInputHandler < Minitest::Test
                   [:scroll_focused, :bottom]], h.instance_variable_get(:@app).calls
   end
 
-  def test_scrollback_mode_exits_on_q_to_normal
+  def test_scrollback_mode_exits_on_q_restores_base_mode
     h = build_passthrough
     h.enter_scrollback_mode
     h.feed("q")
     assert_equal [:exit_scrollback], h.instance_variable_get(:@app).calls
-    assert_equal :normal, h.state
-    assert_equal :normal, h.base_mode
+    assert_equal :passthrough, h.state
+    assert_equal :passthrough, h.base_mode
   end
 
-  def test_scrollback_mode_exits_on_escape_to_normal
+  def test_scrollback_mode_exits_on_escape_restores_base_mode
     h = build_passthrough
     h.enter_scrollback_mode
     h.feed("\e")
     assert_equal [:exit_scrollback], h.instance_variable_get(:@app).calls
+    assert_equal :passthrough, h.state
+  end
+
+  def test_scrollback_mode_exit_from_normal_returns_to_normal
+    h = Muxr::InputHandler.new(FakeApp.new)
+    h.enter_scrollback_mode
+    h.feed("q")
     assert_equal :normal, h.state
+    assert_equal :normal, h.base_mode
   end
 
   def test_scrollback_mode_ignores_unknown_keys
@@ -337,10 +345,17 @@ class TestInputHandler < Minitest::Test
     assert_equal :selection, h.state
   end
 
-  # enter_idle_mode is kept as a legacy alias for the selection-yank
-  # exit path in Application; verify it lands the handler back in :normal.
-  def test_enter_idle_mode_is_alias_for_normal
+  # enter_idle_mode is used by the selection-yank exit path in Application;
+  # verify it restores the base mode the user was in before scrollback.
+  def test_enter_idle_mode_restores_base_mode
     h = build_passthrough
+    h.enter_idle_mode
+    assert_equal :passthrough, h.state
+    assert_equal :passthrough, h.base_mode
+  end
+
+  def test_enter_idle_mode_from_normal_stays_in_normal
+    h = Muxr::InputHandler.new(FakeApp.new)
     h.enter_idle_mode
     assert_equal :normal, h.state
     assert_equal :normal, h.base_mode

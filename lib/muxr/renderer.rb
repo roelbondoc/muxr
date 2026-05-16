@@ -371,7 +371,7 @@ module Muxr
       "  C-a [ ]         scrollback / paste buffer",
       "  C-a C-a         send literal Ctrl-a to focused pane",
       "",
-      "SCROLLBACK mode (exits to NORMAL)",
+      "SCROLLBACK mode (exits to the mode you came from)",
       "  j/k d/u f/b g/G  scroll  C-b/C-f page  v→cursor",
       "  cursor: h/j/k/l 0/^/$ w/e/b W/E/B H/M/L g/G",
       "          v select, C-v block, y/Enter yank, q/Esc cancel",
