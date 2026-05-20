@@ -11,7 +11,8 @@ module Muxr
   #                 normal mode.
   #
   # Plus the sub-states pre-existing from before modes existed:
-  #   :prefix, :command, :confirm_quit, :help, :scrollback, :selection.
+  #   :prefix, :command, :confirm_quit, :confirm_close, :help, :scrollback,
+  #   :selection.
   #
   # One-shot sub-states (prefix, command, confirm_quit, help) return to
   # @base_mode (whichever of :normal/:passthrough is active) when they
@@ -28,7 +29,7 @@ module Muxr
     #   [:symbol, *args]   → @app.public_send(:symbol, *args)
     NORMAL_BINDINGS = {
       "c"  => :new_pane,
-      "K"  => :close_focused,
+      "x"  => :request_close,
       "t"  => [:set_layout, :tall],
       "g"  => [:set_layout, :grid],
       "m"  => [:set_layout, :monocle],
@@ -39,6 +40,10 @@ module Muxr
       "j"  => [:focus_direction, :down],
       "k"  => [:focus_direction, :up],
       "l"  => [:focus_direction, :right],
+      "H"  => [:move_direction, :left],
+      "J"  => [:move_direction, :down],
+      "K"  => [:move_direction, :up],
+      "L"  => [:move_direction, :right],
       "a"  => :focus_last,
       "~"  => :toggle_drawer,
       "C"  => :toggle_claude_drawer,
@@ -55,7 +60,7 @@ module Muxr
       "n"    => :focus_next,
       "p"    => :focus_prev,
       "a"    => :focus_last,
-      "K"    => :close_focused,
+      "x"    => :request_close,
       "\t"   => :cycle_layout,
       "\r"   => :promote_master,
       "\n"   => :promote_master,
@@ -161,6 +166,8 @@ module Muxr
           @state = @base_mode
         when :confirm_quit
           handle_confirm_quit(ch)
+        when :confirm_close
+          handle_confirm_close(ch)
         when :prefix
           handle_prefix(ch)
         when :command
@@ -179,6 +186,10 @@ module Muxr
 
     def enter_confirm_quit
       @state = :confirm_quit
+    end
+
+    def enter_confirm_close
+      @state = :confirm_close
     end
 
     def enter_scrollback_mode
@@ -268,8 +279,8 @@ module Muxr
         @state = @base_mode
       when action
         @app.public_send(action)
-        # The action may have set a new state (confirm_quit, scrollback,
-        # help). Only revert to base mode if we're still in :prefix.
+        # The action may have set a new state (confirm_quit, confirm_close,
+        # scrollback, help). Only revert to base mode if we're still in :prefix.
         @state = @base_mode if @state == :prefix
       else
         # Unknown prefix key: return to base mode silently.
@@ -283,6 +294,15 @@ module Muxr
         @app.confirm_quit
       else
         @app.cancel_quit
+      end
+    end
+
+    def handle_confirm_close(ch)
+      @state = @base_mode
+      if ch == "y" || ch == "Y"
+        @app.confirm_close
+      else
+        @app.cancel_close
       end
     end
 

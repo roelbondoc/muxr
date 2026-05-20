@@ -112,6 +112,29 @@ class TestWindow < Minitest::Test
     assert_equal 2, w.focused_index
   end
 
+  def test_move_focused_to_swaps_and_follows_pane
+    w = Muxr::Window.new
+    a, b, c = FakePane.new("a"), FakePane.new("b"), FakePane.new("c")
+    [a, b, c].each { |p| w.add_pane(p) }
+    w.focused_index = 2 # focused = c
+    last_before = w.instance_variable_get(:@last_focused_pane)
+    assert w.move_focused_to(0)
+    assert_equal [c, b, a], w.panes
+    assert_equal 0, w.focused_index
+    # last_focused_pane should NOT update — the user is still on the same pane,
+    # just at a new index.
+    assert_equal last_before, w.instance_variable_get(:@last_focused_pane)
+  end
+
+  def test_move_focused_to_rejects_invalid_indices
+    w = Muxr::Window.new
+    2.times { w.add_pane(FakePane.new) }
+    refute w.move_focused_to(2)    # out of range
+    refute w.move_focused_to(-1)   # negative
+    refute w.move_focused_to(0)    # equal to current focused_index
+    refute w.move_focused_to(nil)  # nil
+  end
+
   def test_focus_index_out_of_range_is_noop
     w = Muxr::Window.new
     3.times { w.add_pane(FakePane.new) }

@@ -88,8 +88,9 @@ bin/muxr                 # same flags as the installed `muxr` executable
 muxr has two top-level input modes, modeled on vim:
 
 - **Normal** (default at startup) — single keys act on the multiplexer.
-  `hjkl` moves focus between panes, `c`/`K` create/kill panes,
-  `t`/`g`/`m` set the layout, etc. No prefix needed.
+  `hjkl` moves focus between panes, `HJKL` moves the focused pane
+  itself, `c`/`x` create/close panes, `t`/`g`/`m` set the layout, etc.
+  No prefix needed.
 - **Passthrough** (entered with `i`) — every keystroke is forwarded to
   the focused pane, exactly like a regular terminal. muxr commands are
   reached via the historical `Ctrl-a` prefix. `Ctrl-a Esc` returns to
@@ -99,17 +100,18 @@ The active mode appears as a `[MODE]` chip in the top-right corner of
 the focused pane (and the leftmost slot of the status bar). The
 focused pane's border is colored by mode — cyan for normal, green for
 passthrough, orange for scrollback, magenta for selection, yellow for
-the command prompt, red during the kill-session confirmation, blue
-while help is open. Unfocused panes always render with the grey
-unfocused border, regardless of mode.
+the command prompt, red during the kill-session or close-pane
+confirmation, blue while help is open. Unfocused panes always render
+with the grey unfocused border, regardless of mode.
 
 ### Normal mode
 
 | Keys                 | Action                                              |
 |----------------------|-----------------------------------------------------|
 | `h` / `j` / `k` / `l`| focus pane left / down / up / right (spatial)       |
+| `H` / `J` / `K` / `L`| move focused pane left / down / up / right          |
 | `i`                  | drop into passthrough mode                          |
-| `c` / `K`            | new / close focused pane                            |
+| `c` / `x`            | new / close focused pane (close asks `y/n`)         |
 | `t` / `g` / `m`      | layout: tall / grid / monocle                       |
 | `Tab` / `Enter`      | cycle layout / promote focused to master            |
 | `a` / `1` … `9`      | toggle last pane / jump to pane by number           |
@@ -125,6 +127,12 @@ direction. In monocle (where every pane occupies the full area) it
 falls back to linear next/previous so the keys still do something
 useful.
 
+`H`/`J`/`K`/`L` swap the focused pane with the spatial neighbor in
+that direction, then keep focus on the moved pane so you can keep
+dragging it. Swapping into position 0 of `tall`/`grid` promotes the
+pane to master (the layout master is always `panes[0]`). In monocle
+the move falls back to linear next/prev shuffling.
+
 ### Passthrough mode (`Ctrl-a` prefix)
 
 | Keys           | Action                                                  |
@@ -134,7 +142,7 @@ useful.
 | `C-a n` / `p`  | focus next / previous pane (linear)                     |
 | `C-a a`        | toggle last (previously focused) pane                   |
 | `C-a 1` … `9`  | jump to pane by its label                               |
-| `C-a K`        | close focused pane (or hide drawer)                     |
+| `C-a x`        | close focused pane (asks `y/n`; hides drawer with no prompt) |
 | `C-a Tab`      | cycle layout (`tall` → `grid` → `monocle`)              |
 | `C-a Enter`    | promote focused pane to master                          |
 | `C-a ~`        | toggle drawer (shell)                                   |

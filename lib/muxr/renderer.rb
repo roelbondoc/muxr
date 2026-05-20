@@ -24,8 +24,9 @@ module Muxr
       command:      [:c256, 226].freeze,  # yellow
       scrollback:   [:c256, 214].freeze,  # orange
       selection:    [:c256, 201].freeze,  # magenta
-      confirm_quit: [:c256, 196].freeze,  # red
-      help:         [:c256, 39].freeze    # blue
+      confirm_quit:  [:c256, 196].freeze, # red
+      confirm_close: [:c256, 196].freeze, # red
+      help:          [:c256, 39].freeze   # blue
     }.freeze
 
     HORIZONTAL = "─".freeze
@@ -217,8 +218,9 @@ module Muxr
       when :command      then "CMD"
       when :scrollback   then "SCROLL"
       when :selection    then "SEL"
-      when :confirm_quit then "QUIT?"
-      when :help         then "HELP"
+      when :confirm_quit  then "QUIT?"
+      when :confirm_close then "CLOSE?"
+      when :help          then "HELP"
       else                    "?"
       end
     end
@@ -353,8 +355,9 @@ module Muxr
       "",
       "NORMAL mode (default; no prefix)",
       "  h / j / k / l   focus pane left / down / up / right",
+      "  H / J / K / L   move pane left / down / up / right",
       "  i               drop into passthrough mode",
-      "  c / K           new / close pane",
+      "  c / x           new / close pane (close asks y/n)",
       "  t / g / m       layout: tall / grid / monocle",
       "  Tab / Enter     cycle layout / promote to master",
       "  a / 1..9        last pane / jump by number",
@@ -365,7 +368,7 @@ module Muxr
       "",
       "PASSTHROUGH mode (keys reach the focused pane; prefix is Ctrl-a)",
       "  C-a Esc         return to normal mode",
-      "  C-a c K t g m   same as normal-mode bindings",
+      "  C-a c x t g m   same as normal-mode bindings",
       "  C-a Tab Enter   cycle layout / promote master",
       "  C-a n / p / a   next / prev / last pane",
       "  C-a [ ]         scrollback / paste buffer",

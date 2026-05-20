@@ -177,6 +177,37 @@ module Muxr
       invalidate
     end
 
+    # Swap the focused pane with its spatial neighbor in `direction`. Bound
+    # to shift-HJKL in normal mode. Mirrors focus_direction's geometry-aware
+    # lookup so the same "what does my arrow point at" intuition decides
+    # which neighbor gets bumped. Monocle has no spatial layout, so HJKL
+    # falls back to reordering by linear next/prev — useful for shuffling
+    # the master before flipping back to tall/grid.
+    def move_direction(direction)
+      return if @session.window.panes.empty?
+      # The drawer isn't part of the tiled pane list; HJKL while focused on
+      # it would be ambiguous. No-op.
+      return if @session.focus_drawer && @session.drawer&.visible?
+
+      win = @session.window
+      idx = LayoutManager.neighbor(current_pane_rects, win.focused_index, direction)
+      if idx.nil? && win.layout == :monocle
+        target = case direction
+                 when :right, :down then (win.focused_index + 1) % win.panes.length
+                 when :left, :up    then (win.focused_index - 1) % win.panes.length
+                 end
+        if target && target != win.focused_index
+          win.move_focused_to(target)
+          invalidate
+        end
+        return
+      end
+
+      return unless idx
+      win.move_focused_to(idx)
+      invalidate
+    end
+
     # Explicit layout set, used by the normal-mode t/g/m bindings and the
     # `:layout <name>` command.
     def set_layout(layout)
@@ -199,6 +230,31 @@ module Muxr
     def enter_normal_mode
       @input.enter_normal_mode
       flash("normal mode")
+      invalidate
+    end
+
+    # Two-step close — same shape as the quit flow. Hiding the drawer is
+    # cheap and reversible, so we skip the prompt for the drawer case.
+    def request_close
+      if @session.focus_drawer && @session.drawer&.visible?
+        hide_drawer
+        return
+      end
+      return unless focused_pane
+      return if @input.state == :confirm_close
+      @input.enter_confirm_close
+      flash("close pane? (y/n)")
+      invalidate
+    end
+
+    def confirm_close
+      close_focused
+    end
+
+    def cancel_close
+      @message = nil
+      @message_expires = nil
+      flash("cancelled")
       invalidate
     end
 

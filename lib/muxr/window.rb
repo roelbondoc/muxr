@@ -86,6 +86,19 @@ module Muxr
       @panes[i], @panes[j] = @panes[j], @panes[i]
     end
 
+    # Swap the focused pane with the pane at `idx` and keep focus on the
+    # moved pane (so HJKL can keep dragging it across the layout). Unlike
+    # `focused_index=`, this does not record a last_focused_pane — the user
+    # is still on the same pane, just at a new index in the array.
+    def move_focused_to(idx)
+      return false if @panes.empty?
+      return false unless idx.is_a?(Integer) && idx >= 0 && idx < @panes.length
+      return false if idx == @focused_index
+      @panes[@focused_index], @panes[idx] = @panes[idx], @panes[@focused_index]
+      @focused_index = idx
+      true
+    end
+
     def cycle_layout
       i = LAYOUTS.index(@layout) || 0
       @layout = LAYOUTS[(i + 1) % LAYOUTS.length]

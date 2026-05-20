@@ -70,15 +70,17 @@ class TestInputHandler < Minitest::Test
     assert_equal :normal, h.state
   end
 
-  def test_normal_mode_capital_k_kills_pane
+  def test_normal_mode_x_requests_close
+    # Close uses lowercase x (with a y/n confirmation) so shift-HJKL can move
+    # tiles without colliding with destructive actions.
     app = FakeApp.new
     h = Muxr::InputHandler.new(app)
-    h.feed("K")
-    assert_equal [:close_focused], app.calls
+    h.feed("x")
+    assert_equal [:request_close], app.calls
   end
 
   def test_normal_mode_lower_k_navigates_up
-    # k is vim-up, NOT kill — that's the whole reason we use uppercase K for kill.
+    # k is vim-up; uppercase K moves the pane up (see HJKL test below).
     app = FakeApp.new
     h = Muxr::InputHandler.new(app)
     h.feed("k")
@@ -93,6 +95,16 @@ class TestInputHandler < Minitest::Test
                   [:focus_direction, :down],
                   [:focus_direction, :up],
                   [:focus_direction, :right]], app.calls
+  end
+
+  def test_normal_mode_shift_hjkl_moves_pane
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed("HJKL")
+    assert_equal [[:move_direction, :left],
+                  [:move_direction, :down],
+                  [:move_direction, :up],
+                  [:move_direction, :right]], app.calls
   end
 
   def test_normal_mode_tgm_sets_layout
@@ -131,9 +143,10 @@ class TestInputHandler < Minitest::Test
 
   def test_normal_mode_ignores_unknown_keys
     # Avoid sending stray keys to the focused pane and avoid mode flapping.
+    # (x/H/J/K/L are bound now; pick keys that aren't.)
     app = FakeApp.new
     h = Muxr::InputHandler.new(app)
-    h.feed("xyz!")
+    h.feed("yz!")
     assert_equal [], app.calls
     assert_equal :normal, h.state
   end
@@ -185,16 +198,16 @@ class TestInputHandler < Minitest::Test
     assert_equal :passthrough, h.state
   end
 
-  def test_passthrough_prefix_capital_k_kills_pane
+  def test_passthrough_prefix_x_requests_close
     h = build_passthrough
-    h.feed("\x01K")
-    assert_equal [:close_focused], h.instance_variable_get(:@app).calls
+    h.feed("\x01x")
+    assert_equal [:request_close], h.instance_variable_get(:@app).calls
   end
 
   def test_passthrough_prefix_lower_k_is_not_bound
-    # `k` in prefix is intentionally unbound now; only uppercase K kills.
-    # A bare lowercase k from prefix should be silently dropped and return
-    # to passthrough.
+    # `k` in prefix is intentionally unbound — close is `x`, and there's no
+    # spatial navigation under the Ctrl-a prefix. A bare lowercase k from
+    # prefix should be silently dropped and return to passthrough.
     h = build_passthrough
     h.feed("\x01k")
     assert_equal [], h.instance_variable_get(:@app).calls
@@ -343,6 +356,34 @@ class TestInputHandler < Minitest::Test
     h.feed(" ")
     assert_equal [[:toggle_selection, :linear]], h.instance_variable_get(:@app).calls
     assert_equal :selection, h.state
+  end
+
+  # ---------- confirm_close (close pane y/n) ----------
+
+  def test_confirm_close_on_y_calls_confirm_close
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_confirm_close
+    assert_equal :confirm_close, h.state
+    h.feed("y")
+    assert_equal [:confirm_close], app.calls
+    assert_equal :normal, h.state
+  end
+
+  def test_confirm_close_on_other_key_calls_cancel_close
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_confirm_close
+    h.feed("n")
+    assert_equal [:cancel_close], app.calls
+    assert_equal :normal, h.state
+  end
+
+  def test_confirm_close_returns_to_passthrough_when_entered_from_passthrough
+    h = build_passthrough
+    h.enter_confirm_close
+    h.feed("n")
+    assert_equal :passthrough, h.state
   end
 
   # enter_idle_mode is used by the selection-yank exit path in Application;

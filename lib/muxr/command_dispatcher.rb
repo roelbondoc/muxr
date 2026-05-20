@@ -26,7 +26,7 @@ module Muxr
       when "new", "c"
         @app.new_pane
       when "close", "kill", "k"
-        @app.close_focused
+        @app.request_close
       when "next"    then @app.focus_next
       when "prev"    then @app.focus_prev
       when "master"  then @app.promote_master
