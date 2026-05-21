@@ -99,10 +99,11 @@ muxr has two top-level input modes, modeled on vim:
 The active mode appears as a `[MODE]` chip in the top-right corner of
 the focused pane (and the leftmost slot of the status bar). The
 focused pane's border is colored by mode — cyan for normal, green for
-passthrough, orange for scrollback, magenta for selection, yellow for
-the command prompt, red during the kill-session or close-pane
-confirmation, blue while help is open. Unfocused panes always render
-with the grey unfocused border, regardless of mode.
+passthrough, orange for scrollback (and its `/` search prompt),
+magenta for selection, yellow for the command prompt, red during the
+kill-session or close-pane confirmation, blue while help is open.
+Unfocused panes always render with the grey unfocused border,
+regardless of mode.
 
 ### Normal mode
 
@@ -165,11 +166,18 @@ navigation; the status bar shows a key hint and the pane title gains
 
 | Keys                    | Action                              |
 |-------------------------|-------------------------------------|
-| `j` / `k`               | scroll one line                     |
-| `d` / `u` (or `C-d`/`C-u`) | half page                        |
+| `j` / `k` or `↓` / `↑`  | scroll one line                     |
+| `d` / `u` (or `C-d`/`C-u`, `PgDn`/`PgUp`) | half page             |
 | `f` / Space (or `C-f`/`C-b`) | full page                      |
-| `g` / `G`               | top / bottom                        |
+| `g` / `G` (or `Home` / `End`) | top / bottom                  |
+| `/` *query* `Enter`     | search forward (toward newer); `?` searches backward |
+| `n` / `N`               | next / previous match in the search direction (wraps) |
 | `q` / `Esc` / `C-c`     | exit back to normal mode            |
+
+Search uses smart-case (case-insensitive unless the query has an
+uppercase letter), scans both scrollback and the live buffer, and
+centers the chosen match in the viewport. Matches stay highlighted in
+yellow while you're in scrollback; exiting clears the highlight.
 
 Press `v` inside scrollback to enter a movable-cursor selection mode.
 Vim-style motions are supported:
