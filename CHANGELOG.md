@@ -6,6 +6,30 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-05-20
+
+### Added
+- Scrollback search via `/` (forward) and `?` (backward). Enter commits
+  the query, `n` / `N` cycle through matches with wrap. Smart-case
+  matching scans both scrollback and the live buffer; the chosen match
+  is centered in the viewport and every match is highlighted in yellow
+  until the user exits scrollback.
+- Arrow / page keys in scrollback. `↑`/`↓` scroll a line, `PgUp`/`PgDn`
+  half-page, `Home`/`End` jump to top/bottom. `InputHandler#feed` now
+  peeks for CSI escape sequences so a bare `Esc` still exits scrollback
+  the way it always has.
+- Shift-`H`/`J`/`K`/`L` swaps the focused pane with the spatial
+  neighbor in that direction (linear next/prev fallback in monocle).
+  Focus tracks the moved pane so you can keep dragging it; swapping
+  into position 0 of tall/grid promotes it to master.
+
+### Changed
+- Pane close is now confirmed. The close binding moved from `K` to
+  `x` (in both normal mode and the Ctrl-a prefix) so shift-`HJKL` is
+  free for the new move action. Close routes through a `:confirm_close`
+  state that flashes `close pane? (y/n)` — drawer hide stays
+  prompt-free since it's reversible.
+
 ## [0.1.6] - 2026-05-15
 
 ### Added
