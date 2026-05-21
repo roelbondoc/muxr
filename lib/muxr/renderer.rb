@@ -23,11 +23,18 @@ module Muxr
       prefix:       [:c256, 42].freeze,   # green (passthrough sub-state)
       command:      [:c256, 226].freeze,  # yellow
       scrollback:   [:c256, 214].freeze,  # orange
+      search:       [:c256, 214].freeze,  # orange (scrollback sub-state)
       selection:    [:c256, 201].freeze,  # magenta
       confirm_quit:  [:c256, 196].freeze, # red
       confirm_close: [:c256, 196].freeze, # red
       help:          [:c256, 39].freeze   # blue
     }.freeze
+
+    # Background applied to cells that match the active scrollback search.
+    # Bright enough to stand out over typical foreground SGRs while leaving
+    # the original glyph readable.
+    SEARCH_MATCH_BG = [:c256, 226].freeze # yellow
+    SEARCH_MATCH_FG = [:c256, 16].freeze  # black
 
     HORIZONTAL = "─".freeze
     VERTICAL   = "│".freeze
@@ -67,7 +74,7 @@ module Muxr
       @prev = nil
     end
 
-    def render(session, input_state: :normal, command_buffer: "", message: nil, help: false)
+    def render(session, input_state: :normal, command_buffer: "", search_buffer: "", search_direction: :forward, message: nil, help: false)
       w = session.width
       h = session.height
       return if w < 4 || h < 3
@@ -76,10 +83,17 @@ module Muxr
 
       compose_panes(frame, session, input_state: input_state)
       compose_drawer(frame, session, input_state: input_state) if session.drawer&.visible?
-      compose_status_bar(frame, session, input_state: input_state, command_buffer: command_buffer, message: message)
+      compose_status_bar(
+        frame, session,
+        input_state: input_state,
+        command_buffer: command_buffer,
+        search_buffer: search_buffer,
+        search_direction: search_direction,
+        message: message
+      )
       compose_help(frame, session) if help
 
-      emit_frame(frame, session, input_state: input_state, command_buffer: command_buffer)
+      emit_frame(frame, session, input_state: input_state, command_buffer: command_buffer, search_buffer: search_buffer)
     end
 
     private
@@ -217,6 +231,7 @@ module Muxr
       when :prefix       then "^A"
       when :command      then "CMD"
       when :scrollback   then "SCROLL"
+      when :search       then "SEARCH"
       when :selection    then "SEL"
       when :confirm_quit  then "QUIT?"
       when :confirm_close then "CLOSE?"
@@ -225,7 +240,7 @@ module Muxr
       end
     end
 
-    def compose_status_bar(frame, session, input_state:, command_buffer:, message:)
+    def compose_status_bar(frame, session, input_state:, command_buffer:, search_buffer: "", search_direction: :forward, message: nil)
       y = session.height - 1
       w = session.width
       win = session.window
@@ -296,7 +311,25 @@ module Muxr
           c.attrs = 0
         end
       elsif input_state == :scrollback
-        overlay = " SCROLLBACK  j/k line  d/u half  f/b page  g/G top/bot  v select  q quit "
+        overlay = " SCROLLBACK  ↑↓/j/k line  d/u half  f/b page  g/G top/bot  / search  n/N next/prev  v select  q quit "
+        overlay = overlay[0, w]
+        overlay.each_char.with_index do |ch, x|
+          c = frame[y][x]
+          c.char = ch
+          c.fg = [:c256, 232]
+          c.bg = [:c256, 214]
+          c.attrs = Terminal::BOLD
+        end
+        (overlay.length...w).each do |x|
+          c = frame[y][x]
+          c.char = " "
+          c.fg = nil
+          c.bg = [:c256, 214]
+          c.attrs = 0
+        end
+      elsif input_state == :search
+        prefix = search_direction == :backward ? "?" : "/"
+        overlay = "#{prefix}#{search_buffer}"
         overlay = overlay[0, w]
         overlay.each_char.with_index do |ch, x|
           c = frame[y][x]
@@ -375,7 +408,8 @@ module Muxr
       "  C-a C-a         send literal Ctrl-a to focused pane",
       "",
       "SCROLLBACK mode (exits to the mode you came from)",
-      "  j/k d/u f/b g/G  scroll  C-b/C-f page  v→cursor",
+      "  j/k ↑/↓ d/u f/b g/G  scroll  C-b/C-f page  v→cursor",
+      "  / search-fwd  ? search-back  n/N next/prev match",
       "  cursor: h/j/k/l 0/^/$ w/e/b W/E/B H/M/L g/G",
       "          v select, C-v block, y/Enter yank, q/Esc cancel",
       "",
@@ -448,6 +482,7 @@ module Muxr
       rows = term.rows
       cols = term.cols
       selection = term.selection_active?
+      search = term.search_active?
       rows.times do |r|
         fy = dst_y + r
         next if fy < 0 || fy >= frame.length
@@ -460,6 +495,13 @@ module Muxr
           dst.fg = src.fg
           dst.bg = src.bg
           dst.attrs = src.attrs
+          if search && term.cell_in_match?(r, c)
+            # Highlight wins over the cell's own bg so matches stay visible
+            # across whatever SGR the underlying program was using. Selection
+            # still applies on top via REVERSE below.
+            dst.fg = SEARCH_MATCH_FG
+            dst.bg = SEARCH_MATCH_BG
+          end
           dst.attrs |= Terminal::REVERSE if selection && term.selected_at_visible?(r, c)
           dst.hyperlink = src.hyperlink
         end
@@ -476,7 +518,7 @@ module Muxr
       c.attrs = attrs
     end
 
-    def emit_frame(frame, session, input_state:, command_buffer:)
+    def emit_frame(frame, session, input_state:, command_buffer:, search_buffer: "")
       # \e[?2026h enters synchronized-output mode so terminals that support it
       # (Ghostty, kitty, iTerm2 ≥3.5, WezTerm, Alacritty ≥0.13, foot) present
       # the whole frame atomically instead of repainting incrementally as bytes
@@ -520,7 +562,7 @@ module Muxr
       end
       out << "\e]8;;\e\\" if cur_hyperlink
       out << "\e[0m"
-      out << cursor_position(session, input_state: input_state, command_buffer: command_buffer)
+      out << cursor_position(session, input_state: input_state, command_buffer: command_buffer, search_buffer: search_buffer)
       out << "\e[?2026l"
       @out.write(out)
       @out.flush
@@ -529,9 +571,13 @@ module Muxr
       @prev_h = frame.length
     end
 
-    def cursor_position(session, input_state:, command_buffer:)
+    def cursor_position(session, input_state:, command_buffer:, search_buffer: "")
       if input_state == :command
         col = 1 + command_buffer.length + 1 # ':' + buffer
+        return "\e[#{session.height};#{col}H\e[?25h"
+      end
+      if input_state == :search
+        col = 1 + search_buffer.length + 1 # '/' or '?' + buffer
         return "\e[#{session.height};#{col}H\e[?25h"
       end
 

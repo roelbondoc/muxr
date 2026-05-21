@@ -77,6 +77,10 @@ module Muxr
       @sync_pending = false
       @sync_started_at = nil
       @pending_replies = +"".b
+      @search_query = nil
+      @search_direction = :forward
+      @search_matches = []
+      @search_current = nil
     end
 
     # Bytes the emulator owes back to the inner program in response to a
@@ -348,6 +352,81 @@ module Muxr
       return unless @selection_anchor
       @selection_anchor = nil
       @selection_cursor = nil
+      @dirty = true
+    end
+
+    # ---------- search ----------
+    #
+    # Substring search over the full timeline (scrollback + live buffer).
+    # Smart-case: case-insensitive if the query is all-lowercase, sensitive
+    # otherwise. Matches are kept in timeline coordinates so they stay
+    # anchored to the same text as the user pages history.
+
+    attr_reader :search_query, :search_matches, :search_current, :search_direction
+
+    def search(query, direction: :forward)
+      query = query.to_s
+      if query.empty?
+        clear_search
+        return 0
+      end
+      @search_query = query
+      @search_direction = direction
+      @search_matches = collect_matches(query)
+      if @search_matches.empty?
+        @search_current = nil
+        @dirty = true
+        return 0
+      end
+      @search_current = nearest_match_in_direction(current_search_anchor_row, direction, inclusive: true)
+      @search_current ||= direction == :forward ? 0 : @search_matches.length - 1
+      scroll_view_to_match(@search_current)
+      @dirty = true
+      @search_matches.length
+    end
+
+    # Move to the next/previous match in the given direction, wrapping.
+    # Returns the new current match index, or nil if there are no matches.
+    # Anchors on the current match (not the viewport top) so n always
+    # advances even when scroll_view_to_match has centered the previous
+    # hit and dragged the viewport top behind it.
+    def find_in_direction(direction)
+      return nil if @search_matches.empty?
+      anchor_tr =
+        if @search_current && @search_matches[@search_current]
+          @search_matches[@search_current][0]
+        else
+          current_search_anchor_row
+        end
+      idx = strict_next_in_direction(anchor_tr, direction)
+      if idx.nil?
+        # Wrap: pick the far end depending on direction.
+        idx = direction == :forward ? 0 : @search_matches.length - 1
+      end
+      @search_current = idx
+      scroll_view_to_match(idx)
+      @dirty = true
+      idx
+    end
+
+    def cell_in_match?(visible_r, c)
+      return false if @search_matches.empty?
+      tr = timeline_row_for_visible(visible_r)
+      # Linear scan is fine: SCROLLBACK_MAX caps matches at O(rows*cols), and
+      # the renderer touches each visible cell once per frame. A row-indexed
+      # cache would matter at much larger buffer sizes than ours.
+      @search_matches.any? { |mr, sc, ec| mr == tr && c >= sc && c <= ec }
+    end
+
+    def search_active?
+      !(@search_query.nil? || @search_matches.empty?)
+    end
+
+    def clear_search
+      return if @search_query.nil? && @search_matches.empty?
+      @search_query = nil
+      @search_matches = []
+      @search_current = nil
       @dirty = true
     end
 
@@ -770,6 +849,11 @@ module Muxr
             @selection_anchor[0] = [@selection_anchor[0] - 1, 0].max
             @selection_cursor[0] = [@selection_cursor[0] - 1, 0].max
           end
+          unless @search_matches.empty?
+            @search_matches.each { |m| m[0] -= 1 }
+            @search_matches.reject! { |m| m[0] < 0 }
+            @search_current = nil if @search_current && @search_current >= @search_matches.length
+          end
         end
         # Keep the user's view frozen on the same content when new rows arrive
         # while they're scrolled back.
@@ -871,6 +955,73 @@ module Muxr
       else
         true
       end
+    end
+
+    def collect_matches(query)
+      case_sensitive = query.match?(/[A-Z]/)
+      needle = case_sensitive ? query : query.downcase
+      matches = []
+      timeline_size.times do |tr|
+        row = timeline_row(tr)
+        next if row.nil?
+        line = String.new(capacity: @cols)
+        @cols.times { |c| line << (row[c]&.char || " ") }
+        haystack = case_sensitive ? line : line.downcase
+        start = 0
+        while (idx = haystack.index(needle, start))
+          matches << [tr, idx, idx + needle.length - 1]
+          # Advance past the start of this match so overlapping needles
+          # ("aa" in "aaaa") still emit one match per starting position.
+          start = idx + 1
+        end
+      end
+      matches
+    end
+
+    # Top of the current viewport in timeline coordinates. Used as the
+    # reference point for "search from where the user is looking now".
+    def current_search_anchor_row
+      timeline_row_for_visible(0)
+    end
+
+    # Smallest match index whose row is >= anchor_tr (forward) or largest
+    # match index whose row is <= anchor_tr (backward). Used by search() so
+    # the first jump lands on the nearest match in the search direction
+    # without forcing the user to press n.
+    def nearest_match_in_direction(anchor_tr, direction, inclusive:)
+      if direction == :forward
+        @search_matches.each_with_index do |(mr, _, _), i|
+          return i if inclusive ? mr >= anchor_tr : mr > anchor_tr
+        end
+        nil
+      else
+        best = nil
+        @search_matches.each_with_index do |(mr, _, _), i|
+          if (inclusive ? mr <= anchor_tr : mr < anchor_tr)
+            best = i
+          else
+            break
+          end
+        end
+        best
+      end
+    end
+
+    # Strict next match (n/N) — never matches the current row; that would
+    # leave the user stuck on the same line they're already on.
+    def strict_next_in_direction(anchor_tr, direction)
+      nearest_match_in_direction(anchor_tr, direction, inclusive: false)
+    end
+
+    # Center the match in the viewport when possible. set_view_offset clamps
+    # to [0, scrollback.size] so recent matches end up showing the live
+    # buffer at the bottom and very old ones pin to the top.
+    def scroll_view_to_match(idx)
+      match = @search_matches[idx]
+      return unless match
+      tr = match[0]
+      desired = @scrollback.size - tr + (@rows / 2)
+      set_view_offset(desired)
     end
 
     def ensure_selection_cursor_visible

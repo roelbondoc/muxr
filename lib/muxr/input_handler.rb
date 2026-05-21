@@ -12,7 +12,7 @@ module Muxr
   #
   # Plus the sub-states pre-existing from before modes existed:
   #   :prefix, :command, :confirm_quit, :confirm_close, :help, :scrollback,
-  #   :selection.
+  #   :search, :selection.
   #
   # One-shot sub-states (prefix, command, confirm_quit, help) return to
   # @base_mode (whichever of :normal/:passthrough is active) when they
@@ -90,6 +90,20 @@ module Muxr
       "G"    => :bottom
     }.freeze
 
+    # CSI sequences (arrow / page keys) recognized in scrollback mode. Built
+    # for terminal raw-mode emission: arrow keys come through as ESC `[`
+    # followed by a single final letter, PageUp/PageDown as ESC `[5~` /
+    # `[6~`. Lookahead in #feed peels these off as one chunk so a bare ESC
+    # still exits scrollback the way it always has.
+    SCROLLBACK_CSI = {
+      "\e[A"  => :line_back,    # Up
+      "\e[B"  => :line_forward, # Down
+      "\e[5~" => :half_back,    # PageUp
+      "\e[6~" => :half_forward, # PageDown
+      "\e[H"  => :top,          # Home
+      "\e[F"  => :bottom        # End
+    }.freeze
+
     SCROLLBACK_EXITS = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
 
     SELECTION_BINDINGS = {
@@ -129,13 +143,15 @@ module Muxr
 
     DIGIT_RE = /\A[1-9]\z/.freeze
 
-    attr_reader :state, :command_buffer, :base_mode
+    attr_reader :state, :command_buffer, :search_buffer, :search_direction, :base_mode
 
     def initialize(app)
       @app = app
       @state = :normal
       @base_mode = :normal
       @command_buffer = +""
+      @search_buffer = +""
+      @search_direction = :forward
     end
 
     def feed(data)
@@ -156,6 +172,21 @@ module Muxr
           next
         end
 
+        # Multi-byte CSI lookahead for scrollback / search: arrow / page
+        # keys arrive as `\e[<final>` and would otherwise trip the
+        # bare-Esc-exits behavior. In :scrollback we map them to scroll
+        # actions; in :search we silently consume them so a stray arrow
+        # doesn't kick the user out of the prompt. An incomplete `\e[…`
+        # (rare in raw-mode TTY) falls through and the bare `\e` exits as
+        # before.
+        if (@state == :scrollback || @state == :search) && remaining.start_with?("\e[")
+          consumed = consume_csi_escape(remaining)
+          if consumed > 0
+            remaining = remaining[consumed..] || ""
+            next
+          end
+        end
+
         ch = remaining[0]
         remaining = remaining[1..] || ""
         case @state
@@ -174,6 +205,8 @@ module Muxr
           handle_command_input(ch)
         when :scrollback
           handle_scrollback_input(ch)
+        when :search
+          handle_search_input(ch)
         when :selection
           handle_selection_input(ch)
         end
@@ -194,6 +227,12 @@ module Muxr
 
     def enter_scrollback_mode
       @state = :scrollback
+    end
+
+    def enter_search_mode(direction: :forward)
+      @state = :search
+      @search_direction = direction
+      @search_buffer = +""
     end
 
     def enter_selection_mode
@@ -316,10 +355,76 @@ module Muxr
         @app.enter_selection
         return
       end
+      case ch
+      when "/"
+        # Flip state directly so tests with a bare FakeApp transition; the
+        # Application callback redundantly flips state and runs side-effects.
+        enter_search_mode(direction: :forward)
+        @app.enter_search(direction: :forward)
+        return
+      when "?"
+        enter_search_mode(direction: :backward)
+        @app.enter_search(direction: :backward)
+        return
+      when "n"
+        @app.find_next
+        return
+      when "N"
+        @app.find_prev
+        return
+      end
       action = SCROLLBACK_BINDINGS[ch]
       @app.scroll_focused(action) if action
       # Unknown keys: ignored. Avoids accidental shell input when the user
       # mistypes inside scrollback mode.
+    end
+
+    def handle_search_input(ch)
+      case ch
+      when "\r", "\n"
+        query = @search_buffer.dup
+        @search_buffer = +""
+        @state = :scrollback
+        @app.commit_search(query)
+      when "\e", "\x03"
+        @search_buffer = +""
+        @state = :scrollback
+        @app.cancel_search
+      when "\x7f", "\b"
+        @search_buffer.chop!
+        @app.invalidate
+      else
+        # Printable ASCII / UTF-8. We treat anything at or above 0x20 as
+        # input; control bytes besides the ones handled above are dropped
+        # to keep stray Ctrl-keys from corrupting the query.
+        @search_buffer << ch if ch.ord >= 0x20
+        @app.invalidate
+      end
+    end
+
+    # Find the final byte of a CSI escape sequence and return the number
+    # of bytes consumed. In :scrollback we map recognized sequences to
+    # scroll actions; in :search we just swallow them so a stray arrow
+    # key doesn't kick the user out of the prompt. Returns 0 only when
+    # the sequence is incomplete in this chunk — the caller falls through
+    # so a bare \e still exits.
+    def consume_csi_escape(remaining)
+      i = 2
+      max = [remaining.bytesize, 16].min
+      while i < max
+        b = remaining.getbyte(i)
+        if b >= 0x40 && b <= 0x7e
+          seq = remaining.byteslice(0, i + 1)
+          if @state == :scrollback
+            action = SCROLLBACK_CSI[seq]
+            @app.scroll_focused(action) if action
+          end
+          return i + 1
+        end
+        return 0 if b < 0x20 || b > 0x7e # malformed; fall through
+        i += 1
+      end
+      0
     end
 
     def handle_selection_input(ch)

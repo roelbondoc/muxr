@@ -562,4 +562,86 @@ class TestTerminal < Minitest::Test
     t.feed("\e]8;id=42;https://x\e\\a")
     assert_equal "8;id=42;https://x", t.cell(0, 0).hyperlink
   end
+
+  # ---------- search ----------
+
+  def test_search_finds_matches_across_timeline
+    t = Muxr::Terminal.new(rows: 2, cols: 8)
+    # First two lines roll into scrollback, last two stay on the grid.
+    t.feed("hello\r\nworld\r\nhello\r\nfoo")
+    count = t.search("hello")
+    assert_equal 2, count
+    # Match rows: scrollback row 0 and live buffer row 0 (timeline index 2).
+    rows = t.search_matches.map { |m| m[0] }
+    assert_equal [0, 2], rows
+  end
+
+  def test_search_smart_case_is_insensitive_when_query_is_lowercase
+    t = Muxr::Terminal.new(rows: 1, cols: 10)
+    t.feed("Hello")
+    assert_equal 1, t.search("hello")
+  end
+
+  def test_search_smart_case_is_sensitive_when_query_has_uppercase
+    t = Muxr::Terminal.new(rows: 1, cols: 10)
+    t.feed("hello")
+    assert_equal 0, t.search("Hello")
+  end
+
+  def test_search_empty_query_clears_state
+    t = Muxr::Terminal.new(rows: 1, cols: 5)
+    t.feed("hi")
+    t.search("hi")
+    assert t.search_active?
+    t.search("")
+    refute t.search_active?
+    assert_nil t.search_query
+  end
+
+  def test_search_forward_jumps_to_first_match_at_or_after_top
+    t = Muxr::Terminal.new(rows: 2, cols: 5)
+    t.feed("aaa\r\nbbb\r\naaa\r\nccc") # scrollback: [aaa, bbb], grid: [aaa, ccc]
+    t.scroll_to_top
+    t.search("aaa", direction: :forward)
+    # First forward match from top of viewport is the scrollback "aaa" at tr 0.
+    assert_equal 0, t.search_matches[t.search_current][0]
+  end
+
+  def test_search_backward_jumps_to_match_at_or_before_top
+    t = Muxr::Terminal.new(rows: 2, cols: 5)
+    t.feed("aaa\r\nbbb\r\naaa\r\nccc")
+    # User has scrolled back so top of viewport == timeline row 1 (bbb).
+    t.scroll_back(1)
+    t.search("aaa", direction: :backward)
+    assert_equal 0, t.search_matches[t.search_current][0]
+  end
+
+  def test_find_in_direction_advances_and_wraps
+    t = Muxr::Terminal.new(rows: 2, cols: 5)
+    t.feed("aaa\r\nbbb\r\naaa\r\nccc")
+    t.scroll_to_top
+    t.search("aaa", direction: :forward) # lands on tr 0
+    t.find_in_direction(:forward)        # advances to tr 2
+    assert_equal 2, t.search_matches[t.search_current][0]
+    t.find_in_direction(:forward)        # wraps back to tr 0
+    assert_equal 0, t.search_matches[t.search_current][0]
+  end
+
+  def test_cell_in_match_highlights_visible_match_cells
+    t = Muxr::Terminal.new(rows: 1, cols: 5)
+    t.feed("hi yo")
+    t.search("yo")
+    refute t.cell_in_match?(0, 2) # space before match
+    assert t.cell_in_match?(0, 3) # 'y'
+    assert t.cell_in_match?(0, 4) # 'o'
+  end
+
+  def test_clear_search_removes_state
+    t = Muxr::Terminal.new(rows: 1, cols: 3)
+    t.feed("foo")
+    t.search("foo")
+    t.clear_search
+    refute t.search_active?
+    assert_empty t.search_matches
+  end
 end

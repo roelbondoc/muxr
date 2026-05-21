@@ -393,8 +393,60 @@ module Muxr
     def exit_scrollback
       target = focused_target
       target&.terminal&.clear_selection
+      target&.terminal&.clear_search
       target&.terminal&.scroll_to_bottom
       @renderer.reset_frame!
+      invalidate
+    end
+
+    # Bound to `/` (forward) and `?` (backward) in scrollback mode. Drops
+    # the user into a buffered prompt; commit_search / cancel_search exit
+    # back to scrollback.
+    def enter_search(direction: :forward)
+      @input.enter_search_mode(direction: direction)
+      invalidate
+    end
+
+    def commit_search(query)
+      target = focused_target
+      return unless target
+      term = target.terminal
+      direction = @input.search_direction
+      count = term.search(query, direction: direction)
+      if query.empty?
+        # Empty query just dismisses the prompt; leave the prior search
+        # state alone (term.search already cleared it though).
+      elsif count.zero?
+        flash("not found: #{query}")
+      else
+        flash("#{count} match#{count == 1 ? "" : "es"} (n/N to navigate)")
+      end
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def cancel_search
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def find_next
+      step_search(@input.search_direction)
+    end
+
+    def find_prev
+      step_search(@input.search_direction == :forward ? :backward : :forward)
+    end
+
+    def step_search(direction)
+      target = focused_target
+      return unless target
+      term = target.terminal
+      if term.search_matches.empty?
+        flash("no search active")
+        return
+      end
+      term.find_in_direction(direction)
       invalidate
     end
 
@@ -890,6 +942,8 @@ module Muxr
         @session,
         input_state: @input.state,
         command_buffer: @input.command_buffer,
+        search_buffer: @input.search_buffer,
+        search_direction: @input.search_direction,
         message: @message,
         help: @help_visible
       )

@@ -401,4 +401,134 @@ class TestInputHandler < Minitest::Test
     assert_equal :normal, h.state
     assert_equal :normal, h.base_mode
   end
+
+  # ---------- scrollback arrow keys + search ----------
+
+  def test_scrollback_up_arrow_scrolls_back
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("\e[A")
+    assert_equal [[:scroll_focused, :line_back]], app.calls
+    assert_equal :scrollback, h.state
+  end
+
+  def test_scrollback_down_arrow_scrolls_forward
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("\e[B")
+    assert_equal [[:scroll_focused, :line_forward]], app.calls
+  end
+
+  def test_scrollback_pageup_pagedown_map_to_half_scrolls
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("\e[5~\e[6~")
+    assert_equal [[:scroll_focused, :half_back],
+                  [:scroll_focused, :half_forward]], app.calls
+  end
+
+  def test_scrollback_arrow_then_more_keys_in_same_chunk
+    # A single client read might deliver "\e[A" followed by other keys; the
+    # CSI peek must consume exactly the escape sequence and let the rest
+    # dispatch normally.
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("\e[Aj")
+    assert_equal [[:scroll_focused, :line_back],
+                  [:scroll_focused, :line_forward]], app.calls
+  end
+
+  def test_scrollback_bare_escape_still_exits
+    # Regression: the CSI lookahead must not change the meaning of a lone
+    # ESC byte. ESC alone exits scrollback the way it always has.
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("\e")
+    assert_equal [:exit_scrollback], app.calls
+    assert_equal :normal, h.state
+  end
+
+  def test_scrollback_slash_enters_search_mode
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("/")
+    assert_equal :search, h.state
+    assert_equal :forward, h.search_direction
+    assert_equal [[:enter_search, { direction: :forward }]], app.calls
+  end
+
+  def test_scrollback_question_mark_enters_backward_search
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("?")
+    assert_equal :search, h.state
+    assert_equal :backward, h.search_direction
+    assert_equal [[:enter_search, { direction: :backward }]], app.calls
+  end
+
+  def test_scrollback_n_and_N_navigate_matches
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.feed("nN")
+    assert_equal [:find_next, :find_prev], app.calls
+  end
+
+  def test_search_typing_builds_buffer
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_scrollback_mode
+    h.enter_search_mode(direction: :forward)
+    h.feed("foo")
+    assert_equal "foo", h.search_buffer
+    assert_equal :search, h.state
+  end
+
+  def test_search_backspace_chops_buffer
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_search_mode(direction: :forward)
+    h.feed("ab\x7f")
+    assert_equal "a", h.search_buffer
+  end
+
+  def test_search_enter_commits_and_returns_to_scrollback
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_search_mode(direction: :forward)
+    h.feed("foo\r")
+    assert_equal :scrollback, h.state
+    assert_equal "", h.search_buffer
+    commit = app.calls.find { |c| c.is_a?(Array) && c[0] == :commit_search }
+    refute_nil commit
+    assert_equal "foo", commit[1]
+  end
+
+  def test_search_escape_cancels_and_returns_to_scrollback
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_search_mode(direction: :forward)
+    h.feed("foo\e")
+    assert_equal :scrollback, h.state
+    assert_equal "", h.search_buffer
+    assert_includes app.calls, :cancel_search
+  end
+
+  def test_search_mode_swallows_arrow_keys_without_exiting
+    # A stray arrow key while typing a query must not be parsed as
+    # `\e` + `[A` (which would cancel the prompt and inject text).
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_search_mode(direction: :forward)
+    h.feed("f\e[Aoo")
+    assert_equal :search, h.state
+    assert_equal "foo", h.search_buffer
+  end
 end
