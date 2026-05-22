@@ -563,6 +563,61 @@ class TestTerminal < Minitest::Test
     assert_equal "8;id=42;https://x", t.cell(0, 0).hyperlink
   end
 
+  # ---------- plain-text URL detection ----------
+
+  def test_detects_plain_url_and_stamps_cells
+    t = Muxr::Terminal.new(rows: 1, cols: 30)
+    t.feed("see https://example.com here")
+    link = t.cell(0, 4).hyperlink
+    refute_nil link
+    assert_includes link, "https://example.com"
+    assert_includes link, "id=muxr-url-"
+    assert_equal link, t.cell(0, 22).hyperlink
+    assert_nil t.cell(0, 0).hyperlink
+    assert_nil t.cell(0, 24).hyperlink
+  end
+
+  def test_wrapped_url_shares_one_id_across_rows
+    # The whole point: a URL that wraps across rows must share one OSC 8
+    # `id=` so the outer terminal recognises both halves as one click target.
+    t = Muxr::Terminal.new(rows: 2, cols: 20)
+    t.feed("https://example.com/some-very-long-path")
+    link = t.cell(0, 0).hyperlink
+    refute_nil link
+    assert_includes link, "id=muxr-url-"
+    assert_equal link, t.cell(1, 0).hyperlink
+    assert_equal link, t.cell(1, 18).hyperlink
+  end
+
+  def test_trims_trailing_sentence_punctuation
+    t = Muxr::Terminal.new(rows: 1, cols: 30)
+    t.feed("see https://example.com.")
+    link = t.cell(0, 4).hyperlink
+    refute_nil link
+    assert_includes link, "https://example.com"
+    refute_includes link, "https://example.com."
+    # The trailing period itself is not part of the link.
+    assert_nil t.cell(0, 23).hyperlink
+  end
+
+  def test_does_not_clobber_program_emitted_hyperlink
+    # If an inner program already wrapped the URL in OSC 8, leave its
+    # payload alone — the program knows best.
+    t = Muxr::Terminal.new(rows: 1, cols: 30)
+    t.feed("\e]8;;https://other.com\e\\https://example.com\e]8;;\e\\")
+    assert_equal "8;;https://other.com", t.cell(0, 0).hyperlink
+  end
+
+  def test_same_url_produces_stable_payload_across_feeds
+    # Idempotent scanning: re-feeding the same screen content must yield the
+    # exact same hyperlink object, so the renderer's diff doesn't churn.
+    t = Muxr::Terminal.new(rows: 1, cols: 30)
+    t.feed("https://example.com")
+    first = t.cell(0, 0).hyperlink
+    t.feed("")
+    assert_equal first, t.cell(0, 0).hyperlink
+  end
+
   # ---------- search ----------
 
   def test_search_finds_matches_across_timeline

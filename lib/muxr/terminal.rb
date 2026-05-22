@@ -17,6 +17,22 @@ module Muxr
     # tolerant of weird inputs without giving an attacker an unbounded sink.
     OSC_MAX_LEN = 4096
 
+    # Match plain-text URLs the inner program printed without wrapping them
+    # in OSC 8. We stamp the matching cells with a synthetic hyperlink so the
+    # outer terminal treats a wrapped URL as one click target instead of two
+    # truncated halves. The character class excludes whitespace, control
+    # bytes, and the punctuation that almost never sits inside a URL.
+    URL_REGEX = %r{(?:https?|ftp)://[^\s<>"\\^`\x00-\x1f\x7f]+}
+    # Trailing punctuation we trim from a detected URL — these usually belong
+    # to the surrounding sentence ("see https://x.com.") rather than the URL
+    # itself. Parens/brackets are intentionally left alone since they're
+    # commonly part of Wikipedia-style URLs.
+    URL_TRIM_TRAILING = ".,;:!?'\""
+    # Prefix on the OSC 8 payload of cells we tagged ourselves. Used to tell
+    # synthetic links apart from program-emitted ones so we never clobber
+    # OSC 8 links the inner program set.
+    SYNTH_URL_PREFIX = "8;id=muxr-url-"
+
     # Inner programs (fzf ≥ 0.41, neovim, helix, …) bracket coherent screen
     # updates with `\e[?2026h … \e[?2026l` (DECSET 2026 — "Synchronized
     # Output"). When we see the open, we know more bytes are coming that
@@ -68,6 +84,10 @@ module Muxr
       # links share one frozen string for fast equality and small memory.
       @current_hyperlink = nil
       @hyperlink_intern = {}
+      # Stable interning for synthetic URL hyperlinks. Keyed by the URI text
+      # so the same URL produces the same payload string across scans —
+      # otherwise every feed would churn the renderer diff.
+      @synth_url_intern = {}
       @dirty = true
       @scrollback = []
       @view_offset = 0
@@ -535,7 +555,58 @@ module Muxr
         return if str.empty?
       end
       str.each_char { |c| process_char(c) }
+      detect_urls!
       @dirty = true
+    end
+
+    # Walk the buffer (plus the last scrollback row so wraps across the
+    # scrollback boundary still join), find plain-text URLs, and stamp the
+    # covering cells with an OSC 8 hyperlink carrying an `id=` parameter.
+    # Outer terminals (Ghostty, iTerm2, kitty, WezTerm) use `id=` to merge
+    # spans that wrap across rows into a single click target — without this
+    # a wrapped URL like https://very.long.example.com/path-that-wraps would
+    # be detected as two truncated URLs on consecutive lines.
+    def detect_urls!
+      rows = []
+      rows << @scrollback.last if @scrollback.any?
+      rows.concat(@buffer)
+
+      rows.each do |row|
+        row.each do |cell|
+          link = cell.hyperlink
+          cell.hyperlink = nil if link && link.start_with?(SYNTH_URL_PREFIX)
+        end
+      end
+
+      text = String.new(capacity: rows.length * @cols)
+      cells = []
+      rows.each do |row|
+        row.each do |cell|
+          text << cell.char
+          cells << cell
+        end
+      end
+
+      pos = 0
+      while (md = URL_REGEX.match(text, pos))
+        start_off = md.begin(0)
+        end_off = md.end(0)
+        while end_off > start_off + 1 && URL_TRIM_TRAILING.include?(text[end_off - 1])
+          end_off -= 1
+        end
+        uri = text[start_off...end_off]
+        payload = (@synth_url_intern[uri] ||=
+          "#{SYNTH_URL_PREFIX}#{uri.hash.abs.to_s(16)};#{uri}".freeze)
+
+        (start_off...end_off).each do |off|
+          cell = cells[off]
+          existing = cell.hyperlink
+          next if existing && !existing.start_with?(SYNTH_URL_PREFIX)
+          cell.hyperlink = payload
+        end
+
+        pos = end_off
+      end
     end
 
     private
