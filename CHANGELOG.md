@@ -6,6 +6,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-05-22
+
+### Added
+- Wrapped plain-text URLs are stamped with a shared OSC 8 hyperlink id
+  after each `Terminal#feed`. The Terminal scans the live buffer plus
+  the last scrollback row for `http`/`https`/`ftp` URLs and tags the
+  covering cells with `id=muxr-url-<hash>` so Ghostty / iTerm2 / kitty /
+  WezTerm merge the wrapped halves into a single clickable link.
+  Program-emitted OSC 8 payloads continue to pass through unchanged.
+
+### Changed
+- Selection mode now anchors at the live cursor's visible position
+  instead of `(0,0)`, so visual selection starts where the user's
+  attention already is.
+
 ## [0.1.7] - 2026-05-20
 
 ### Added
