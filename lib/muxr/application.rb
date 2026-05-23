@@ -473,8 +473,10 @@ module Muxr
       return unless target
       # Vim-style: drop the user at a movable cursor with NO selection yet.
       # They navigate with h/j/k/l, then press v (linear) or C-v (block) to
-      # anchor.
-      target.terminal.place_selection_cursor(0, 0)
+      # anchor. Start at the live cursor's visible position so the user lands
+      # where their attention already is, instead of the top-left corner.
+      term = target.terminal
+      term.place_selection_cursor(term.cursor_row, term.cursor_col)
       @input.enter_selection_mode
       @renderer.reset_frame!
       invalidate
