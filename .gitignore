@@ -6,3 +6,4 @@ tmp/
 .idea/
 .vscode/
 coverage/
+docs/screenshots/tapes/.*.gif

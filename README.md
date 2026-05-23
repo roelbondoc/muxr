@@ -390,6 +390,21 @@ On-disk layout:
  └─ logs/<name>.log             server stdout/stderr
 ```
 
+### Regenerating the README screenshots
+
+The PNGs under `docs/screenshots/` are produced by [`vhs`](https://github.com/charmbracelet/vhs)
+driving muxr itself — one `.tape` file per screenshot under
+`docs/screenshots/tapes/`. After a UI change, refresh them with:
+
+```bash
+brew install vhs                       # one-time
+docs/screenshots/tapes/regenerate.sh   # renders all four
+```
+
+Each tape spawns a throwaway `shot` session, populates three panes with
+`ls`/`git log`/`wc` output, sets the layout, and writes a single PNG via
+`Screenshot`. Tweak the tape if the keybindings or status bar change.
+
 ## Contributing
 
 Contributions are welcome from anyone, with one requirement: **the code
