@@ -45,10 +45,12 @@ module Muxr
         @app.cycle_layout
         return
       end
-      sym = name.to_sym
-      if Window::LAYOUTS.include?(sym)
-        @app.session.window.set_layout(sym)
+      matches = Window::LAYOUTS.select { |l| l.to_s.start_with?(name) }
+      if matches.length == 1
+        @app.session.window.set_layout(matches.first)
         @app.invalidate
+      elsif matches.length > 1
+        @app.flash("ambiguous layout: #{name} (#{matches.join(", ")})")
       else
         @app.flash("unknown layout: #{name}")
       end

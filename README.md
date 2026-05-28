@@ -206,7 +206,7 @@ focused pane.
 ## Commands (typed after `:` in normal mode, or `C-a :` in passthrough)
 
 ```
-layout {tall|grid|monocle}     # also: layout (no arg) → cycle
+layout {tall|grid|monocle}     # short forms ok: t / g / m; layout (no arg) → cycle
 drawer {toggle|show|hide|reset}
 claude                         # toggle the Claude Code drawer
 private                        # toggle private flag on focused pane
