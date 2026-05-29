@@ -52,6 +52,17 @@ The Quake-style drawer overlay (`~` in normal mode, `C-a ~` in passthrough):
 
 ![drawer overlay](docs/screenshots/04-drawer.png)
 
+Scrollback / copy-mode (`s`) with `/` search — matches highlight in
+yellow and the focused pane border turns orange:
+
+![scrollback search](docs/screenshots/05-scrollback-search.png)
+
+Movable-cursor visual selection (`v` inside scrollback) — the border
+turns magenta and the swept region is highlighted, ready to yank with
+`y`:
+
+![visual selection](docs/screenshots/06-selection.png)
+
 ## Install / run
 
 ```bash
@@ -324,7 +335,11 @@ The per-pane `Terminal` is a real VT100 emulator (cursor movement, SGR
 including 256-color/truecolor and underline subparameters, erase/insert/
 delete, autowrap, scroll regions). Scrollback is composited into the
 visible grid through a view-offset that auto-tracks new rows while
-scrolled back, so reviewed content stays frozen.
+scrolled back, so reviewed content stays frozen. Plain-text `http`/
+`https`/`ftp` URLs that wrap across rows are re-stamped with matching
+OSC 8 hyperlink ids after each feed, so terminals like Ghostty, iTerm2,
+kitty, and WezTerm merge the wrapped halves back into one clickable
+link (program-emitted OSC 8 payloads are left untouched).
 
 ## Session persistence
 
@@ -398,11 +413,12 @@ driving muxr itself — one `.tape` file per screenshot under
 
 ```bash
 brew install vhs                       # one-time
-docs/screenshots/tapes/regenerate.sh   # renders all four
+docs/screenshots/tapes/regenerate.sh   # renders all six
 ```
 
-Each tape spawns a throwaway `shot` session, populates three panes with
-`ls`/`git log`/`wc` output, sets the layout, and writes a single PNG via
+Each tape spawns a throwaway `shot` session, populates one or more panes
+with `ls`/`git log`/`wc` output, drives the feature being shown (layout,
+drawer, scrollback search, selection), and writes a single PNG via
 `Screenshot`. Tweak the tape if the keybindings or status bar change.
 
 ## Contributing
