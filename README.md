@@ -51,19 +51,34 @@ The built-in layouts (pick directly with the keys below in normal mode, or cycle
   <tr>
     <td align="center"><strong>tall</strong><br/>master + stacked slaves</td>
     <td align="center"><strong>wide</strong><br/>master on top, slaves below</td>
-    <td align="center"><strong>grid</strong><br/>even tiling</td>
-    <td align="center"><strong>monocle</strong><br/>focused pane fullscreen</td>
+    <td align="center"><strong>columns</strong><br/>equal-width strips</td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/01-layout-tall.png" alt="tall layout"></td>
     <td><img src="docs/screenshots/05-layout-wide.png" alt="wide layout"></td>
+    <td><img src="docs/screenshots/06-layout-columns.png" alt="columns layout"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>rows</strong><br/>equal-height strips</td>
+    <td align="center"><strong>grid</strong><br/>even tiling</td>
+    <td align="center"><strong>spiral</strong><br/>Fibonacci spiral</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/07-layout-rows.png" alt="rows layout"></td>
     <td><img src="docs/screenshots/02-layout-grid.png" alt="grid layout"></td>
+    <td><img src="docs/screenshots/08-layout-spiral.png" alt="spiral layout"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>centered</strong><br/>master flanked by slaves</td>
+    <td align="center"><strong>stack</strong><br/>accordion of title slivers</td>
+    <td align="center"><strong>monocle</strong><br/>focused pane fullscreen</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/09-layout-centered.png" alt="centered layout"></td>
+    <td><img src="docs/screenshots/10-layout-stack.png" alt="stack layout"></td>
     <td><img src="docs/screenshots/03-layout-monocle.png" alt="monocle layout"></td>
   </tr>
 </table>
-
-> `columns`, `rows`, `spiral`, `centered`, and `stack` are screenshot-less for now —
-> run `docs/screenshots/tapes/regenerate.sh` (needs [VHS](https://github.com/charmbracelet/vhs)) to capture them.
 
 The Quake-style drawer overlay (`~` in normal mode, `C-a ~` in passthrough):
 
@@ -173,7 +188,7 @@ the move falls back to linear next/prev shuffling.
 | `C-a a`        | toggle last (previously focused) pane                   |
 | `C-a 1` … `9`  | jump to pane by its label                               |
 | `C-a x`        | close focused pane (asks `y/n`; hides drawer with no prompt) |
-| `C-a Tab`      | cycle layout (`tall` → `grid` → `monocle`)              |
+| `C-a Tab`      | cycle layout (`tall` → `wide` → `columns` → `rows` → `grid` → `spiral` → `centered` → `stack` → `monocle`) |
 | `C-a Enter`    | promote focused pane to master                          |
 | `C-a ~`        | toggle drawer (shell)                                   |
 | `C-a C`        | toggle Claude Code drawer (MCP-aware)                   |
@@ -235,7 +250,10 @@ focused pane.
 ## Commands (typed after `:` in normal mode, or `C-a :` in passthrough)
 
 ```
-layout {tall|grid|monocle}     # short forms ok: t / g / m; layout (no arg) → cycle
+layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle}
+                               # any unambiguous name prefix works (t, w, r, g, m, …);
+                               # ambiguous ones (c → columns/centered, s → spiral/stack)
+                               # flash the candidates. layout (no arg) → cycle
 drawer {toggle|show|hide|reset}
 claude                         # toggle the Claude Code drawer
 private                        # toggle private flag on focused pane

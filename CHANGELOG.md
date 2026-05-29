@@ -6,6 +6,21 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Six new layouts join `tall`, `grid`, and `monocle`:
+  - **`wide`** (`w`) — master on top, slaves split across the bottom.
+  - **`columns`** (`|`) — equal-width, full-height vertical strips.
+  - **`rows`** (`-`) — equal-height, full-width horizontal strips.
+  - **`spiral`** (`f`) — Fibonacci spiral winding inward, each pane half
+    the size of the last.
+  - **`centered`** (`e`) — master in a centred column with slaves dealt
+    to both sides.
+  - **`stack`** (`S`) — accordion: the focused pane expands while the
+    others collapse to title slivers.
+  The `:layout` command resolves any unambiguous name prefix across all
+  nine layouts; `C-a Tab` / `Tab` cycles through them in order. README
+  screenshots cover every layout.
+
 ## [0.1.9] - 2026-05-29
 
 ### Added
