@@ -10,7 +10,7 @@ module Muxr
       end
     end
 
-    LAYOUTS = %i[tall grid monocle].freeze
+    LAYOUTS = %i[tall wide columns rows grid spiral centered stack monocle].freeze
 
     module_function
 
@@ -19,9 +19,15 @@ module Muxr
       master_index = master_index.clamp(0, count - 1)
       focused_index = focused_index.clamp(0, count - 1)
       case layout
-      when :tall    then tall(count, area, master_index)
-      when :grid    then grid(count, area)
-      when :monocle then monocle(count, area, focused_index)
+      when :tall     then tall(count, area, master_index)
+      when :wide     then wide(count, area, master_index)
+      when :columns  then columns(count, area)
+      when :rows     then rows(count, area)
+      when :grid     then grid(count, area)
+      when :spiral   then spiral(count, area)
+      when :centered then centered(count, area, master_index)
+      when :stack    then stack(count, area, focused_index)
+      when :monocle  then monocle(count, area, focused_index)
       else
         raise ArgumentError, "Unknown layout: #{layout.inspect}"
       end
@@ -50,6 +56,153 @@ module Muxr
         y += h
       end
       rects
+    end
+
+    # The transpose of `tall`: master pane spans the full width across the top
+    # half; remaining panes sit side-by-side in the bottom half, dividing the
+    # remaining width evenly.
+    def wide(count, area, master_index = 0)
+      master_index = master_index.clamp(0, count - 1)
+      return [Rect.new(area.x, area.y, area.w, area.h)] if count == 1
+
+      master_h = [area.h / 2, 1].max
+      stack_h  = [area.h - master_h, 1].max
+      others   = (0...count).to_a - [master_index]
+      slave_count = others.length
+      base_w = area.w / slave_count
+      remainder = area.w - base_w * slave_count
+
+      rects = Array.new(count)
+      rects[master_index] = Rect.new(area.x, area.y, area.w, master_h)
+
+      x = area.x
+      others.each_with_index do |idx, i|
+        w = base_w + (i < remainder ? 1 : 0)
+        rects[idx] = Rect.new(x, area.y + master_h, w, stack_h)
+        x += w
+      end
+      rects
+    end
+
+    # Equal-width, full-height vertical strips, side by side. No master.
+    def columns(count, area)
+      base_w = area.w / count
+      rem    = area.w - base_w * count
+      rects  = []
+      x = area.x
+      count.times do |i|
+        w = base_w + (i < rem ? 1 : 0)
+        rects << Rect.new(x, area.y, w, area.h)
+        x += w
+      end
+      rects
+    end
+
+    # Equal-height, full-width horizontal strips, stacked. The dual of columns.
+    def rows(count, area)
+      base_h = area.h / count
+      rem    = area.h - base_h * count
+      rects  = []
+      y = area.y
+      count.times do |i|
+        h = base_h + (i < rem ? 1 : 0)
+        rects << Rect.new(area.x, y, area.w, h)
+        y += h
+      end
+      rects
+    end
+
+    # Fibonacci spiral: each pane takes half of the remaining region, splitting
+    # vertically then horizontally in alternation, so panes wind inward toward
+    # the bottom-right. The last pane fills whatever is left.
+    def spiral(count, area)
+      x, y, w, h = area.x, area.y, area.w, area.h
+      rects = []
+      count.times do |i|
+        if i == count - 1
+          rects << Rect.new(x, y, w, h)
+        elsif i.even?
+          left = [w / 2, 1].max
+          rects << Rect.new(x, y, left, h)
+          x += left
+          w = [w - left, 1].max
+        else
+          top = [h / 2, 1].max
+          rects << Rect.new(x, y, w, top)
+          y += top
+          h = [h - top, 1].max
+        end
+      end
+      rects
+    end
+
+    # Three-column master: master occupies the centre column full-height; the
+    # remaining panes are dealt alternately to a left and a right column and
+    # stacked within each. With a single slave there is no symmetry to keep, so
+    # it falls back to a simple master/slave vertical split (like `tall`).
+    def centered(count, area, master_index = 0)
+      master_index = master_index.clamp(0, count - 1)
+      return [Rect.new(area.x, area.y, area.w, area.h)] if count == 1
+
+      others = (0...count).to_a - [master_index]
+      rects  = Array.new(count)
+
+      if others.length == 1
+        master_w = [area.w / 2, 1].max
+        rects[master_index] = Rect.new(area.x, area.y, master_w, area.h)
+        rects[others[0]] = Rect.new(area.x + master_w, area.y, [area.w - master_w, 1].max, area.h)
+        return rects
+      end
+
+      master_w = [area.w / 2, 1].max
+      side_w   = area.w - master_w
+      left_w   = [side_w / 2, 1].max
+      right_w  = [side_w - left_w, 1].max
+
+      rects[master_index] = Rect.new(area.x + left_w, area.y, master_w, area.h)
+      left  = others.select.with_index { |_, i| i.even? }
+      right = others.select.with_index { |_, i| i.odd? }
+      stack_column(rects, left,  area.x, area.y, left_w, area.h)
+      stack_column(rects, right, area.x + left_w + master_w, area.y, right_w, area.h)
+      rects
+    end
+
+    # Accordion: the focused pane expands to fill the leftover height while the
+    # others collapse to short "title sliver" rows, all stacked vertically.
+    # Like monocle but the other panes stay visible (and spatially reachable).
+    def stack(count, area, focused_index = 0)
+      return [Rect.new(area.x, area.y, area.w, area.h)] if count == 1
+      focused_index = focused_index.clamp(0, count - 1)
+
+      others = count - 1
+      # Sliver is 3 rows so draw_box can still render the title; shrink it only
+      # when the terminal is too short to give the focused pane its own 3 rows.
+      sliver = [3, [area.h - 3, 0].max / others].min
+      sliver = [sliver, 1].max
+      focus_h = area.h - sliver * others
+
+      rects = Array.new(count)
+      y = area.y
+      count.times do |i|
+        h = (i == focused_index) ? focus_h : sliver
+        rects[i] = Rect.new(area.x, y, area.w, h)
+        y += h
+      end
+      rects
+    end
+
+    # Stack the given pane indices vertically within a single column, dividing
+    # the height evenly (remainder to the topmost panes). Used by `centered`.
+    def stack_column(rects, indices, x, y, w, total_h)
+      return if indices.empty?
+      base_h = total_h / indices.length
+      rem    = total_h - base_h * indices.length
+      cy = y
+      indices.each_with_index do |idx, i|
+        h = base_h + (i < rem ? 1 : 0)
+        rects[idx] = Rect.new(x, cy, w, h)
+        cy += h
+      end
     end
 
     # Roughly square grid. Each row stretches its panes to fill the full width

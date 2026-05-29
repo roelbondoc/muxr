@@ -33,20 +33,37 @@ with the border color — tracks the current [input mode](#modes).
 
 ## Screenshots
 
-The three built-in layouts (pick directly with `t`/`g`/`m` in normal mode, or cycle with `Tab` / `C-a Tab`):
+The built-in layouts (pick directly with the keys below in normal mode, or cycle with `Tab` / `C-a Tab`):
+
+| Layout | Key | Geometry |
+|--------|-----|----------|
+| `tall`     | `t` | master on the left, slaves stacked on the right |
+| `wide`     | `w` | master on top, slaves split across the bottom |
+| `columns`  | `\|` | equal-width full-height vertical strips |
+| `rows`     | `-` | equal-height full-width horizontal strips |
+| `grid`     | `g` | roughly-square even tiling |
+| `spiral`   | `f` | Fibonacci spiral winding inward (each pane half the last) |
+| `centered` | `e` | master in a centred column, slaves dealt to both sides |
+| `stack`    | `S` | accordion — focused pane expands, others collapse to title slivers |
+| `monocle`  | `m` | focused pane fullscreen |
 
 <table>
   <tr>
     <td align="center"><strong>tall</strong><br/>master + stacked slaves</td>
+    <td align="center"><strong>wide</strong><br/>master on top, slaves below</td>
     <td align="center"><strong>grid</strong><br/>even tiling</td>
     <td align="center"><strong>monocle</strong><br/>focused pane fullscreen</td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/01-layout-tall.png" alt="tall layout"></td>
+    <td><img src="docs/screenshots/05-layout-wide.png" alt="wide layout"></td>
     <td><img src="docs/screenshots/02-layout-grid.png" alt="grid layout"></td>
     <td><img src="docs/screenshots/03-layout-monocle.png" alt="monocle layout"></td>
   </tr>
 </table>
+
+> `columns`, `rows`, `spiral`, `centered`, and `stack` are screenshot-less for now —
+> run `docs/screenshots/tapes/regenerate.sh` (needs [VHS](https://github.com/charmbracelet/vhs)) to capture them.
 
 The Quake-style drawer overlay (`~` in normal mode, `C-a ~` in passthrough):
 
@@ -100,7 +117,7 @@ muxr has two top-level input modes, modeled on vim:
 
 - **Normal** (default at startup) — single keys act on the multiplexer.
   `hjkl` moves focus between panes, `HJKL` moves the focused pane
-  itself, `c`/`x` create/close panes, `t`/`g`/`m` set the layout, etc.
+  itself, `c`/`x` create/close panes, `t`/`w`/`g`/`m` (and `|`/`-`/`f`/`e`/`S`) set the layout, etc.
   No prefix needed.
 - **Passthrough** (entered with `i`) — every keystroke is forwarded to
   the focused pane, exactly like a regular terminal. muxr commands are
@@ -124,7 +141,8 @@ regardless of mode.
 | `H` / `J` / `K` / `L`| move focused pane left / down / up / right          |
 | `i`                  | drop into passthrough mode                          |
 | `c` / `x`            | new / close focused pane (close asks `y/n`)         |
-| `t` / `g` / `m`      | layout: tall / grid / monocle                       |
+| `t` / `w` / `g` / `m`| layout: tall / wide / grid / monocle                |
+| `\|` / `-` / `f` / `e` / `S` | layout: columns / rows / spiral / centered / stack |
 | `Tab` / `Enter`      | cycle layout / promote focused to master            |
 | `a` / `1` … `9`      | toggle last pane / jump to pane by number           |
 | `s`                  | enter scrollback / copy-mode                        |

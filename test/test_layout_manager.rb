@@ -46,6 +46,105 @@ class TestLayoutManager < Minitest::Test
     assert_equal 3, rects.compact.length
   end
 
+  def test_wide_with_single_pane_fills_area
+    rects = Muxr::LayoutManager.compute(:wide, 1, @area)
+    assert_equal 1, rects.length
+    assert_equal [0, 0, 80, 24], rects[0].to_a
+  end
+
+  def test_wide_with_two_panes_splits_master_top_and_stack_bottom
+    rects = Muxr::LayoutManager.compute(:wide, 2, @area, master_index: 0)
+    assert_equal 2, rects.length
+    assert_equal [0, 0, 80, 12], rects[0].to_a
+    assert_equal [0, 12, 80, 12], rects[1].to_a
+  end
+
+  def test_wide_stack_widths_sum_to_total
+    rects = Muxr::LayoutManager.compute(:wide, 4, @area)
+    master = rects[0]
+    slaves = rects[1..]
+    assert_equal 80, slaves.sum(&:w)
+    slaves.each { |r| assert_equal master.h, r.y }
+  end
+
+  def test_wide_respects_master_index
+    rects = Muxr::LayoutManager.compute(:wide, 3, @area, master_index: 2)
+    refute_nil rects[2]
+    assert_equal @area.w, rects[2].w
+    assert_equal 0, rects[2].y
+  end
+
+  def test_wide_clamps_master_index_out_of_range
+    rects = Muxr::LayoutManager.compute(:wide, 3, @area, master_index: 99)
+    assert_equal 3, rects.compact.length
+  end
+
+  def test_columns_are_equal_width_full_height_strips
+    rects = Muxr::LayoutManager.compute(:columns, 4, @area)
+    assert_equal 4, rects.length
+    assert_equal [20], rects.map(&:w).uniq
+    rects.each { |r| assert_equal 24, r.h; assert_equal 0, r.y }
+    assert_equal [0, 20, 40, 60], rects.map(&:x)
+  end
+
+  def test_columns_cover_full_width_with_remainder
+    rects = Muxr::LayoutManager.compute(:columns, 3, @area)
+    assert_equal 80, rects.sum(&:w)
+    assert_equal [0, rects[0].w, rects[0].w + rects[1].w], rects.map(&:x)
+  end
+
+  def test_rows_are_equal_height_full_width_strips
+    rects = Muxr::LayoutManager.compute(:rows, 3, @area)
+    assert_equal 3, rects.length
+    assert_equal 24, rects.sum(&:h)
+    rects.each { |r| assert_equal 80, r.w; assert_equal 0, r.x }
+    assert_equal [0, rects[0].h, rects[0].h + rects[1].h], rects.map(&:y)
+  end
+
+  def test_spiral_single_pane_fills_area
+    rects = Muxr::LayoutManager.compute(:spiral, 1, @area)
+    assert_equal [0, 0, 80, 24], rects[0].to_a
+  end
+
+  def test_spiral_winds_inward_without_gaps_or_zero_sizes
+    rects = Muxr::LayoutManager.compute(:spiral, 5, @area)
+    assert_equal 5, rects.length
+    rects.each { |r| assert_operator r.w, :>=, 1; assert_operator r.h, :>=, 1 }
+    # First pane takes the left half, full height; last pane is the inner remainder.
+    assert_equal [0, 0, 40, 24], rects[0].to_a
+    assert_operator rects.last.w, :<, 40
+  end
+
+  def test_centered_master_in_middle_with_slaves_each_side
+    rects = Muxr::LayoutManager.compute(:centered, 5, @area, master_index: 0)
+    master = rects[0]
+    slaves = rects[1..]
+    # Master is centred: slaves exist both to its left and to its right.
+    assert(slaves.any? { |r| r.x < master.x })
+    assert(slaves.any? { |r| r.x >= master.x + master.w })
+    assert_equal 24, master.h
+  end
+
+  def test_centered_single_slave_falls_back_to_vertical_split
+    rects = Muxr::LayoutManager.compute(:centered, 2, @area, master_index: 0)
+    assert_equal [0, 0, 40, 24], rects[0].to_a
+    assert_equal [40, 0, 40, 24], rects[1].to_a
+  end
+
+  def test_stack_focused_pane_expands_others_are_slivers
+    rects = Muxr::LayoutManager.compute(:stack, 3, @area, focused_index: 1)
+    assert_equal 24, rects.sum(&:h)
+    rects.each { |r| assert_equal 80, r.w; assert_equal 0, r.x }
+    assert_operator rects[1].h, :>, rects[0].h
+    assert_operator rects[1].h, :>, rects[2].h
+    assert_equal rects[0].h, rects[2].h
+  end
+
+  def test_stack_single_pane_fills_area
+    rects = Muxr::LayoutManager.compute(:stack, 1, @area)
+    assert_equal [0, 0, 80, 24], rects[0].to_a
+  end
+
   def test_grid_with_four_panes_two_by_two
     rects = Muxr::LayoutManager.compute(:grid, 4, @area)
     assert_equal 4, rects.length

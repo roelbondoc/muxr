@@ -339,7 +339,7 @@ class TestControlServer < Minitest::Test
     app = build_app
     app.session.window.set_layout(:tall)
     res = dispatch(app, "layout.cycle")
-    assert_equal "grid", res["layout"]
+    assert_equal "wide", res["layout"]
   end
 
   # ---- pane.run ----
