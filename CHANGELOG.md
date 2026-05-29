@@ -6,6 +6,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-05-29
+
 ### Added
 - Six new layouts join `tall`, `grid`, and `monocle`:
   - **`wide`** (`w`) — master on top, slaves split across the bottom.
