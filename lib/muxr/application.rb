@@ -116,6 +116,7 @@ module Muxr
       else
         @session.window.focus_next
       end
+      sync_input_mode_to_focus
       invalidate
     end
 
@@ -126,6 +127,7 @@ module Muxr
       else
         @session.window.focus_prev
       end
+      sync_input_mode_to_focus
       invalidate
     end
 
@@ -136,6 +138,7 @@ module Muxr
       else
         @session.window.focus_last
       end
+      sync_input_mode_to_focus
       invalidate
     end
 
@@ -145,7 +148,21 @@ module Muxr
       return unless idx >= 0 && idx < @session.window.panes.length
       @session.focus_drawer = false
       @session.window.focus_index(idx)
+      sync_input_mode_to_focus
       invalidate
+    end
+
+    # After a focus change, reconcile the input mode with the newly-focused
+    # pane: if it was left scrolled back, re-enter scrollback so the user
+    # lands exactly where they were reading ("navigating back to the scrolled
+    # pane puts you back into scrollback"). We only ever auto-ENTER here —
+    # the InputHandler's @prefix_return is what keeps you in scrollback when
+    # you hop onto a live pane, so we never auto-leave.
+    def sync_input_mode_to_focus
+      target = focused_target
+      return unless target&.terminal&.scrolled_back?
+      @input.enter_scrollback_mode
+      @renderer.reset_frame!
     end
 
     # Move focus to the pane spatially adjacent in `direction` (:left/:right/
@@ -168,12 +185,14 @@ module Muxr
         when :right, :down then win.focus_next
         when :left, :up    then win.focus_prev
         end
+        sync_input_mode_to_focus
         invalidate
         return
       end
 
       return unless idx
       win.focus_index(idx)
+      sync_input_mode_to_focus
       invalidate
     end
 
@@ -502,7 +521,6 @@ module Muxr
     def exit_selection(yank:)
       target = focused_target
       term = target&.terminal
-      yanked = false
       if yank
         # No anchor → no-op. User is still positioning; they can press v
         # first, then yank. Esc/q is the way to exit from navigation.
@@ -512,18 +530,14 @@ module Muxr
           @paste_buffer = text
           spawn_pbcopy(text)
           flash("yanked #{text.bytesize} bytes")
-          yanked = true
         end
       end
       term&.clear_selection
-      if yanked
-        # vim-style: yanking drops you straight back to "normal" (idle),
-        # not back into scrollback navigation.
-        term&.scroll_to_bottom
-        @input.enter_idle_mode
-      else
-        @input.enter_scrollback_mode
-      end
+      # Drop back into scrollback at the current position whether or not we
+      # yanked. We no longer snap to the live bottom on yank — the user stays
+      # where they were reading so they can keep selecting or scrolling, and
+      # `q`/Esc is still there when they want to return to the bottom.
+      @input.enter_scrollback_mode
       @renderer.reset_frame!
       invalidate
     end

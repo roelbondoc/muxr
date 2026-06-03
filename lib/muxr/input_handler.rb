@@ -19,6 +19,15 @@ module Muxr
   # finish. :scrollback and :selection also return to @base_mode so that
   # exiting back from a scroll/yank lands you back in passthrough if that's
   # where you came from.
+  #
+  # Scrollback is effectively pane-bound. Ctrl-a is honored from inside
+  # :scrollback and :selection — it drops into :prefix (with @prefix_return
+  # = :scrollback) so a pane switch keeps you in scrollback on the pane you
+  # move to, while the pane you left keeps its own scroll position. Coming
+  # the other way, the Application re-enters scrollback whenever you focus a
+  # pane that was left scrolled back. `i` from scrollback drops to insert
+  # (passthrough) without snapping to the bottom; only `q`/Esc returns the
+  # pane to the live bottom.
   class InputHandler
     PREFIX = "\x01".freeze # Ctrl-a
 
@@ -158,6 +167,11 @@ module Muxr
       @command_buffer = +""
       @search_buffer = +""
       @search_direction = :forward
+      # When the prefix state is entered from scrollback/selection (Ctrl-a),
+      # this records :scrollback so that a pane switch lands you back in
+      # scrollback on the newly-focused pane instead of dropping to the base
+      # mode. nil means "use @base_mode" (the normal passthrough behavior).
+      @prefix_return = nil
     end
 
     def feed(data)
@@ -305,6 +319,12 @@ module Muxr
     end
 
     def handle_prefix(ch)
+      # Where to land once the prefix binding finishes. Normally the base
+      # mode, but :scrollback when we entered the prefix from scrollback /
+      # selection so a pane switch keeps you in scrollback on the new pane.
+      # Consume it immediately so it never leaks into the next prefix.
+      ret = @prefix_return || @base_mode
+      @prefix_return = nil
       action = PREFIX_BINDINGS[ch]
       case
       when ch == "\e"
@@ -321,15 +341,18 @@ module Muxr
         @state = @base_mode
       when DIGIT_RE.match?(ch)
         @app.focus_pane_number(ch.to_i)
-        @state = @base_mode
+        # The focus action may auto-enter scrollback (landing on a pane that
+        # was left scrolled). Only fall back to `ret` if it didn't.
+        @state = ret if @state == :prefix
       when action
         @app.public_send(action)
         # The action may have set a new state (confirm_quit, confirm_close,
-        # scrollback, help). Only revert to base mode if we're still in :prefix.
-        @state = @base_mode if @state == :prefix
+        # scrollback via auto-enter, help). Only fall back to `ret` if we're
+        # still in :prefix.
+        @state = ret if @state == :prefix
       else
-        # Unknown prefix key: return to base mode silently.
-        @state = @base_mode
+        # Unknown prefix key: return to where we came from silently.
+        @state = ret
       end
     end
 
@@ -352,6 +375,25 @@ module Muxr
     end
 
     def handle_scrollback_input(ch)
+      if ch == PREFIX
+        # Ctrl-a is the escape hatch even from scrollback: drop into the
+        # prefix state so the user can switch panes (Ctrl-a n/p/a/1-9) or
+        # run any other prefix binding without first leaving scrollback.
+        # @prefix_return = :scrollback keeps the user in scrollback on the
+        # pane they switch to; the source pane keeps its scroll position so
+        # it stays put. Scrollback is effectively pane-bound now.
+        @prefix_return = :scrollback
+        @state = :prefix
+        return
+      end
+      if ch == "i"
+        # Drop straight into insert (passthrough) without snapping to the
+        # live bottom — the pane stays where it's scrolled. Mirrors the
+        # normal-mode `i` so "type now" is one key from scrollback too.
+        enter_passthrough_mode
+        @app.enter_passthrough_mode
+        return
+      end
       if SCROLLBACK_EXITS.include?(ch)
         enter_idle_mode
         @app.exit_scrollback
@@ -434,6 +476,16 @@ module Muxr
     end
 
     def handle_selection_input(ch)
+      if ch == PREFIX
+        # Same escape hatch as scrollback: Ctrl-a enters the prefix state so
+        # pane switching (and any other prefix binding) works mid-selection.
+        # We return to :scrollback (not :selection) on the new pane — you
+        # don't want to be mid-select on a pane you just arrived at — while
+        # the source pane keeps its scroll position and selection intact.
+        @prefix_return = :scrollback
+        @state = :prefix
+        return
+      end
       if SELECTION_YANK.include?(ch)
         @app.exit_selection(yank: true)
         return

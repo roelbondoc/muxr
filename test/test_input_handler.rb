@@ -284,6 +284,72 @@ class TestInputHandler < Minitest::Test
     assert_equal [:enter_selection], h.instance_variable_get(:@app).calls
   end
 
+  def test_scrollback_ctrl_a_switches_pane_and_stays_in_scrollback
+    h = build_passthrough
+    h.enter_scrollback_mode
+    h.feed("\x01n") # Ctrl-a n → next pane
+    calls = h.instance_variable_get(:@app).calls
+    assert_equal [:focus_next], calls
+    # No exit_scrollback: the source pane keeps its scroll position, and the
+    # mode is pane-bound so we stay in scrollback on the new pane.
+    refute_includes calls, :exit_scrollback
+    assert_equal :scrollback, h.state
+  end
+
+  def test_scrollback_ctrl_a_digit_switches_pane_and_stays_in_scrollback
+    h = Muxr::InputHandler.new(FakeApp.new) # normal base mode
+    h.enter_scrollback_mode
+    h.feed("\x012") # Ctrl-a 2 → focus pane #2
+    calls = h.instance_variable_get(:@app).calls
+    assert_equal [[:focus_pane_number, 2]], calls
+    refute_includes calls, :exit_scrollback
+    assert_equal :scrollback, h.state
+  end
+
+  def test_scrollback_ctrl_a_then_escape_leaves_scrollback_to_normal
+    h = build_passthrough
+    h.enter_scrollback_mode
+    h.feed("\x01\e") # Ctrl-a Esc → leave passthrough entirely
+    assert_equal :normal, h.state
+    assert_equal :normal, h.base_mode
+  end
+
+  def test_scrollback_i_enters_passthrough_insert
+    h = Muxr::InputHandler.new(FakeApp.new) # normal base mode
+    h.enter_scrollback_mode
+    h.feed("i")
+    calls = h.instance_variable_get(:@app).calls
+    assert_equal [:enter_passthrough_mode], calls
+    # No exit_scrollback / scroll-to-bottom: the pane keeps its position.
+    refute_includes calls, :exit_scrollback
+    assert_equal :passthrough, h.state
+    assert_equal :passthrough, h.base_mode
+  end
+
+  def test_selection_ctrl_a_switches_pane_and_returns_to_scrollback
+    h = build_passthrough
+    h.enter_selection_mode
+    h.feed("\x01p") # Ctrl-a p → prev pane
+    calls = h.instance_variable_get(:@app).calls
+    assert_equal [:focus_prev], calls
+    refute_includes calls, :exit_selection
+    # Switching out of selection lands you in scrollback on the new pane.
+    assert_equal :scrollback, h.state
+  end
+
+  def test_prefix_return_does_not_leak_into_next_prefix
+    # A scrollback-originated prefix sets @prefix_return = :scrollback. After
+    # it resolves, a fresh prefix from passthrough must fall back to base.
+    h = build_passthrough
+    h.enter_scrollback_mode
+    h.feed("\x01n")        # scrollback → switch pane → stays scrollback
+    assert_equal :scrollback, h.state
+    h.feed("i")            # scrollback → insert → passthrough
+    assert_equal :passthrough, h.state
+    h.feed("\x01z")        # unknown prefix key from passthrough → base mode
+    assert_equal :passthrough, h.state
+  end
+
   def test_selection_mode_dispatches_directional_moves
     h = build_passthrough
     h.enter_selection_mode
