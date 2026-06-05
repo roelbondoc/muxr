@@ -96,6 +96,11 @@ module Muxr
       @selection_mode = :linear
       @sync_pending = false
       @sync_started_at = nil
+      # True once the inner program enables bracketed-paste mode (DECSET
+      # 2004). The Application consults this to decide whether to forward the
+      # \e[200~…\e[201~ paste markers the outer terminal wraps around a paste
+      # or strip them — see Application#send_to_focused.
+      @bracketed_paste = false
       @pending_replies = +"".b
       @search_query = nil
       @search_direction = :forward
@@ -132,6 +137,14 @@ module Muxr
     def sync_deadline
       return nil unless @sync_pending && @sync_started_at
       @sync_started_at + SYNC_TIMEOUT
+    end
+
+    # True iff the inner program has enabled bracketed-paste mode (DECSET
+    # 2004). When false, the Application strips paste markers before writing
+    # so a program that doesn't speak bracketed paste never prints a literal
+    # "^[[200~".
+    def bracketed_paste?
+      @bracketed_paste
     end
 
     attr_reader :selection_mode
@@ -773,19 +786,20 @@ module Muxr
       when ">", "<", "=", "!"
         return
       when "?"
-        # DEC private modes — most we treat as no-ops, but mode 2026
-        # (Synchronized Output) is a render-timing hint we honor so the
-        # outer paint lands on fully-formed frames from fzf/nvim/helix.
+        # DEC private modes — most we treat as no-ops, but two we track:
+        #   2026 (Synchronized Output) — a render-timing hint we honor so the
+        #        outer paint lands on fully-formed frames from fzf/nvim/helix.
+        #   2004 (Bracketed Paste) — whether the inner program wants pastes
+        #        wrapped in \e[200~…\e[201~; the Application strips those
+        #        markers when it's off (see Application#send_to_focused).
         if final == "h" || final == "l"
-          if csi_params.include?(2026)
-            if final == "h"
-              @sync_pending = true
-              @sync_started_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-            else
-              @sync_pending = false
-              @sync_started_at = nil
-            end
+          enabled = (final == "h")
+          params = csi_params
+          if params.include?(2026)
+            @sync_pending = enabled
+            @sync_started_at = enabled ? Process.clock_gettime(Process::CLOCK_MONOTONIC) : nil
           end
+          @bracketed_paste = enabled if params.include?(2004)
         end
         return
       end

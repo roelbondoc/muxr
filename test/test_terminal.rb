@@ -152,6 +152,26 @@ class TestTerminal < Minitest::Test
     assert_equal "X", t.cell(0, 0).char
   end
 
+  def test_bracketed_paste_mode_tracks_decset_2004
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    refute t.bracketed_paste?, "starts disabled"
+    t.feed("\e[?2004h")
+    assert t.bracketed_paste?, "enabled by \\e[?2004h"
+    t.feed("\e[?2004l")
+    refute t.bracketed_paste?, "disabled by \\e[?2004l"
+  end
+
+  def test_bracketed_paste_and_sync_modes_are_independent
+    # A combined DECSET shouldn't bleed one mode into the other.
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e[?2026h")
+    assert t.sync_pending?
+    refute t.bracketed_paste?
+    t.feed("\e[?2004h")
+    assert t.bracketed_paste?
+    assert t.sync_pending?
+  end
+
   def test_sgr_colon_extended_foreground_color
     t = Muxr::Terminal.new(rows: 1, cols: 2)
     t.feed("\e[38:5:9mA")

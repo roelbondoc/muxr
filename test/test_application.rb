@@ -80,6 +80,76 @@ class TestApplicationScrollbackFollowsFocus < Minitest::Test
   end
 end
 
+# The client unconditionally enables bracketed-paste mode on the outer
+# terminal, so pastes arrive wrapped in \e[200~…\e[201~. send_to_focused must
+# forward those markers to programs that speak the protocol and strip them
+# from programs that don't, so the latter never print a literal "^[[200~".
+class TestApplicationBracketedPaste < Minitest::Test
+  FakeSession = Struct.new(:window, :focus_drawer, :drawer)
+
+  class WritablePane
+    attr_reader :terminal, :writes
+    def initialize(terminal)
+      @terminal = terminal
+      @writes = +"".b
+    end
+
+    def write(data)
+      @writes << data
+    end
+  end
+
+  def build(term)
+    app = Muxr::Application.new([])
+    win = Muxr::Window.new
+    win.add_pane(WritablePane.new(term))
+    app.instance_variable_set(:@session, FakeSession.new(win, false, nil))
+    app
+  end
+
+  def written(app)
+    app.send(:focused_pane).writes
+  end
+
+  def test_strips_markers_when_program_has_not_enabled_bracketed_paste
+    app = build(Muxr::Terminal.new(rows: 5, cols: 20))
+    app.send_to_focused("\e[200~hello world\e[201~")
+    assert_equal "hello world", written(app)
+  end
+
+  def test_forwards_markers_when_program_enabled_bracketed_paste
+    term = Muxr::Terminal.new(rows: 5, cols: 20)
+    term.feed("\e[?2004h")
+    app = build(term)
+    app.send_to_focused("\e[200~hello\e[201~")
+    assert_equal "\e[200~hello\e[201~", written(app)
+  end
+
+  def test_strips_markers_split_across_chunks
+    app = build(Muxr::Terminal.new(rows: 5, cols: 20))
+    # End marker straddles the chunk boundary mid-sequence.
+    app.send_to_focused("\e[200~abc\e[20")
+    app.send_to_focused("1~")
+    assert_equal "abc", written(app)
+  end
+
+  def test_bare_escape_key_is_not_held_back
+    # A lone ESC is the Escape key — it must reach the program immediately,
+    # not get stuck waiting for the rest of a marker that will never come.
+    app = build(Muxr::Terminal.new(rows: 5, cols: 20))
+    app.send_to_focused("\e")
+    assert_equal "\e", written(app)
+  end
+
+  def test_split_escape_sequence_is_reassembled_intact
+    # \e[2~ (Insert) split across chunks must arrive whole, not stripped.
+    app = build(Muxr::Terminal.new(rows: 5, cols: 20))
+    app.send_to_focused("\e[2")
+    app.send_to_focused("~")
+    assert_equal "\e[2~", written(app)
+  end
+end
+
 class TestApplicationListActive < Minitest::Test
   def with_isolated_sockets_dir
     Dir.mktmpdir("muxr-sockets") do |dir|

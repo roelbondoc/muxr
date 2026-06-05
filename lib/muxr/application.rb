@@ -71,6 +71,11 @@ module Muxr
       @control_socket_path = self.class.control_socket_path_for(@session_name)
       @control_server = nil
       @paste_buffer = +""
+      # Trailing bytes of an in-flight INPUT chunk that look like the start of
+      # a bracketed-paste marker but were cut off by the 4 KiB read boundary.
+      # Held back and prepended to the next chunk so a split marker still gets
+      # recognized — see #strip_bracketed_paste_markers.
+      @paste_marker_tail = +"".b
       @last_render_at = nil
       @foreground_poller = nil
     end
@@ -94,9 +99,61 @@ module Muxr
 
     # ---------- public action API (called from InputHandler / CommandDispatcher) ----------
 
+    # Bytes the outer terminal wraps around a paste once bracketed-paste mode
+    # is on (the client enables it unconditionally — see
+    # Client#enter_terminal_mode).
+    BRACKETED_PASTE_MARKERS = ["\e[200~".b, "\e[201~".b].freeze
+
     def send_to_focused(data)
       target = focused_target
-      target&.write(data)
+      return unless target
+      data = strip_bracketed_paste_markers(data, target)
+      target.write(data) unless data.empty?
+    end
+
+    # The client turns bracketed-paste mode on for the *outer* terminal so big
+    # pastes arrive wrapped in \e[200~…\e[201~ (which lets shells/editors that
+    # speak the protocol collapse them). But the focused program may not speak
+    # it — in that case the markers would print as a literal "^[[200~" before
+    # and after the text. So: forward the markers untouched when the focused
+    # program enabled DECSET 2004, strip them otherwise.
+    #
+    # A marker can straddle a 4 KiB read boundary, so any trailing bytes that
+    # form a partial marker (but not a bare ESC, which must reach the program
+    # immediately as the Escape key) are held back and prepended next chunk.
+    def strip_bracketed_paste_markers(data, target)
+      data = data.b
+      term = target.respond_to?(:terminal) ? target.terminal : nil
+      buf = @paste_marker_tail + data
+      @paste_marker_tail = +"".b
+
+      if term&.bracketed_paste?
+        # Program wants the markers — hand back everything, partial included.
+        return buf
+      end
+
+      hold = pending_marker_prefix(buf)
+      if hold.positive?
+        @paste_marker_tail = buf.byteslice(buf.bytesize - hold, hold)
+        buf = buf.byteslice(0, buf.bytesize - hold) || +"".b
+      end
+      BRACKETED_PASTE_MARKERS.each { |m| buf = buf.gsub(m, "") }
+      buf
+    end
+
+    # Length (2..5) of the longest suffix of `buf` that is a proper prefix of a
+    # bracketed-paste marker, so the remainder can arrive in the next chunk. A
+    # bare trailing ESC (length 1) is deliberately not held: it's almost always
+    # the Escape key and the program must see it without waiting on the next
+    # keystroke. Worst case a marker split right after its ESC leaks a few
+    # bytes, which the program reads as a harmless unknown escape.
+    def pending_marker_prefix(buf)
+      max = [buf.bytesize, 5].min
+      max.downto(2) do |k|
+        tail = buf.byteslice(buf.bytesize - k, k)
+        return k if BRACKETED_PASTE_MARKERS.any? { |m| m.byteslice(0, k) == tail }
+      end
+      0
     end
 
     def new_pane(cwd: nil)
