@@ -719,4 +719,93 @@ class TestTerminal < Minitest::Test
     refute t.search_active?
     assert_empty t.search_matches
   end
+
+  # ---------- wide / combining characters ----------
+
+  def test_char_width_classifies_codepoints
+    assert_equal 1, Muxr::Terminal.char_width("a".ord)
+    assert_equal 1, Muxr::Terminal.char_width("é".ord)        # precomposed
+    assert_equal 0, Muxr::Terminal.char_width("́".ord)   # combining acute
+    assert_equal 2, Muxr::Terminal.char_width("中".ord)        # CJK
+    assert_equal 2, Muxr::Terminal.char_width("🐛".ord)        # emoji
+    assert_equal 2, Muxr::Terminal.char_width("가".ord)        # Hangul syllable
+  end
+
+  def test_wide_char_advances_cursor_two_columns
+    t = Muxr::Terminal.new(rows: 2, cols: 10)
+    t.feed("中x")
+    assert_equal "中", t.cell(0, 0).char
+    assert_equal "",  t.cell(0, 1).char   # continuation half
+    assert_equal "x", t.cell(0, 2).char   # next glyph lands one column past
+    assert_equal 3, t.cursor_col
+  end
+
+  def test_wide_char_continuation_inherits_style
+    t = Muxr::Terminal.new(rows: 1, cols: 6)
+    t.feed("\e[31m中")                       # red foreground (SGR 31 → fg 1)
+    assert_equal 1, t.cell(0, 0).fg          # lead half colored
+    assert_equal 1, t.cell(0, 1).fg          # continuation half colored too
+  end
+
+  def test_combining_mark_folds_onto_previous_cell
+    t = Muxr::Terminal.new(rows: 1, cols: 5)
+    t.feed("é")                       # e + combining acute
+    assert_equal "é", t.cell(0, 0).char
+    assert_equal 1, t.cursor_col            # no extra column consumed
+    assert_equal " ", t.cell(0, 1).char
+  end
+
+  def test_combining_mark_at_line_start_is_dropped
+    t = Muxr::Terminal.new(rows: 1, cols: 5)
+    t.feed("́a")                       # nothing to attach to
+    assert_equal "a", t.cell(0, 0).char
+    assert_equal 1, t.cursor_col
+  end
+
+  def test_wide_char_defers_past_last_column
+    # A wide glyph that can't fit in the final column wraps to the next line
+    # rather than being split across the edge.
+    t = Muxr::Terminal.new(rows: 2, cols: 3)
+    t.feed("ab中")                          # 'a','b' fill cols 0,1; col 2 free
+    assert_equal " ", t.cell(0, 2).char     # last column left blank
+    assert_equal "中", t.cell(1, 0).char    # wide glyph on next row
+    assert_equal "",  t.cell(1, 1).char
+  end
+
+  def test_dump_text_preserves_wide_chars
+    t = Muxr::Terminal.new(rows: 1, cols: 8)
+    t.feed("中文x")
+    assert_equal "中文x", t.dump_text
+  end
+
+  def test_search_highlights_wide_line_in_column_coordinates
+    t = Muxr::Terminal.new(rows: 1, cols: 8)
+    t.feed("中x")                            # 中 at cols 0-1, x at col 2
+    t.search("x")
+    assert t.cell_in_match?(0, 2)           # highlight lands on the real column
+    refute t.cell_in_match?(0, 1)
+  end
+
+  def test_absolute_positioning_after_wide_char_stays_aligned
+    # TUI redraw pattern: a wide glyph followed by an absolute cursor move.
+    # The wide glyph must occupy two columns so the later CUP lands where the
+    # program expects.
+    t = Muxr::Terminal.new(rows: 2, cols: 10)
+    t.feed("\e[1;1H中\e[1;5HX")              # 中 at 0-1, then jump to column 5
+    assert_equal "中", t.cell(0, 0).char
+    assert_equal "",  t.cell(0, 1).char
+    assert_equal "X", t.cell(0, 4).char
+  end
+
+  def test_url_detection_after_wide_char_targets_correct_cells
+    t = Muxr::Terminal.new(rows: 1, cols: 30)
+    t.feed("中 http://example.com")          # 中 occupies cols 0-1
+    # The URL starts at column 3 (中=0-1, space=2). The synthetic hyperlink
+    # must land on the URL's actual cells, not be shifted by the wide glyph.
+    link = t.cell(0, 3).hyperlink
+    refute_nil link
+    assert link.start_with?("8;id=muxr-url-")
+    assert_includes link, "http://example.com"
+    assert_nil t.cell(0, 0).hyperlink         # the 中 cell is not part of the URL
+  end
 end

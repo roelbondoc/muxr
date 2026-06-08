@@ -135,4 +135,19 @@ class TestRenderer < Minitest::Test
     assert_equal 1, output.scan("\e]8;;https://example.com/longpath\e\\").length
     assert_equal 1, output.scan("\e]8;;\e\\").length
   end
+
+  def test_wide_char_emitted_once_with_following_glyph_contiguous
+    session = Muxr::Session.new(name: "spec", width: 40, height: 12)
+    session.window.add_pane(FakePane.new(label: "中x"))
+    session.window.set_layout(:monocle)
+    session.window.focused_index = 0
+    output = render(session)
+    # The wide glyph is emitted exactly once — its continuation half is never
+    # written, so we don't double-draw it or shove the trailing 'x' over.
+    assert_equal 1, output.scan("中").length
+    # With width-aware cursor tracking the 'x' lands one column past the wide
+    # glyph's two columns, so it follows contiguously with no cursor-position
+    # escape wedged between them.
+    assert_includes output, "中x"
+  end
 end

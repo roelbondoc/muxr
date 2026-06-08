@@ -12,6 +12,67 @@ module Muxr
 
     SCROLLBACK_MAX = 5000
 
+    # Codepoint ranges that occupy two display columns (East Asian Wide /
+    # Fullwidth per UAX #11, plus the common emoji blocks). A wide glyph is
+    # stored in its lead cell with a continuation cell (char "") to its right
+    # reserving the second column — see #put_char. Kept as a flat, sorted list
+    # of ranges; #char_width only consults it for codepoints >= 0x300, so the
+    # ASCII/Latin-1 fast path never pays for the scan.
+    WIDE_RANGES = [
+      0x1100..0x115F,   # Hangul Jamo
+      0x2329..0x232A,   # angle brackets
+      0x2E80..0x303E,   # CJK radicals, Kangxi, CJK symbols & punctuation
+      0x3041..0x33FF,   # Hiragana … CJK compatibility
+      0x3400..0x4DBF,   # CJK Unified Ext A
+      0x4E00..0x9FFF,   # CJK Unified Ideographs
+      0xA000..0xA4CF,   # Yi
+      0xA960..0xA97F,   # Hangul Jamo Ext-A
+      0xAC00..0xD7A3,   # Hangul Syllables
+      0xF900..0xFAFF,   # CJK Compatibility Ideographs
+      0xFE10..0xFE19,   # vertical forms
+      0xFE30..0xFE6F,   # CJK compatibility / small form variants
+      0xFF00..0xFF60,   # Fullwidth Forms
+      0xFFE0..0xFFE6,   # Fullwidth signs
+      0x1B000..0x1B16F, # Kana supplement / extended
+      0x1F300..0x1F64F, # Misc symbols & pictographs, emoticons
+      0x1F680..0x1F6FF, # transport & map symbols
+      0x1F900..0x1F9FF, # supplemental symbols & pictographs
+      0x1FA70..0x1FAFF, # symbols & pictographs extended-A
+      0x20000..0x3FFFD  # CJK Unified Ext B and beyond
+    ].freeze
+
+    # Codepoint ranges that occupy zero display columns: combining marks,
+    # variation selectors, and zero-width formatting characters. These fold
+    # onto the preceding glyph rather than consuming a column (#attach_combining)
+    # so the cursor stays aligned with what a real terminal would do.
+    ZERO_WIDTH_RANGES = [
+      0x0300..0x036F,     # combining diacritical marks
+      0x0483..0x0489,     # Cyrillic combining
+      0x0591..0x05BD, 0x05BF..0x05BF, 0x05C1..0x05C2, 0x05C4..0x05C5,
+      0x0610..0x061A, 0x064B..0x065F, 0x0670..0x0670,
+      0x06D6..0x06DC, 0x06DF..0x06E4, 0x06E7..0x06E8, 0x06EA..0x06ED,
+      0x0711..0x0711, 0x0730..0x074A,
+      0x200B..0x200F,     # zero-width space/joiner/non-joiner, marks
+      0x2028..0x202E, 0x2060..0x2064,
+      0x20D0..0x20FF,     # combining marks for symbols
+      0x1AB0..0x1AFF, 0x1DC0..0x1DFF, # combining extensions
+      0xFE00..0xFE0F,     # variation selectors
+      0xFE20..0xFE2F,     # combining half marks
+      0xFEFF..0xFEFF,     # BOM / zero-width no-break space
+      0xE0100..0xE01EF    # variation selectors supplement
+    ].freeze
+
+    # Display width of a codepoint in terminal columns: 0 (combining /
+    # zero-width), 2 (East Asian wide / emoji), or 1 (everything else). The
+    # Renderer uses this to advance its emit cursor by the right number of
+    # columns; #put_char uses it to lay glyphs into the grid.
+    def self.char_width(cp)
+      return 1 if cp < 0x0300
+      return 0 if ZERO_WIDTH_RANGES.any? { |r| r.cover?(cp) }
+      return 2 if WIDE_RANGES.any? { |r| r.cover?(cp) }
+      1
+    end
+
     # Cap on the OSC payload we buffer before parsing. URLs in OSC 8 can be
     # long but rarely exceed a few hundred bytes; 4 KiB lets the parser stay
     # tolerant of weird inputs without giving an attacker an unbounded sink.
@@ -591,12 +652,20 @@ module Muxr
         end
       end
 
+      # Build the scan text alongside a codepoint→cell map. A wide
+      # continuation half (char "") contributes no codepoints, and a
+      # base+combining cell contributes more than one, so we can't assume the
+      # old 1:1 cell↔codepoint indexing — map every codepoint back to its
+      # source cell instead. URLs are ASCII, but a wide glyph earlier on the
+      # line would otherwise shift every later offset off its cell.
       text = String.new(capacity: rows.length * @cols)
       cells = []
       rows.each do |row|
         row.each do |cell|
-          text << cell.char
-          cells << cell
+          ch = cell.char
+          next if ch.empty?
+          ch.each_char { cells << cell }
+          text << ch
         end
       end
 
@@ -893,22 +962,65 @@ module Muxr
     end
 
     def put_char(ch)
+      width = self.class.char_width(ch.ord)
+
+      # Zero-width: fold the mark onto the preceding glyph instead of taking a
+      # column, so the cursor stays where a real terminal would leave it.
+      return attach_combining(ch) if width.zero?
+
       if @autowrap_pending
         @cursor_col = 0
         line_feed
         @autowrap_pending = false
       end
-      cell = @buffer[@cursor_row][@cursor_col]
+
+      # A wide glyph needs two columns; if only the last column is free, leave
+      # it blank and wrap first (matching xterm/VTE deferral behavior).
+      if width == 2 && @cursor_col == @cols - 1
+        @buffer[@cursor_row][@cursor_col].reset!
+        @cursor_col = 0
+        line_feed
+      end
+
+      c = @cursor_col
+      write_cell(@buffer[@cursor_row][c], ch)
+      if width == 2
+        # The continuation half carries no glyph (char "") but inherits the
+        # lead's colors so a styled wide cell paints both columns; the Renderer
+        # skips emitting it since the lead already covers both columns.
+        write_cell(@buffer[@cursor_row][c + 1], "")
+      end
+
+      last_col = c + width - 1
+      if last_col >= @cols - 1
+        @cursor_col = @cols - 1
+        @autowrap_pending = true
+      else
+        @cursor_col = last_col + 1
+      end
+    end
+
+    def write_cell(cell, ch)
       cell.char = ch
       cell.fg = @fg
       cell.bg = @bg
       cell.attrs = @attrs
       cell.hyperlink = @current_hyperlink
-      if @cursor_col >= @cols - 1
-        @autowrap_pending = true
-      else
-        @cursor_col += 1
-      end
+    end
+
+    # Fold a zero-width mark (combining accent, variation selector, …) onto the
+    # glyph in the cell the cursor just left, so the outer terminal composes
+    # them (e + ◌́ → é) without the mark consuming a column. Marks with nothing
+    # to attach to — start of line, or landing on a wide continuation half —
+    # are dropped; column alignment matters more than the lost accent.
+    def attach_combining(ch)
+      target =
+        if @autowrap_pending then @buffer[@cursor_row][@cols - 1]
+        elsif @cursor_col > 0 then @buffer[@cursor_row][@cursor_col - 1]
+        end
+      return unless target
+      return if target.char.empty?
+      target.char += ch
     end
 
     def line_feed
@@ -1049,12 +1161,25 @@ module Muxr
       timeline_size.times do |tr|
         row = timeline_row(tr)
         next if row.nil?
+        # Build the row text and a parallel codepoint→column map so matches can
+        # be reported in column coordinates even when wide glyphs (one cell, two
+        # columns) and combining marks (multi-codepoint, one cell) break the
+        # 1:1 char-index↔column relationship. For all-ASCII rows col_at[i] == i,
+        # so this is identical to the old behavior on the common path.
         line = String.new(capacity: @cols)
-        @cols.times { |c| line << (row[c]&.char || " ") }
+        col_at = []
+        @cols.times do |c|
+          ch = row[c]&.char
+          next if ch == "" # wide continuation half — occupies no text slot
+          ch = " " if ch.nil?
+          ch.each_char { col_at << c }
+          line << ch
+        end
         haystack = case_sensitive ? line : line.downcase
         start = 0
         while (idx = haystack.index(needle, start))
-          matches << [tr, idx, idx + needle.length - 1]
+          last = idx + needle.length - 1
+          matches << [tr, col_at[idx], col_at[last] || col_at.last || idx]
           # Advance past the start of this match so overlapping needles
           # ("aa" in "aaaa") still emit one match per starting position.
           start = idx + 1

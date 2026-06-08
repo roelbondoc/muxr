@@ -548,6 +548,11 @@ module Muxr
           if same_size && @prev[y][x] == cell
             next
           end
+          # The right half of a wide glyph (char "") is painted by its lead
+          # cell to the left, which spans both columns in the outer terminal.
+          # Emitting anything here would clobber that glyph, so skip it — and
+          # leave last_x untouched, since we didn't move the outer cursor.
+          next if cell.char.empty?
           if last_y != y || last_x != x
             out << "\e[#{y + 1};#{x + 1}H"
           end
@@ -564,7 +569,12 @@ module Muxr
           end
           out << cell.char
           last_y = y
-          last_x = x + cell.char.length
+          # Advance by the glyph's display width, not its codepoint count: a
+          # wide char ("中") moves the outer cursor two columns though it's one
+          # codepoint, and a base+combining cell ("é") moves one though it's
+          # two. Keeping last_x in sync with the real cursor lets the next cell
+          # skip a redundant CUP.
+          last_x = x + Terminal.char_width(cell.char.ord)
         end
       end
       out << "\e]8;;\e\\" if cur_hyperlink
