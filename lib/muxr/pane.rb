@@ -117,6 +117,12 @@ module Muxr
       @process.resize(rows, cols)
     end
 
+    # Force the inner program to repaint itself (see PTYProcess#nudge_redraw).
+    # Used by the refresh keybinding to recover from emulation drift.
+    def request_redraw
+      @process.nudge_redraw
+    end
+
     def alive?
       @process.alive?
     end

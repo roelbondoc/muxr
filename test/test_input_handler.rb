@@ -123,6 +123,23 @@ class TestInputHandler < Minitest::Test
     assert_equal [:enter_scrollback], app.calls
   end
 
+  def test_normal_mode_r_refreshes
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed("r")
+    assert_equal [:refresh_focused], app.calls
+    assert_equal :normal, h.state
+  end
+
+  def test_passthrough_ctrl_a_r_refreshes
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.enter_passthrough_mode
+    h.feed("\x01r")
+    assert_equal [:refresh_focused], app.calls
+    assert_equal :passthrough, h.state
+  end
+
   def test_normal_mode_digit_focuses_pane_number
     app = FakeApp.new
     h = Muxr::InputHandler.new(app)

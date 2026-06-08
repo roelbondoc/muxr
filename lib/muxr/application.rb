@@ -351,6 +351,23 @@ module Muxr
       invalidate
     end
 
+    # Bound to `r` (normal) / `Ctrl-a r` (passthrough). Two-layer repaint to
+    # recover from a corrupted display, whichever layer drifted:
+    #   1. Nudge the focused program to redraw itself (SIGWINCH wiggle). This
+    #      fixes muxr's own Terminal grid when an unhandled or wide glyph
+    #      desynced the cursor — reset_frame! alone can't, since it would just
+    #      faithfully re-emit the wrong grid.
+    #   2. Force a full re-emit of our composed frame to the outer terminal,
+    #      fixing the case where the outer display lost/garbled bytes but our
+    #      grid is correct.
+    def refresh_focused
+      target = focused_target
+      target.request_redraw if target.respond_to?(:request_redraw)
+      @renderer.reset_frame!
+      flash("refreshed")
+      invalidate
+    end
+
     def promote_master
       @session.window.promote_to_master
       invalidate

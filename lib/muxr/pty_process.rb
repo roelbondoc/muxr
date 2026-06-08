@@ -81,6 +81,26 @@ module Muxr
       end
     end
 
+    # Coax the foreground program into repainting from scratch by briefly
+    # toggling the PTY window size, which delivers SIGWINCH to the tty's
+    # foreground process group. Full-screen TUIs (vim, htop, less, fzf) redraw
+    # on WINCH, which rewrites muxr's Terminal grid and clears any emulation
+    # drift (e.g. a wide glyph that desynced the cursor). The size is restored
+    # immediately, so the program redraws at the real dimensions: it reads the
+    # current (restored) winsize in its handler and never observes the
+    # transient size. No-op when the pane is too narrow to wiggle.
+    def nudge_redraw
+      return if @exited
+      smaller = [@cols - 1, 1].max
+      return if smaller == @cols
+      begin
+        @reader.winsize = [@rows, smaller, 0, 0]
+        @reader.winsize = [@rows, @cols, 0, 0]
+      rescue StandardError
+        # Some platforms reject winsize pokes; reset_frame! still re-emits.
+      end
+    end
+
     def alive?
       return false if @exited
       Process.kill(0, @pid)
