@@ -89,7 +89,12 @@ class TestRenderer < Minitest::Test
     session.window.set_layout(:monocle)
     session.window.focused_index = 0
     output = render(session)
-    assert_includes output, "· npm test"
+    # The "·" separator is East Asian Ambiguous width, so the renderer now
+    # forces an absolute cursor move after it rather than emitting the next
+    # glyph contiguously (see Renderer#contiguous_after?). Both the separator
+    # and the command still render; they're just no longer adjacent bytes.
+    assert_includes output, "·"
+    assert_includes output, "npm test"
   end
 
   def test_title_omits_separator_when_no_foreground_command
@@ -136,7 +141,7 @@ class TestRenderer < Minitest::Test
     assert_equal 1, output.scan("\e]8;;\e\\").length
   end
 
-  def test_wide_char_emitted_once_with_following_glyph_contiguous
+  def test_wide_char_emitted_once_then_repositions_following_glyph
     session = Muxr::Session.new(name: "spec", width: 40, height: 12)
     session.window.add_pane(FakePane.new(label: "中x"))
     session.window.set_layout(:monocle)
@@ -145,9 +150,28 @@ class TestRenderer < Minitest::Test
     # The wide glyph is emitted exactly once — its continuation half is never
     # written, so we don't double-draw it or shove the trailing 'x' over.
     assert_equal 1, output.scan("中").length
-    # With width-aware cursor tracking the 'x' lands one column past the wide
-    # glyph's two columns, so it follows contiguously with no cursor-position
-    # escape wedged between them.
-    assert_includes output, "中x"
+    # Because the outer terminal might disagree about a wide glyph's column
+    # count, the renderer forces an absolute cursor move before the next cell
+    # instead of relying on contiguity — so a width disagreement clips one
+    # glyph rather than shifting the rest of the line. The pane content starts
+    # at frame col 1 (inside the left border at col 0), so 中 occupies cols
+    # 1-2 and x is repositioned to col 3 (1-based: column 4).
+    refute_includes output, "中x"
+    assert_includes output, "中"
+    assert_includes output, "\e[2;4Hx"
+  end
+
+  def test_ambiguous_width_symbol_forces_reposition_but_ascii_stays_contiguous
+    session = Muxr::Session.new(name: "spec", width: 40, height: 12)
+    # "ab" is plain ASCII (contiguous), then "●" (U+25CF, East Asian
+    # Ambiguous), then "c". A terminal that draws ● two columns wide must not
+    # be allowed to shift "c"; the renderer repositions after ●.
+    session.window.add_pane(FakePane.new(label: "ab●c"))
+    session.window.set_layout(:monocle)
+    session.window.focused_index = 0
+    output = render(session)
+    assert_includes output, "ab●"        # ASCII run stays contiguous up to ●
+    refute_includes output, "●c"          # but c is repositioned after ●
+    assert_includes output, "c"
   end
 end

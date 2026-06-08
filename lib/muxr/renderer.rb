@@ -569,12 +569,19 @@ module Muxr
           end
           out << cell.char
           last_y = y
-          # Advance by the glyph's display width, not its codepoint count: a
-          # wide char ("中") moves the outer cursor two columns though it's one
-          # codepoint, and a base+combining cell ("é") moves one though it's
-          # two. Keeping last_x in sync with the real cursor lets the next cell
-          # skip a redundant CUP.
-          last_x = x + Terminal.char_width(cell.char.ord)
+          if contiguous_after?(cell.char)
+            # Advance by the glyph's display width, not its codepoint count: a
+            # wide char ("中") moves the outer cursor two columns though it's
+            # one codepoint, and a base+combining cell ("é") moves one though
+            # it's two. Keeping last_x in sync with the real cursor lets the
+            # next cell skip a redundant CUP.
+            last_x = x + Terminal.char_width(cell.char.ord)
+          else
+            # The outer terminal might advance its cursor by a different number
+            # of columns than we think for this glyph — force an absolute
+            # reposition for the next cell so the disagreement can't cascade.
+            last_x = nil
+          end
         end
       end
       out << "\e]8;;\e\\" if cur_hyperlink
@@ -586,6 +593,24 @@ module Muxr
       @prev = frame.map { |row| row.map(&:dup) }
       @prev_w = frame[0].length
       @prev_h = frame.length
+    end
+
+    # Whether we can trust the outer terminal's cursor to be exactly one
+    # display-width past this glyph, so the next contiguous cell needs no
+    # cursor-position escape. Safe only for glyphs whose width every terminal
+    # agrees on: ASCII (always one column), and the box-drawing / block-element
+    # band 0x2500–0x259F (reliably one column, and we emit a lot of them for
+    # borders, so keeping them contiguous matters). Everything else non-ASCII —
+    # CJK, emoji, and East Asian Ambiguous symbols like ·, …, ●, arrows, and
+    # the ⏺/✻/❯ glyphs Claude Code's UI is full of — can be drawn two columns
+    # wide by some terminals. We can't know which, so we force an absolute
+    # reposition after them: a width disagreement then clips a single glyph
+    # instead of shifting the whole rest of the line. A base+combining cell
+    # (multi-codepoint) is treated the same way out of caution.
+    def contiguous_after?(char)
+      return false if char.length > 1
+      cp = char.ord
+      cp < 0x80 || (cp >= 0x2500 && cp <= 0x259F)
     end
 
     def cursor_position(session, input_state:, command_buffer:, search_buffer: "")
