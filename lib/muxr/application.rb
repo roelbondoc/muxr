@@ -78,6 +78,20 @@ module Muxr
       @paste_marker_tail = +"".b
       @last_render_at = nil
       @foreground_poller = nil
+      # Opt-in diagnostic tap. When MUXR_TRACE_OUTPUT names a writable path, the
+      # server appends every byte it sends to the client — i.e. exactly what the
+      # outer terminal receives. Replaying it (`cat` it into a fresh terminal, or
+      # feed it to a reference emulator) reproduces a rendering bug from the byte
+      # stream alone, which tells us whether corruption is in muxr's emitted
+      # output or somewhere downstream. Off unless the env var is set.
+      @trace_output = open_trace(ENV["MUXR_TRACE_OUTPUT"])
+    end
+
+    def open_trace(path)
+      return nil if path.nil? || path.empty?
+      File.open(path, "ab")
+    rescue SystemCallError
+      nil
     end
 
     # Interval for the background thread that refreshes each pane's
@@ -698,6 +712,9 @@ module Muxr
     # the server is also trying to read from that same client.
     def deliver_output(bytes)
       return unless @current_client
+      if @trace_output
+        @trace_output.write(bytes) rescue nil
+      end
       @client_write_buffer << Protocol.frame(Protocol::OUTPUT, bytes)
       drain_client_writes
     end
@@ -806,6 +823,10 @@ module Muxr
       end
       @session&.window&.panes&.each(&:close)
       @session&.drawer&.close
+      if @trace_output
+        @trace_output.close rescue nil
+        @trace_output = nil
+      end
     end
 
     def loop_forever
