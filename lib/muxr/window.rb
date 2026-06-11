@@ -14,7 +14,7 @@ module Muxr
       @focused_index = 0
       @last_focused_pane = nil
       @master_index = 0
-      @layout = :tall
+      @layout = :spiral
     end
 
     # Setter records the outgoing focused pane (by reference) so focus_last can

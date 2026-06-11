@@ -50,16 +50,16 @@ class TestWindow < Minitest::Test
   def test_cycle_layout_rotates_through_known_layouts
     w = Muxr::Window.new
     w.add_pane(FakePane.new)
-    assert_equal :tall, w.layout
+    assert_equal :spiral, w.layout
+    w.cycle_layout; assert_equal :centered, w.layout
+    w.cycle_layout; assert_equal :stack, w.layout
+    w.cycle_layout; assert_equal :monocle, w.layout
+    w.cycle_layout; assert_equal :tall, w.layout
     w.cycle_layout; assert_equal :wide, w.layout
     w.cycle_layout; assert_equal :columns, w.layout
     w.cycle_layout; assert_equal :rows, w.layout
     w.cycle_layout; assert_equal :grid, w.layout
     w.cycle_layout; assert_equal :spiral, w.layout
-    w.cycle_layout; assert_equal :centered, w.layout
-    w.cycle_layout; assert_equal :stack, w.layout
-    w.cycle_layout; assert_equal :monocle, w.layout
-    w.cycle_layout; assert_equal :tall, w.layout
   end
 
   def test_set_layout_rejects_unknown
