@@ -65,13 +65,13 @@ A few things that are not obvious until you've debugged them:
 
 - **`LayoutManager` is pure** — `compute(layout, count, area, focused_index:, master_index:)` is the only entry point. Adding a new layout means adding a method here and an entry to `LAYOUTS`. No bookkeeping elsewhere; the Renderer calls `compute` on every render tick.
 
-- **Drawer PTY is never torn down on hide.** `toggle/show/hide` only flip `@visible`; the shell process keeps running so its scrollback survives. Only `drawer reset` actually kills the PTY. cwd inheritance happens **once at first creation** from the focused pane's `cwd`.
+- **Drawer PTY is never torn down on hide.** `toggle/show/hide` only flip `@visible`; the shell process keeps running so its scrollback survives. Only `drawer reset` actually kills the PTY. The drawer (like every new pane) starts in the **session origin cwd** — the directory `bin/muxr` was launched from, captured once in `Application#initialize` (`@origin_cwd`).
 
 - **`InputHandler` state machine:** `:idle` → (Ctrl-a) → `:prefix` → dispatches single key → `:idle`, OR `:prefix` + `:` → `:command` (buffered until Enter). `:confirm_quit` is a one-shot state entered by `:quit` / `Ctrl-a q`; it consumes one key and either calls `confirm_quit` (on `y`/`Y`) or `cancel_quit` (anything else). `:help` is the same shape — one-shot, cleared on any key. `Ctrl-a Ctrl-a` sends a literal Ctrl-a byte through to the focused pane.
 
 - **`Window#promote_to_master`** does NOT just swap indices — it moves the focused pane to position 0 in `@panes` and resets both indices to 0. This keeps tall/grid layouts visually stable (master is always `panes[0]`).
 
-- **`PTYProcess#cwd`** uses `/proc/<pid>/cwd` on Linux and falls back to `lsof -a -p PID -d cwd` on macOS/BSD. The lsof path is **synchronous and slow** (~100–300ms on macOS) — it runs on the event-loop thread when creating a new pane or saving a session. Don't add new callers without thinking about it.
+- **`PTYProcess#cwd`** uses `/proc/<pid>/cwd` on Linux and falls back to `lsof -a -p PID -d cwd` on macOS/BSD. The lsof path is **synchronous and slow** (~100–300ms on macOS) — it runs on the event-loop thread when saving a session. Don't add new callers without thinking about it. (New panes no longer call it — they start in the session origin cwd, not the focused pane's.)
 
 - **`ForegroundCommand.lookup(pid)`** is the moral cousin of `PTYProcess#cwd`: Linux reads `/proc/<pid>/stat` cheaply; macOS shells out to `ps -o tpgid=,pgid= -p <pid>` (and another `ps -o comm= -p <tpgid>`). Each macOS call is ~10–20ms × every pane × 750ms tick. It runs on `@foreground_poller` so the event loop is unaffected, but don't move it back to the main thread.
 

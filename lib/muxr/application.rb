@@ -67,6 +67,11 @@ module Muxr
       @current_client = nil
       @client_write_buffer = +"".b
       @listening_socket = nil
+      # The directory bin/muxr was launched from — Process.daemon(true, ...)
+      # preserves it across daemonization. Every new pane (and the drawer)
+      # starts here, treating it as the session's project root regardless of
+      # where the focused pane's shell has wandered.
+      @origin_cwd = Dir.pwd
       @socket_path = self.class.socket_path_for(@session_name)
       @control_socket_path = self.class.control_socket_path_for(@session_name)
       @control_server = nil
@@ -171,7 +176,7 @@ module Muxr
     end
 
     def new_pane(cwd: nil)
-      cwd ||= focused_pane&.cwd
+      cwd ||= @origin_cwd
       pane = make_pane(cwd: cwd)
       @session.window.add_pane(pane)
       @session.focus_drawer = false
@@ -1158,7 +1163,7 @@ module Muxr
 
     def ensure_drawer(command: nil)
       return if @session.drawer
-      cwd = focused_pane&.cwd
+      cwd = @origin_cwd
       pane = Pane.new(
         id: :drawer,
         rows: 10,
