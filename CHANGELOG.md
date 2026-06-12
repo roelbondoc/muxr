@@ -6,6 +6,50 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.11] - 2026-06-11
+
+### Added
+- Wide (CJK/emoji) and combining character support in the emulator.
+  `Terminal.char_width` classifies codepoints as 0/1/2 columns; a width-2
+  glyph occupies a lead cell plus an empty continuation cell, and
+  zero-width marks fold onto the preceding cell. Search highlights and
+  synthetic URL hyperlinks stay aligned on rows containing wide or
+  combining glyphs.
+- `r` / `Ctrl-a r` refresh keybinding: a SIGWINCH winsize-wiggle nudges
+  the focused program to repaint itself, and a forced full re-emit
+  repaints the outer terminal — recovering from display drift whichever
+  layer is at fault.
+- Scrollback is now pane-bound: `Ctrl-a` works from inside scrollback
+  and selection so pane-switch bindings work without leaving the mode,
+  focus returning to a scrolled-back pane resumes where you were
+  reading, yank returns to scrollback instead of snapping to the live
+  bottom, and `i` drops into insert without losing your place.
+- Opt-in `MUXR_TRACE_OUTPUT` tap: when the env var names a writable
+  path, the server appends every byte it sends to the client, so a
+  rendering bug can be reproduced from the byte stream alone.
+
+### Fixed
+- The diff renderer now forces an absolute cursor move after
+  width-ambiguous glyphs (East Asian Ambiguous symbols, CJK, emoji)
+  instead of trusting cursor contiguity, so a width disagreement with
+  the outer terminal clips a single glyph rather than shifting the
+  entire rest of the line — the "text doesn't line up until I resize"
+  bug. Verified against pyte as a reference emulator.
+- Bracketed-paste markers (`\e[200~`/`\e[201~`) are stripped before
+  writing to panes whose program never enabled the mode, so pastes no
+  longer show literal `^[[200~` text; programs that did enable it still
+  receive the markers, and markers split across read boundaries are
+  recombined.
+
+### Changed
+- `spiral` is the default layout for new windows (was `tall`). Saved
+  sessions are unaffected.
+- New panes and the drawer start in the session origin cwd — the
+  directory `bin/muxr` was launched from — instead of the focused
+  pane's live cwd. Explicit cwds (MCP `panes.create`, restored
+  sessions) still win, and pane creation no longer pays the synchronous
+  ~100–300ms `lsof` call on macOS.
+
 ## [0.1.10] - 2026-05-29
 
 ### Added
@@ -288,7 +332,13 @@ Initial release.
   boundaries.
 - Renderer that composes one frame and diff-emits ANSI to STDOUT.
 
-[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/roelbondoc/muxr/compare/v0.1.11...HEAD
+[0.1.11]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.11
+[0.1.10]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.10
+[0.1.9]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.9
+[0.1.8]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.8
+[0.1.7]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.7
+[0.1.6]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.6
 [0.1.5]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.5
 [0.1.4]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.4
 [0.1.3]: https://github.com/roelbondoc/muxr/releases/tag/v0.1.3
