@@ -62,14 +62,88 @@ module Muxr
       0xE0100..0xE01EF    # variation selectors supplement
     ].freeze
 
+    # East Asian *Ambiguous* width (UAX #11 class "A"): codepoints that some
+    # terminals draw one column wide and others two, depending on the font and
+    # the terminal's "ambiguous-as-wide" setting. This is where muxr and the
+    # outer terminal most often disagree — and the disagreement is exactly what
+    # corrupts in-place animations (Claude Code's ⏺/✻/❯ spinner, ·, …, ●, arrows).
+    # We don't hardcode a width for them: #char_width consults `ambiguous_wide`,
+    # which the width probe (see WidthProbe / the client handshake) sets to
+    # match the actual outer terminal. Curated to the BMP symbol/punctuation
+    # ranges that show up in practice rather than the full UAX #11 table.
+    AMBIGUOUS_RANGES = [
+      0x00A1..0x00A1, 0x00A4..0x00A4, 0x00A7..0x00A8, 0x00AA..0x00AA,
+      0x00AD..0x00AE, 0x00B0..0x00B4, 0x00B6..0x00BA, 0x00BC..0x00BF,
+      0x00C6..0x00C6, 0x00D0..0x00D0, 0x00D7..0x00D8, 0x00DE..0x00E1,
+      0x00E6..0x00E6, 0x00E8..0x00EA, 0x00EC..0x00ED, 0x00F0..0x00F0,
+      0x00F2..0x00F3, 0x00F7..0x00FA, 0x00FC..0x00FC, 0x00FE..0x00FE,
+      0x2010..0x2010, 0x2013..0x2016, 0x2018..0x2019, 0x201C..0x201D,
+      0x2020..0x2022, 0x2024..0x2027, 0x2030..0x2030, 0x2032..0x2033,
+      0x2035..0x2035, 0x203B..0x203B, 0x203E..0x203E, 0x2074..0x2074,
+      0x207F..0x207F, 0x2081..0x2084, 0x20AC..0x20AC, 0x2103..0x2103,
+      0x2105..0x2105, 0x2109..0x2109, 0x2113..0x2113, 0x2116..0x2116,
+      0x2121..0x2122, 0x2126..0x2126, 0x212B..0x212B, 0x2153..0x2154,
+      0x215B..0x215E, 0x2160..0x216B, 0x2170..0x2179, 0x2189..0x2189,
+      0x2190..0x2199, 0x21B8..0x21B9, 0x21D2..0x21D2, 0x21D4..0x21D4,
+      0x21E7..0x21E7, 0x2200..0x2200, 0x2202..0x2203, 0x2207..0x2208,
+      0x220B..0x220B, 0x220F..0x220F, 0x2211..0x2211, 0x2215..0x2215,
+      0x221A..0x221A, 0x221D..0x2220, 0x2223..0x2223, 0x2225..0x2225,
+      0x2227..0x222C, 0x222E..0x222E, 0x2234..0x2237, 0x223C..0x223D,
+      0x2248..0x2248, 0x224C..0x224C, 0x2252..0x2252, 0x2260..0x2261,
+      0x2264..0x2267, 0x226A..0x226B, 0x226E..0x226F, 0x2282..0x2283,
+      0x2286..0x2287, 0x2295..0x2295, 0x2299..0x2299, 0x22A5..0x22A5,
+      0x22BF..0x22BF, 0x2312..0x2312, 0x2460..0x24E9, 0x24EB..0x24FF,
+      # NOTE: the box-drawing / block-element band 0x2500-0x259F is deliberately
+      # excluded — Renderer#contiguous_after? trusts it as width-1 and terminals
+      # draw it narrow regardless of the ambiguous setting. Geometric shapes
+      # (0x25A0+) are fair game.
+      0x25A0..0x25A1,
+      0x25A3..0x25A9, 0x25B2..0x25B3, 0x25B6..0x25B7, 0x25BC..0x25BD,
+      0x25C0..0x25C1, 0x25C6..0x25C8, 0x25CB..0x25CB, 0x25CE..0x25D1,
+      0x25E2..0x25E5, 0x25EF..0x25EF, 0x2605..0x2606, 0x2609..0x2609,
+      0x260E..0x260F, 0x261C..0x261C, 0x261E..0x261E, 0x2640..0x2640,
+      0x2642..0x2642, 0x2660..0x2661, 0x2663..0x2665, 0x2667..0x266A,
+      0x266C..0x266D, 0x266F..0x266F, 0x269E..0x269F, 0x26BF..0x26BF,
+      0x26C6..0x26CD, 0x26CF..0x26D3, 0x26D5..0x26E1, 0x273D..0x273D,
+      0x2776..0x277F, 0xFFFD..0xFFFD
+    ].freeze
+
+    class << self
+      # Whether the outer terminal draws East Asian Ambiguous glyphs two columns
+      # wide. Set per attach by the width probe (default narrow, matching most
+      # modern terminals). Covers the long tail of ambiguous glyphs the probe
+      # doesn't sample individually.
+      attr_accessor :ambiguous_wide
+      # Exact per-codepoint widths the probe measured against the live terminal,
+      # cp => 1|2. These WIN over every heuristic below, because a direct
+      # measurement is ground truth. This is what catches glyphs whose width no
+      # class captures — Claude Code's ⏺/✻/❯, which a font may draw two columns
+      # wide via emoji presentation even when the terminal's ambiguous setting
+      # is narrow (the exact case the class toggle alone would miss).
+      attr_reader :width_overrides
+    end
+    # Both are process-global: the server hosts exactly one session / outer
+    # terminal at a time, and both #char_width call sites (the emulator and the
+    # Renderer) must agree.
+    self.ambiguous_wide = false
+    @width_overrides = {}
+
+    def self.width_overrides=(map)
+      @width_overrides = map || {}
+    end
+
     # Display width of a codepoint in terminal columns: 0 (combining /
-    # zero-width), 2 (East Asian wide / emoji), or 1 (everything else). The
-    # Renderer uses this to advance its emit cursor by the right number of
-    # columns; #put_char uses it to lay glyphs into the grid.
+    # zero-width), 2 (East Asian wide / emoji, plus anything the probe measured
+    # or Ambiguous when the probed terminal draws those wide), or 1 (everything
+    # else). The Renderer uses this to advance its emit cursor by the right
+    # number of columns; #put_char uses it to lay glyphs into the grid.
     def self.char_width(cp)
       return 1 if cp < 0x0300
       return 0 if ZERO_WIDTH_RANGES.any? { |r| r.cover?(cp) }
+      ov = @width_overrides[cp]
+      return ov if ov
       return 2 if WIDE_RANGES.any? { |r| r.cover?(cp) }
+      return 2 if @ambiguous_wide && AMBIGUOUS_RANGES.any? { |r| r.cover?(cp) }
       1
     end
 

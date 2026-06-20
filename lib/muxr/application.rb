@@ -954,10 +954,26 @@ module Muxr
 
       size = Protocol.decode_size(payload)
       apply_size(*size) if size
+      apply_caps(Protocol.decode_caps(payload))
 
       @current_client = sock
       @renderer.reset_frame!
       invalidate
+    end
+
+    # Apply the client's width-probe verdict so the emulator and Renderer measure
+    # glyphs exactly as this terminal draws them, eliminating the width
+    # disagreement that smears in-place animations:
+    #   ambiguous (1 narrow / 2 wide) — tunes the broad East Asian Ambiguous
+    #     class for the long tail of glyphs the probe didn't sample by hand.
+    #   glyphs ({codepoint => width}) — exact per-glyph overrides for the
+    #     emoji-presentation glyphs (Claude Code's ⏺/✻/❯) no class predicts.
+    # A reattaching client re-probes, so a different terminal re-tunes; the full
+    # repaint on attach absorbs the change.
+    def apply_caps(caps)
+      return if caps.nil? || caps.empty?
+      Terminal.ambiguous_wide = (caps[:ambiguous] == 2) if caps.key?(:ambiguous)
+      Terminal.width_overrides = caps[:glyphs] if caps.key?(:glyphs)
     end
 
     def consume_client_frame

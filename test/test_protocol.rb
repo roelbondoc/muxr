@@ -83,4 +83,29 @@ class TestProtocol < Minitest::Test
     assert_nil Muxr::Protocol.decode_size("30 abc")
     assert_nil Muxr::Protocol.decode_size("")
   end
+
+  def test_encode_size_appends_caps
+    assert_equal "30 120 ambiguous=2", Muxr::Protocol.encode_size(30, 120, { ambiguous: 2 })
+    assert_equal "30 120", Muxr::Protocol.encode_size(30, 120, {})
+    assert_equal "30 120", Muxr::Protocol.encode_size(30, 120, nil)
+  end
+
+  def test_decode_size_tolerates_trailing_caps
+    assert_equal [30, 120], Muxr::Protocol.decode_size("30 120 ambiguous=2")
+  end
+
+  def test_decode_caps_extracts_integer_pairs
+    assert_equal({ ambiguous: 2 }, Muxr::Protocol.decode_caps("30 120 ambiguous=2"))
+    assert_empty Muxr::Protocol.decode_caps("30 120")
+    # Malformed / non-numeric tokens are skipped, not raised on.
+    assert_empty Muxr::Protocol.decode_caps("30 120 bogus xx=yy")
+  end
+
+  def test_caps_glyph_map_round_trips
+    caps = { ambiguous: 1, glyphs: { 0x23FA => 2, 0x273B => 1 } }
+    encoded = Muxr::Protocol.encode_size(48, 200, caps)
+    assert_equal "48 200 ambiguous=1 glyphs=23fa:2,273b:1", encoded
+    assert_equal [48, 200], Muxr::Protocol.decode_size(encoded)
+    assert_equal caps, Muxr::Protocol.decode_caps(encoded)
+  end
 end

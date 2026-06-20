@@ -808,4 +808,49 @@ class TestTerminal < Minitest::Test
     assert_includes link, "http://example.com"
     assert_nil t.cell(0, 0).hyperlink         # the 中 cell is not part of the URL
   end
+
+  # The width probe flips Terminal.ambiguous_wide to match the outer terminal.
+  # When narrow (default), an ambiguous glyph is one column; when wide it claims
+  # two. Restore the default afterwards so the process-global toggle doesn't
+  # leak into other tests.
+  def test_ambiguous_width_follows_toggle
+    refute Muxr::Terminal.ambiguous_wide, "expected narrow default"
+    assert_equal 1, Muxr::Terminal.char_width("●".ord)
+    # CJK and ASCII are unaffected by the ambiguous setting.
+    assert_equal 2, Muxr::Terminal.char_width("中".ord)
+    assert_equal 1, Muxr::Terminal.char_width("a".ord)
+
+    Muxr::Terminal.ambiguous_wide = true
+    assert_equal 2, Muxr::Terminal.char_width("●".ord)
+    assert_equal 1, Muxr::Terminal.char_width("a".ord)
+    # Box-drawing band stays narrow even when ambiguous is wide.
+    assert_equal 1, Muxr::Terminal.char_width("─".ord)
+  ensure
+    Muxr::Terminal.ambiguous_wide = false
+  end
+
+  # Per-glyph overrides are ground truth: they win over every heuristic and
+  # cover glyphs (Claude Code's ⏺) that no width class predicts. They apply
+  # regardless of the ambiguous toggle.
+  def test_width_overrides_take_precedence
+    assert_equal 1, Muxr::Terminal.char_width(0x23FA)   # ⏺ default narrow
+    Muxr::Terminal.width_overrides = { 0x23FA => 2 }
+    assert_equal 2, Muxr::Terminal.char_width(0x23FA)
+    # An override can also demote a glyph muxr would otherwise call wide.
+    Muxr::Terminal.width_overrides = { "中".ord => 1 }
+    assert_equal 1, Muxr::Terminal.char_width("中".ord)
+  ensure
+    Muxr::Terminal.width_overrides = {}
+  end
+
+  def test_overridden_wide_glyph_gets_continuation_cell
+    Muxr::Terminal.width_overrides = { 0x23FA => 2 }   # ⏺
+    t = Muxr::Terminal.new(rows: 1, cols: 10)
+    t.feed("⏺x")
+    assert_equal "⏺", t.cell(0, 0).char
+    assert_equal "",  t.cell(0, 1).char       # reserved continuation half
+    assert_equal "x", t.cell(0, 2).char       # pushed one column right
+  ensure
+    Muxr::Terminal.width_overrides = {}
+  end
 end

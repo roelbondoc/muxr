@@ -29,11 +29,10 @@ module Muxr
 
     # Opens the socket. Returns true on success. Raises Errno::ENOENT /
     # Errno::ECONNREFUSED to the caller, which is bin/muxr's job to handle by
-    # spawning a server.
+    # spawning a server. HELLO is deferred to #run: it now carries the width
+    # probe's verdict, and the probe needs the TTY in raw mode first.
     def connect
       @sock = UNIXSocket.new(@socket_path)
-      rows, cols = terminal_size
-      Protocol.write(@sock, Protocol::HELLO, Protocol.encode_size(rows, cols))
       true
     end
 
@@ -41,8 +40,9 @@ module Muxr
       raise "must call #connect first" unless @sock
 
       enter_terminal_mode
-      install_winch_trap
       @running = true
+      send_hello          # may clear @running if the socket is already gone
+      install_winch_trap
 
       begin
         loop_forever
@@ -137,6 +137,28 @@ module Muxr
       queue_frame(Protocol::RESIZE, Protocol.encode_size(rows, cols))
     rescue Errno::EPIPE, Errno::ECONNRESET, IOError
       @running = false
+    end
+
+    # The opening handshake. Sent after the TTY is in raw mode so the width
+    # probe can read the terminal's CPR replies; its verdict (e.g. whether the
+    # terminal draws ambiguous-width glyphs wide) rides along in the payload so
+    # the server can align its emulator/Renderer with this exact terminal.
+    def send_hello
+      rows, cols = terminal_size
+      Protocol.write(@sock, Protocol::HELLO, Protocol.encode_size(rows, cols, probe_caps))
+    rescue Errno::EPIPE, Errno::ECONNRESET, IOError
+      @running = false
+    end
+
+    # Run the width probe against the controlling terminal. Skipped (→ no caps,
+    # server keeps its defaults) when STDIN/STDOUT aren't a TTY — tests, pipes,
+    # CI — or if the probe raises for any reason; a failed probe must never stop
+    # the client from attaching.
+    def probe_caps
+      return {} unless STDIN.tty? && STDOUT.tty?
+      WidthProbe.run(out: STDOUT, input: STDIN)
+    rescue StandardError
+      {}
     end
 
     def terminal_size
