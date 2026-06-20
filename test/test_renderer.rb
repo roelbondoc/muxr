@@ -174,4 +174,56 @@ class TestRenderer < Minitest::Test
     refute_includes output, "●c"          # but c is repositioned after ●
     assert_includes output, "c"
   end
+
+  # The real-world Claude Code symptom: an ambiguous-width glyph (here ●, U+25CF)
+  # animates in place while the neighbouring text stays put. A terminal that
+  # draws ● two columns wide steals the column to its right; if the diff skips
+  # that unchanged neighbour, the phantom second half lingers until a manual
+  # refresh. The renderer must force-repaint the cell after a model-1/draw-2
+  # glyph on every frame so the steal is reclaimed.
+  def test_ambiguous_glyph_forces_neighbour_repaint_on_later_frame
+    session = Muxr::Session.new(name: "spec", width: 40, height: 12)
+    pane = FakePane.new(label: "")
+    session.window.add_pane(pane)
+    session.window.set_layout(:monocle)
+    session.window.focused_index = 0
+
+    out = StringIO.new
+    renderer = Muxr::Renderer.new(out: out)
+
+    # Frame 1: spinner glyph + a space + steady text.
+    pane.terminal.feed("\e[H\e[2J● done")
+    renderer.render(session)
+    out.truncate(0)
+    out.rewind
+
+    # Frame 2: only the spinner glyph changes; " done" is untouched.
+    pane.terminal.feed("\e[H◐")
+    renderer.render(session)
+    frame2 = out.string
+
+    assert_includes frame2, "◐"
+    # The column immediately right of the glyph (the space) must be repainted
+    # even though our model says it is unchanged, so a 2-wide draw can't leave
+    # a phantom there.
+    assert_includes frame2, "\e[2;3H "
+  end
+
+  def test_visible_inner_cursor_is_shown
+    session = build_session(layout: :monocle, focused_index: 0)
+    # FakePane's terminal starts with the cursor visible (DECTCEM default).
+    output = render(session)
+    assert_includes output, "\e[?25h", "focused pane's cursor should be shown"
+  end
+
+  def test_hidden_inner_cursor_is_suppressed
+    session = build_session(layout: :monocle, focused_index: 0)
+    # Mirror Claude Code mid-render: the focused pane hid its cursor.
+    session.window.focused_pane.terminal.feed("\e[?25l")
+    output = render(session)
+    # Never re-show the cursor — the frame's own leading \e[?25l (hide during
+    # the diff) is the only visibility escape that should appear.
+    refute_includes output, "\e[?25h",
+      "a pane that hid its cursor must not get one painted back"
+  end
 end

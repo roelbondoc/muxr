@@ -808,4 +808,116 @@ class TestTerminal < Minitest::Test
     assert_includes link, "http://example.com"
     assert_nil t.cell(0, 0).hyperlink         # the 中 cell is not part of the URL
   end
+
+  # The width probe flips Terminal.ambiguous_wide to match the outer terminal.
+  # When narrow (default), an ambiguous glyph is one column; when wide it claims
+  # two. Restore the default afterwards so the process-global toggle doesn't
+  # leak into other tests.
+  def test_ambiguous_width_follows_toggle
+    refute Muxr::Terminal.ambiguous_wide, "expected narrow default"
+    assert_equal 1, Muxr::Terminal.char_width("●".ord)
+    # CJK and ASCII are unaffected by the ambiguous setting.
+    assert_equal 2, Muxr::Terminal.char_width("中".ord)
+    assert_equal 1, Muxr::Terminal.char_width("a".ord)
+
+    Muxr::Terminal.ambiguous_wide = true
+    assert_equal 2, Muxr::Terminal.char_width("●".ord)
+    assert_equal 1, Muxr::Terminal.char_width("a".ord)
+    # Box-drawing band stays narrow even when ambiguous is wide.
+    assert_equal 1, Muxr::Terminal.char_width("─".ord)
+  ensure
+    Muxr::Terminal.ambiguous_wide = false
+  end
+
+  # Per-glyph overrides are ground truth: they win over every heuristic and
+  # cover glyphs (Claude Code's ⏺) that no width class predicts. They apply
+  # regardless of the ambiguous toggle.
+  def test_width_overrides_take_precedence
+    assert_equal 1, Muxr::Terminal.char_width(0x23FA)   # ⏺ default narrow
+    Muxr::Terminal.width_overrides = { 0x23FA => 2 }
+    assert_equal 2, Muxr::Terminal.char_width(0x23FA)
+    # An override can also demote a glyph muxr would otherwise call wide.
+    Muxr::Terminal.width_overrides = { "中".ord => 1 }
+    assert_equal 1, Muxr::Terminal.char_width("中".ord)
+  ensure
+    Muxr::Terminal.width_overrides = {}
+  end
+
+  def test_overridden_wide_glyph_gets_continuation_cell
+    Muxr::Terminal.width_overrides = { 0x23FA => 2 }   # ⏺
+    t = Muxr::Terminal.new(rows: 1, cols: 10)
+    t.feed("⏺x")
+    assert_equal "⏺", t.cell(0, 0).char
+    assert_equal "",  t.cell(0, 1).char       # reserved continuation half
+    assert_equal "x", t.cell(0, 2).char       # pushed one column right
+  ensure
+    Muxr::Terminal.width_overrides = {}
+  end
+
+  def test_cursor_visibility_tracks_dectcem
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    assert t.cursor_visible?, "starts visible"
+    t.feed("\e[?25l")
+    refute t.cursor_visible?, "hidden by \\e[?25l"
+    t.feed("\e[?25h")
+    assert t.cursor_visible?, "shown by \\e[?25h"
+  end
+
+  def test_cursor_visibility_independent_of_sync_and_paste
+    # A combined DECSET must not bleed mode 25 into 2026/2004 or vice versa.
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e[?25l")
+    refute t.cursor_visible?
+    refute t.sync_pending?
+    refute t.bracketed_paste?
+    t.feed("\e[?2026h\e[?2004h")
+    refute t.cursor_visible?, "still hidden after unrelated DECSETs"
+    assert t.sync_pending?
+    assert t.bracketed_paste?
+  end
+
+  def test_full_reset_restores_cursor_visibility
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e[?25l")
+    refute t.cursor_visible?
+    t.feed("\ec") # RIS
+    assert t.cursor_visible?, "\\ec restores the cursor"
+  end
+
+  def test_bell_is_queued_as_a_notification
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    assert_nil t.take_pending_notifications!, "nothing queued initially"
+    t.feed("x\ay")
+    assert_equal "\a", t.take_pending_notifications!
+    assert_nil t.take_pending_notifications!, "drained"
+    # The bell is out-of-band: it does not disturb the grid.
+    assert_equal "x", t.cell(0, 0).char
+    assert_equal "y", t.cell(0, 1).char
+  end
+
+  def test_osc_9_desktop_notification_is_forwarded_verbatim
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e]9;build done\a")
+    assert_equal "\e]9;build done\a", t.take_pending_notifications!
+  end
+
+  def test_osc_777_notification_is_forwarded
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e]777;notify;Claude;needs input\e\\")
+    # ST terminator is normalized to BEL; the payload is preserved.
+    assert_equal "\e]777;notify;Claude;needs input\a", t.take_pending_notifications!
+  end
+
+  def test_osc_8_hyperlink_is_not_treated_as_a_notification
+    t = Muxr::Terminal.new(rows: 1, cols: 10)
+    t.feed("\e]8;;http://x\e\\A\e]8;;\e\\")
+    assert_nil t.take_pending_notifications!, "OSC 8 stays on the grid, not the bell queue"
+  end
+
+  def test_notification_queue_is_capped
+    t = Muxr::Terminal.new(rows: 1, cols: 1)
+    # Far more bells than NOTIFY_MAX bytes; the queue must not grow past the cap.
+    (Muxr::Terminal::NOTIFY_MAX + 1000).times { t.feed("\a") }
+    assert_operator t.take_pending_notifications!.bytesize, :<=, Muxr::Terminal::NOTIFY_MAX
+  end
 end

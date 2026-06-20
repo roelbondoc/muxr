@@ -544,10 +544,18 @@ module Muxr
       last_x = nil
 
       frame.each_with_index do |row, y|
+        # When the previous glyph on this row had an uncertain display width
+        # (set below), the outer terminal may have drawn it two columns wide and
+        # stolen the column to its right. Force that next cell to repaint even
+        # if our model says it's unchanged, so a phantom second half can't
+        # linger until a full repaint. Reset per row — a steal can't cross a
+        # line boundary.
+        force_next = false
         row.each_with_index do |cell, x|
-          if same_size && @prev[y][x] == cell
+          if same_size && @prev[y][x] == cell && !force_next
             next
           end
+          force_next = false
           # The right half of a wide glyph (char "") is painted by its lead
           # cell to the left, which spans both columns in the outer terminal.
           # Emitting anything here would clobber that glyph, so skip it — and
@@ -581,6 +589,15 @@ module Muxr
             # of columns than we think for this glyph — force an absolute
             # reposition for the next cell so the disagreement can't cascade.
             last_x = nil
+            # For a glyph WE model as a single column but whose real width the
+            # outer terminal may stretch to two (East Asian Ambiguous symbols
+            # like ·, …, ●, and the ⏺/✻/❯ glyphs Claude Code animates in place),
+            # also force the next cell to repaint. Otherwise an in-place spinner
+            # leaves its unchanged neighbour skipped by the diff, and the glyph's
+            # phantom second half sits on that column until a manual refresh.
+            # Width-2 glyphs (CJK/emoji) own their continuation cell already, so
+            # they don't need this — only the model-1/draw-2 mismatch does.
+            force_next = true if Terminal.char_width(cell.char.ord) == 1
           end
         end
       end
@@ -641,6 +658,11 @@ module Muxr
         return "\e[#{row};#{col}H\e[?25h"
       end
       return "\e[?25l" if term.scrolled_back?
+      # Honor the inner program's own cursor visibility (DECTCEM): Claude Code
+      # and other Ink UIs hide the cursor while rendering and only show it at a
+      # text prompt. Painting our block at its last write position otherwise
+      # leaves a phantom cursor smeared across the animating UI.
+      return "\e[?25l" unless term.cursor_visible?
       row = rect.y + 1 + term.cursor_row + 1
       col = rect.x + 1 + term.cursor_col + 1
       "\e[#{row};#{col}H\e[?25h"
