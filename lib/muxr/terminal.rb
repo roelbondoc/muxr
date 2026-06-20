@@ -152,6 +152,12 @@ module Muxr
     # tolerant of weird inputs without giving an attacker an unbounded sink.
     OSC_MAX_LEN = 4096
 
+    # Cap on the outbound notification queue (bell + notification OSCs). While a
+    # client is attached the Application drains it every read, so it stays tiny;
+    # the cap only matters for a detached session, where nobody is listening and
+    # a noisy inner program would otherwise grow it without bound.
+    NOTIFY_MAX = 64 * 1024
+
     # Match plain-text URLs the inner program printed without wrapping them
     # in OSC 8. We stamp the matching cells with a synthetic hyperlink so the
     # outer terminal treats a wrapped URL as one click target instead of two
@@ -236,7 +242,21 @@ module Muxr
       # \e[200~…\e[201~ paste markers the outer terminal wraps around a paste
       # or strip them — see Application#send_to_focused.
       @bracketed_paste = false
+      # Whether the inner program wants its cursor shown (DECTCEM, DEC private
+      # mode 25). Claude Code and other Ink UIs hide the cursor (\e[?25l) for
+      # the whole render and only show it (\e[?25h) at a text-input prompt —
+      # the Renderer consults this so we don't paint a stray block cursor on
+      # top of an animating progress line.
+      @cursor_visible = true
       @pending_replies = +"".b
+      # Out-of-band bytes the emulator owes the OUTER terminal (not the inner
+      # program): the bell and desktop-notification OSCs (OSC 9, OSC 777) that
+      # Claude Code emits to get your attention. We don't model these on the
+      # grid — they're forwarded verbatim so the user's real terminal rings /
+      # raises the notification, even when the emitting pane isn't focused.
+      # The Application drains this in consume_pane_io. Capped so a detached
+      # session (nobody to forward to) can't grow it without bound.
+      @pending_notifications = +"".b
       @search_query = nil
       @search_direction = :forward
       @search_matches = []
@@ -280,6 +300,25 @@ module Muxr
     # "^[[200~".
     def bracketed_paste?
       @bracketed_paste
+    end
+
+    # True iff the inner program currently wants its cursor shown (DEC private
+    # mode 25, DECTCEM). The Renderer suppresses the focused pane's cursor when
+    # this is false so a hidden-cursor UI (Claude Code mid-render, a spinner)
+    # doesn't get a phantom block painted at its last write position.
+    def cursor_visible?
+      @cursor_visible
+    end
+
+    # Bytes the emulator owes the OUTER terminal: bell + desktop-notification
+    # OSCs the inner program emitted. The Application drains this after each
+    # read and forwards it to the attached client so the user's real terminal
+    # rings / notifies. Returns nil when empty (mirrors take_pending_replies!).
+    def take_pending_notifications!
+      return nil if @pending_notifications.empty?
+      data = @pending_notifications
+      @pending_notifications = +"".b
+      data
     end
 
     attr_reader :selection_mode
@@ -771,14 +810,33 @@ module Muxr
       Cell.new(" ", nil, nil, 0, nil)
     end
 
-    # Parse the just-completed OSC payload. We only care about OSC 8
-    # (hyperlinks): `8;params;URI`. An empty URI closes the active link.
+    # Queue bytes for the outer terminal (bell / notification OSC). Dropped once
+    # the buffer is full so a detached, never-drained session can't grow without
+    # bound — see NOTIFY_MAX.
+    def queue_notification(bytes)
+      return if @pending_notifications.bytesize >= NOTIFY_MAX
+      @pending_notifications << bytes
+    end
+
+    # Parse the just-completed OSC payload. We care about two families:
+    #   OSC 8  (hyperlinks): `8;params;URI` — modeled on the grid (below).
+    #   OSC 9 / OSC 777 (desktop notifications) — not grid state; forwarded to
+    #     the outer terminal verbatim so the user's real terminal raises the
+    #     notification. Claude Code emits these (alongside the bell) when it
+    #     wants your attention.
     # Anything else (window-title OSC 0/1/2, palette OSC 4, …) is silently
     # consumed — the emulator doesn't model it.
     def finalize_osc
       payload = @parser_osc
       @parser_osc = +""
       return if payload.empty?
+      if payload.start_with?("9;", "777;")
+        # Re-wrap with a BEL terminator (universally accepted) — the original
+        # ST/BEL was consumed by the parser. The OUTPUT path carries raw bytes,
+        # so this reaches the outer terminal unchanged.
+        queue_notification("\e]#{payload}\a")
+        return
+      end
       return unless payload.start_with?("8;")
       parts = payload.split(";", 3)
       uri = parts[2]
@@ -823,7 +881,7 @@ module Muxr
       when 0x1b
         @parser_state = :escape
       when 0x07 # BEL
-        # ignore
+        queue_notification("\a")
       when 0x08 # BS
         @cursor_col -= 1 if @cursor_col > 0
         @autowrap_pending = false
@@ -935,6 +993,8 @@ module Muxr
         #   2004 (Bracketed Paste) — whether the inner program wants pastes
         #        wrapped in \e[200~…\e[201~; the Application strips those
         #        markers when it's off (see Application#send_to_focused).
+        #   25   (DECTCEM) — cursor show/hide; the Renderer honors it so a
+        #        hidden-cursor UI doesn't get a phantom block painted on it.
         if final == "h" || final == "l"
           enabled = (final == "h")
           params = csi_params
@@ -943,6 +1003,7 @@ module Muxr
             @sync_started_at = enabled ? Process.clock_gettime(Process::CLOCK_MONOTONIC) : nil
           end
           @bracketed_paste = enabled if params.include?(2004)
+          @cursor_visible = enabled if params.include?(25)
         end
         return
       end
@@ -1497,6 +1558,7 @@ module Muxr
       @scroll_bottom = @rows - 1
       @autowrap_pending = false
       @current_hyperlink = nil
+      @cursor_visible = true
     end
   end
 end

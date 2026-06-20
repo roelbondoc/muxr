@@ -208,4 +208,22 @@ class TestRenderer < Minitest::Test
     # a phantom there.
     assert_includes frame2, "\e[2;3H "
   end
+
+  def test_visible_inner_cursor_is_shown
+    session = build_session(layout: :monocle, focused_index: 0)
+    # FakePane's terminal starts with the cursor visible (DECTCEM default).
+    output = render(session)
+    assert_includes output, "\e[?25h", "focused pane's cursor should be shown"
+  end
+
+  def test_hidden_inner_cursor_is_suppressed
+    session = build_session(layout: :monocle, focused_index: 0)
+    # Mirror Claude Code mid-render: the focused pane hid its cursor.
+    session.window.focused_pane.terminal.feed("\e[?25l")
+    output = render(session)
+    # Never re-show the cursor — the frame's own leading \e[?25l (hide during
+    # the diff) is the only visibility escape that should appear.
+    refute_includes output, "\e[?25h",
+      "a pane that hid its cursor must not get one painted back"
+  end
 end

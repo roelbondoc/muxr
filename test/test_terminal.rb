@@ -853,4 +853,71 @@ class TestTerminal < Minitest::Test
   ensure
     Muxr::Terminal.width_overrides = {}
   end
+
+  def test_cursor_visibility_tracks_dectcem
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    assert t.cursor_visible?, "starts visible"
+    t.feed("\e[?25l")
+    refute t.cursor_visible?, "hidden by \\e[?25l"
+    t.feed("\e[?25h")
+    assert t.cursor_visible?, "shown by \\e[?25h"
+  end
+
+  def test_cursor_visibility_independent_of_sync_and_paste
+    # A combined DECSET must not bleed mode 25 into 2026/2004 or vice versa.
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e[?25l")
+    refute t.cursor_visible?
+    refute t.sync_pending?
+    refute t.bracketed_paste?
+    t.feed("\e[?2026h\e[?2004h")
+    refute t.cursor_visible?, "still hidden after unrelated DECSETs"
+    assert t.sync_pending?
+    assert t.bracketed_paste?
+  end
+
+  def test_full_reset_restores_cursor_visibility
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e[?25l")
+    refute t.cursor_visible?
+    t.feed("\ec") # RIS
+    assert t.cursor_visible?, "\\ec restores the cursor"
+  end
+
+  def test_bell_is_queued_as_a_notification
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    assert_nil t.take_pending_notifications!, "nothing queued initially"
+    t.feed("x\ay")
+    assert_equal "\a", t.take_pending_notifications!
+    assert_nil t.take_pending_notifications!, "drained"
+    # The bell is out-of-band: it does not disturb the grid.
+    assert_equal "x", t.cell(0, 0).char
+    assert_equal "y", t.cell(0, 1).char
+  end
+
+  def test_osc_9_desktop_notification_is_forwarded_verbatim
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e]9;build done\a")
+    assert_equal "\e]9;build done\a", t.take_pending_notifications!
+  end
+
+  def test_osc_777_notification_is_forwarded
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e]777;notify;Claude;needs input\e\\")
+    # ST terminator is normalized to BEL; the payload is preserved.
+    assert_equal "\e]777;notify;Claude;needs input\a", t.take_pending_notifications!
+  end
+
+  def test_osc_8_hyperlink_is_not_treated_as_a_notification
+    t = Muxr::Terminal.new(rows: 1, cols: 10)
+    t.feed("\e]8;;http://x\e\\A\e]8;;\e\\")
+    assert_nil t.take_pending_notifications!, "OSC 8 stays on the grid, not the bell queue"
+  end
+
+  def test_notification_queue_is_capped
+    t = Muxr::Terminal.new(rows: 1, cols: 1)
+    # Far more bells than NOTIFY_MAX bytes; the queue must not grow past the cap.
+    (Muxr::Terminal::NOTIFY_MAX + 1000).times { t.feed("\a") }
+    assert_operator t.take_pending_notifications!.bytesize, :<=, Muxr::Terminal::NOTIFY_MAX
+  end
 end

@@ -658,6 +658,11 @@ module Muxr
         return "\e[#{row};#{col}H\e[?25h"
       end
       return "\e[?25l" if term.scrolled_back?
+      # Honor the inner program's own cursor visibility (DECTCEM): Claude Code
+      # and other Ink UIs hide the cursor while rendering and only show it at a
+      # text prompt. Painting our block at its last write position otherwise
+      # leaves a phantom cursor smeared across the animating UI.
+      return "\e[?25l" unless term.cursor_visible?
       row = rect.y + 1 + term.cursor_row + 1
       col = rect.x + 1 + term.cursor_col + 1
       "\e[#{row};#{col}H\e[?25h"

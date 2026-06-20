@@ -1013,6 +1013,17 @@ module Muxr
         # server pulls the resulting text out of pane.terminal.dump_text.
         @control_server&.on_pane_output(pane.id, data) if pane.id.is_a?(String)
       end
+      forward_notifications(pane)
+    end
+
+    # Push any bell / desktop-notification bytes the pane's emulator collected
+    # straight to the outer terminal — out of band from the rendered frame, so a
+    # background pane (an unfocused Claude Code finishing a task) still alerts
+    # the user. When no client is attached deliver_output is a no-op; the queue
+    # is still drained so it can't accumulate while detached.
+    def forward_notifications(pane)
+      bytes = pane.terminal.take_pending_notifications!
+      deliver_output(bytes) if bytes && @current_client
     end
 
     def pane_for_io(io)
