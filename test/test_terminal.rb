@@ -914,6 +914,52 @@ class TestTerminal < Minitest::Test
     assert_nil t.take_pending_notifications!, "OSC 8 stays on the grid, not the bell queue"
   end
 
+  def test_osc_52_clipboard_write_is_decoded_and_queued
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    assert_nil t.take_pending_clipboard!, "nothing queued initially"
+    b64 = ["hello world"].pack("m0")
+    t.feed("\e]52;c;#{b64}\a")
+    assert_equal "hello world", t.take_pending_clipboard!
+    assert_nil t.take_pending_clipboard!, "drained"
+  end
+
+  def test_osc_52_is_out_of_band_and_does_not_touch_the_grid
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("x")
+    t.feed("\e]52;c;#{["yo"].pack("m0")}\e\\")
+    t.feed("y")
+    assert_equal "x", t.cell(0, 0).char
+    assert_equal "y", t.cell(0, 1).char
+    assert_equal "yo", t.take_pending_clipboard!
+  end
+
+  def test_osc_52_query_is_ignored
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e]52;c;?\a")
+    assert_nil t.take_pending_clipboard!, "a clipboard query must not be treated as a write"
+  end
+
+  def test_osc_52_empty_payload_does_not_clear_clipboard
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e]52;c;#{["keep"].pack("m0")}\a")
+    t.feed("\e]52;c;\a")
+    assert_equal "keep", t.take_pending_clipboard!, "empty OSC 52 is a no-op, not a wipe"
+  end
+
+  def test_osc_52_last_write_wins
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    t.feed("\e]52;c;#{["first"].pack("m0")}\a")
+    t.feed("\e]52;c;#{["second"].pack("m0")}\a")
+    assert_equal "second", t.take_pending_clipboard!
+  end
+
+  def test_osc_52_default_target_is_accepted
+    t = Muxr::Terminal.new(rows: 5, cols: 5)
+    # Empty target field (just `52;;<base64>`) — defaults to the clipboard.
+    t.feed("\e]52;;#{["nt"].pack("m0")}\a")
+    assert_equal "nt", t.take_pending_clipboard!
+  end
+
   def test_notification_queue_is_capped
     t = Muxr::Terminal.new(rows: 1, cols: 1)
     # Far more bells than NOTIFY_MAX bytes; the queue must not grow past the cap.

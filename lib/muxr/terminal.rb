@@ -147,10 +147,13 @@ module Muxr
       1
     end
 
-    # Cap on the OSC payload we buffer before parsing. URLs in OSC 8 can be
-    # long but rarely exceed a few hundred bytes; 4 KiB lets the parser stay
-    # tolerant of weird inputs without giving an attacker an unbounded sink.
-    OSC_MAX_LEN = 4096
+    # Cap on the OSC payload we buffer before parsing. URLs in OSC 8 rarely
+    # exceed a few hundred bytes, but OSC 52 clipboard writes (a vim yank, etc.)
+    # carry the base64 of whatever the inner program copied, so the cap doubles
+    # as the practical clipboard size limit. 100 KiB stays bounded per parser
+    # (it's freed on finalize) while comfortably fitting normal yanks; a payload
+    # longer than this is truncated rather than copied wholesale.
+    OSC_MAX_LEN = 100 * 1024
 
     # Cap on the outbound notification queue (bell + notification OSCs). While a
     # client is attached the Application drains it every read, so it stays tiny;
@@ -257,6 +260,14 @@ module Muxr
       # The Application drains this in consume_pane_io. Capped so a detached
       # session (nobody to forward to) can't grow it without bound.
       @pending_notifications = +"".b
+      # The most recent clipboard write the inner program requested via OSC 52
+      # (`\e]52;c;<base64>\a` — what vim/tmux/Ghostty emit on a "copy to system
+      # clipboard" yank), already base64-decoded to raw bytes. Not grid state;
+      # the Application drains it in consume_pane_io and pipes it to pbcopy.
+      # Last-write-wins (a clipboard holds one value) so this can't grow without
+      # bound, and it's drained even while detached since pbcopy is local to the
+      # server host and doesn't need an attached client.
+      @pending_clipboard = nil
       @search_query = nil
       @search_direction = :forward
       @search_matches = []
@@ -318,6 +329,15 @@ module Muxr
       return nil if @pending_notifications.empty?
       data = @pending_notifications
       @pending_notifications = +"".b
+      data
+    end
+
+    # The latest OSC 52 clipboard write (raw, already base64-decoded), or nil if
+    # the inner program hasn't asked to set the clipboard since the last drain.
+    # The Application pulls this in consume_pane_io and hands it to pbcopy.
+    def take_pending_clipboard!
+      data = @pending_clipboard
+      @pending_clipboard = nil
       data
     end
 
@@ -818,8 +838,10 @@ module Muxr
       @pending_notifications << bytes
     end
 
-    # Parse the just-completed OSC payload. We care about two families:
+    # Parse the just-completed OSC payload. We care about three families:
     #   OSC 8  (hyperlinks): `8;params;URI` — modeled on the grid (below).
+    #   OSC 52 (clipboard): `52;<targets>;<base64>` — decoded and queued for
+    #     pbcopy (a vim yank with OSC 52 enabled lands here).
     #   OSC 9 / OSC 777 (desktop notifications) — not grid state; forwarded to
     #     the outer terminal verbatim so the user's real terminal raises the
     #     notification. Claude Code emits these (alongside the bell) when it
@@ -837,6 +859,10 @@ module Muxr
         queue_notification("\e]#{payload}\a")
         return
       end
+      if payload.start_with?("52;")
+        finalize_clipboard(payload)
+        return
+      end
       return unless payload.start_with?("8;")
       parts = payload.split(";", 3)
       uri = parts[2]
@@ -845,6 +871,20 @@ module Muxr
       else
         @current_hyperlink = (@hyperlink_intern[payload] ||= payload.dup.freeze)
       end
+    end
+
+    # Decode an OSC 52 clipboard write and stash it for the Application to pipe
+    # to pbcopy. The payload is `52;<targets>;<base64>`; <targets> selects which
+    # X-style clipboard ("c" clipboard, "p" primary, …) and is irrelevant here
+    # since the host has one system clipboard. A base64 of "?" is a *query*
+    # ("tell me the clipboard"), and an empty body is a clear request — we honor
+    # neither (we can't safely read the host clipboard, and silently wiping it on
+    # an inner program's whim would be surprising), so both are dropped.
+    def finalize_clipboard(payload)
+      b64 = payload.split(";", 3)[2]
+      return if b64.nil? || b64.empty? || b64 == "?"
+      decoded = b64.unpack1("m")
+      @pending_clipboard = decoded unless decoded.nil? || decoded.empty?
     end
 
     def process_char(ch)

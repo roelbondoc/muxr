@@ -1014,6 +1014,7 @@ module Muxr
         @control_server&.on_pane_output(pane.id, data) if pane.id.is_a?(String)
       end
       forward_notifications(pane)
+      forward_clipboard(pane)
     end
 
     # Push any bell / desktop-notification bytes the pane's emulator collected
@@ -1024,6 +1025,18 @@ module Muxr
     def forward_notifications(pane)
       bytes = pane.terminal.take_pending_notifications!
       deliver_output(bytes) if bytes && @current_client
+    end
+
+    # Copy any OSC 52 clipboard write the pane's emulator collected to the
+    # system clipboard, and mirror it into the internal paste buffer so Ctrl-a p
+    # pastes the same text (same as copy-mode's yank). Unlike notifications this
+    # runs even when no client is attached — pbcopy is local to the server host,
+    # so a background pane's yank still lands on the clipboard.
+    def forward_clipboard(pane)
+      text = pane.terminal.take_pending_clipboard!
+      return if text.nil? || text.empty?
+      @paste_buffer = text
+      spawn_pbcopy(text)
     end
 
     def pane_for_io(io)
