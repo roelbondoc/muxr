@@ -82,7 +82,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
     muxr #{Muxr::VERSION} — a tiling terminal multiplexer
 
     Usage:
-      muxr                 attach the default session (auto-spawn if needed)
+      muxr                 attach the session for the current directory (auto-spawn if needed)
       muxr <name>          attach (or start) the named session
       muxr -s <name>       same as above
       muxr --list          list running sessions and exit
@@ -131,7 +131,7 @@ end
 def session_name_from(argv)
   idx = argv.index("-s") || argv.index("--session")
   return argv[idx + 1] if idx && argv[idx + 1]
-  argv.find { |a| !a.start_with?("-") } || "default"
+  argv.find { |a| !a.start_with?("-") } || Muxr::Application.default_session_name
 end
 
 def probe_socket(path)

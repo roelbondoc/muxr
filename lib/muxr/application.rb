@@ -31,6 +31,17 @@ module Muxr
       File.join(SOCKETS_DIR, "#{name}.sock")
     end
 
+    # The name a bare `muxr` (no name argument) resolves to: a slug of the
+    # current working directory, so re-running `muxr` in the same directory
+    # reattaches the same session. The name is interpolated straight into
+    # <name>.sock / <name>.json / <name>.log filenames, so the path's slashes
+    # (and any other filesystem-unfriendly bytes) are folded to "-"; the
+    # leading "-" from the root slash is trimmed for readability in --list.
+    def self.default_session_name(dir = Dir.pwd)
+      slug = dir.gsub(%r{/}, "-").gsub(/[^A-Za-z0-9._-]/, "-").sub(/\A-+/, "")
+      slug.empty? ? "default" : slug
+    end
+
     def self.control_socket_path_for(name)
       File.join(SOCKETS_DIR, "#{name}.ctrl.sock")
     end
@@ -755,7 +766,7 @@ module Muxr
       if idx && argv[idx + 1]
         argv[idx + 1]
       else
-        argv.find { |a| !a.start_with?("-") } || "default"
+        argv.find { |a| !a.start_with?("-") } || self.class.default_session_name
       end
     end
 
