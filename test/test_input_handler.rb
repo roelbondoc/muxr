@@ -158,6 +158,61 @@ class TestInputHandler < Minitest::Test
     assert_equal :normal, h.state
   end
 
+  def test_command_mode_ctrl_c_cancels_without_running
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed(":lay\x03")
+    # Ctrl-c abandons the command: no run_command, buffer cleared, back to base.
+    assert(app.calls.none? { |c| c.is_a?(Array) && c[0] == :run_command })
+    assert_equal "", h.command_buffer
+    assert_equal :normal, h.state
+  end
+
+  def test_command_mode_escape_cancels_without_running
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed(":lay\e")
+    assert(app.calls.none? { |c| c.is_a?(Array) && c[0] == :run_command })
+    assert_equal "", h.command_buffer
+    assert_equal :normal, h.state
+  end
+
+  def test_command_mode_tab_completes_unique_command
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed(":lay\t")
+    assert_equal "layout ", h.command_buffer
+    assert_nil h.command_completions
+    assert_equal :command, h.state
+  end
+
+  def test_command_mode_tab_completes_layout_name
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed(":layout gr\t")
+    assert_equal "layout grid ", h.command_buffer
+    assert_nil h.command_completions
+  end
+
+  def test_command_mode_tab_extends_to_common_prefix_and_records_candidates
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed(":layout s\t")
+    # spiral / stack share only the "s" prefix, so the buffer is unchanged but
+    # the candidates are recorded so the prompt can list them.
+    assert_equal "layout s", h.command_buffer
+    assert_equal %w[spiral stack], h.command_completions
+  end
+
+  def test_command_mode_typing_clears_completion_hint
+    app = FakeApp.new
+    h = Muxr::InputHandler.new(app)
+    h.feed(":layout s\t")
+    refute_nil h.command_completions
+    h.feed("t") # narrows to stack; hint must not linger from the prior Tab
+    assert_nil h.command_completions
+  end
+
   def test_normal_mode_ignores_unknown_keys
     # Avoid sending stray keys to the focused pane and avoid mode flapping.
     # (x/H/J/K/L are bound now; pick keys that aren't.)

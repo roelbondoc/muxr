@@ -74,7 +74,7 @@ module Muxr
       @prev = nil
     end
 
-    def render(session, input_state: :normal, command_buffer: "", search_buffer: "", search_direction: :forward, message: nil, help: false)
+    def render(session, input_state: :normal, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false)
       w = session.width
       h = session.height
       return if w < 4 || h < 3
@@ -87,6 +87,7 @@ module Muxr
         frame, session,
         input_state: input_state,
         command_buffer: command_buffer,
+        command_completions: command_completions,
         search_buffer: search_buffer,
         search_direction: search_direction,
         message: message
@@ -240,7 +241,7 @@ module Muxr
       end
     end
 
-    def compose_status_bar(frame, session, input_state:, command_buffer:, search_buffer: "", search_direction: :forward, message: nil)
+    def compose_status_bar(frame, session, input_state:, command_buffer:, command_completions: nil, search_buffer: "", search_direction: :forward, message: nil)
       y = session.height - 1
       w = session.width
       win = session.window
@@ -294,14 +295,18 @@ module Muxr
       end
 
       if input_state == :command
-        overlay = ":#{command_buffer}"
-        overlay = overlay[0, w]
+        prompt = ":#{command_buffer}"
+        # Ambiguous Tab-completion candidates trail the prompt in a muted
+        # color, e.g. `:layout s      spiral stack`. Cosmetic — the cursor
+        # stays at the end of the buffer (see #cursor_position).
+        hint = command_completions && !command_completions.empty? ? "    #{command_completions.join(" ")}" : ""
+        overlay = (prompt + hint)[0, w]
         overlay.each_char.with_index do |ch, x|
           c = frame[y][x]
           c.char = ch
-          c.fg = [:c256, 232]
+          c.fg = x < prompt.length ? [:c256, 232] : [:c256, 240]
           c.bg = [:c256, 226]
-          c.attrs = Terminal::BOLD
+          c.attrs = x < prompt.length ? Terminal::BOLD : 0
         end
         (overlay.length...w).each do |x|
           c = frame[y][x]
@@ -419,6 +424,7 @@ module Muxr
       "          v select, C-v block, y/Enter yank (stays in scrollback)",
       "          q/Esc cancel   C-a n/p/a/1-9 switch pane",
       "",
+      "COMMAND prompt (: to open;  Tab completes,  Esc/C-c cancels)",
       "Commands: layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle},",
       "          drawer {toggle|show|hide|reset},",
       "          claude, save, restore, sessions, quit, new, close, next, prev",
