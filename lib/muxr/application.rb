@@ -1109,6 +1109,7 @@ module Muxr
         @session,
         input_state: @input.state,
         command_buffer: @input.command_buffer,
+        command_completions: @input.command_completions,
         search_buffer: @input.search_buffer,
         search_direction: @input.search_direction,
         message: @message,

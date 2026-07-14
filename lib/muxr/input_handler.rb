@@ -1,3 +1,5 @@
+require "muxr/command_dispatcher"
+
 module Muxr
   # Translates raw keystrokes into either commands or pane input. Two top-level
   # modes:
@@ -160,13 +162,16 @@ module Muxr
 
     DIGIT_RE = /\A[1-9]\z/.freeze
 
-    attr_reader :state, :command_buffer, :search_buffer, :search_direction, :base_mode
+    attr_reader :state, :command_buffer, :command_completions, :search_buffer, :search_direction, :base_mode
 
     def initialize(app)
       @app = app
       @state = :normal
       @base_mode = :normal
       @command_buffer = +""
+      # Ambiguous Tab-completion candidates for the current command buffer,
+      # shown as a hint in the prompt. nil when there's nothing to disambiguate.
+      @command_completions = nil
       @search_buffer = +""
       @search_direction = :forward
       # When the prefix state is entered from scrollback/selection (Ctrl-a),
@@ -286,6 +291,7 @@ module Muxr
     def cancel
       @state = @base_mode
       @command_buffer = +""
+      @command_completions = nil
     end
 
     private
@@ -302,6 +308,7 @@ module Muxr
       if ch == ":"
         @state = :command
         @command_buffer = +""
+        @command_completions = nil
         return
       end
       if DIGIT_RE.match?(ch)
@@ -338,6 +345,7 @@ module Muxr
       when ch == ":"
         @state = :command
         @command_buffer = +""
+        @command_completions = nil
       when ch == PREFIX
         @app.send_to_focused(PREFIX)
         @state = @base_mode
@@ -514,17 +522,28 @@ module Muxr
       when "\r", "\n"
         cmd = @command_buffer.dup
         @command_buffer = +""
+        @command_completions = nil
         @state = @base_mode
         @app.run_command(cmd)
-      when "\e"
+      when "\e", "\x03" # Esc or Ctrl-c → abandon the command
         @command_buffer = +""
+        @command_completions = nil
         @state = @base_mode
+        @app.invalidate
+      when "\t"
+        new_line, candidates = CommandDispatcher.complete(@command_buffer)
+        @command_buffer = +new_line
+        # Only keep the hint list when it's still ambiguous; a unique match
+        # (or none) leaves nothing useful to show.
+        @command_completions = candidates.length > 1 ? candidates : nil
         @app.invalidate
       when "\x7f", "\b"
         @command_buffer.chop!
+        @command_completions = nil
         @app.invalidate
       else
         @command_buffer << ch if ch.ord >= 0x20
+        @command_completions = nil if ch.ord >= 0x20
         @app.invalidate
       end
     end
