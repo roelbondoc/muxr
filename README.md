@@ -288,9 +288,17 @@ still applies to literal segments only.
 ### Claude Code integration
 
 ```bash
-muxr --install-skill            # copies skills/muxr-control into ~/.claude/skills
+muxr --install-skill            # installs skills/muxr-control into ~/.claude/skills
                                 # and prints the `claude mcp add` registration line
 ```
+
+How it installs depends on where muxr runs from. An **installed gem** is
+**copied**, because RubyGems prunes the old versioned gem directory on upgrade
+and a symlink into it would dangle — so re-run `muxr --install-skill` after each
+`gem update muxr` to refresh the copy. A **source checkout** (detected by a
+`.git` directory beside `bin/`) is **symlinked**, so edits to `SKILL.md` are live
+in new claude sessions with no re-run. Force either with
+`muxr --install-skill=copy` or `muxr --install-skill=link`.
 
 `bin/muxr-mcp` is the standalone MCP-over-stdio bridge that translates
 Claude Code tool calls into NDJSON requests on the control socket. It

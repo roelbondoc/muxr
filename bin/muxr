@@ -18,27 +18,31 @@ if ARGV.include?("-l") || ARGV.include?("--list")
   exit 0
 end
 
-if ARGV.include?("--install-skill")
-  # Copies skills/muxr-control into ~/.claude/skills/muxr-control so the
-  # claude CLI loads it from anywhere. We *copy* rather than symlink so the
-  # install survives a RubyGems upgrade (which deletes the old versioned
-  # gem path that a symlink would have pointed at). Idempotent: re-running
-  # this after a `gem update muxr` is the supported way to refresh the
-  # skill content.
+install_skill_arg = ARGV.find { |a| a == "--install-skill" || a.start_with?("--install-skill=") }
+
+if install_skill_arg
+  requested_strategy = install_skill_arg.split("=", 2)[1]
+  unless [nil, "copy", "link"].include?(requested_strategy)
+    $stderr.puts "muxr: --install-skill takes `copy` or `link` (got #{requested_strategy.inspect})"
+    exit 1
+  end
   src = File.expand_path("../skills/muxr-control", __dir__)
   unless File.directory?(src)
     $stderr.puts "muxr: skill source not found at #{src} (was the gem packaged without skills/?)"
     exit 1
   end
+  running_from_source_checkout = File.directory?(File.expand_path("../.git", __dir__))
+  strategy = requested_strategy || (running_from_source_checkout ? "link" : "copy")
   claude_skills = File.expand_path("~/.claude/skills")
   dst = File.join(claude_skills, "muxr-control")
   FileUtils.mkdir_p(claude_skills)
-  # Wipe any prior install — symlink (from older dev installs) or directory.
-  if File.symlink?(dst) || File.exist?(dst)
-    FileUtils.rm_rf(dst)
+  FileUtils.rm_rf(dst) if File.symlink?(dst) || File.exist?(dst)
+  if strategy == "link"
+    FileUtils.ln_s(src, dst)
+  else
+    FileUtils.mkdir_p(dst)
+    FileUtils.cp_r(File.join(src, "."), dst)
   end
-  FileUtils.mkdir_p(dst)
-  FileUtils.cp_r(File.join(src, "."), dst)
 
   # Pick the most stable absolute path we can point claude's mcp config at:
   #
@@ -49,13 +53,30 @@ if ARGV.include?("--install-skill")
   #    sits next to the running `muxr` binary.
   bin_stub = File.join(Gem.bindir, "muxr-mcp") rescue nil
   bridge = (bin_stub && File.exist?(bin_stub)) ? bin_stub : File.expand_path("muxr-mcp", __dir__)
+  puts(
+    if strategy == "link"
+      <<~LINKED
+        ✓ Linked skill: #{dst}
+                     -> #{src}
+
+        Edits to the skill are live in new claude sessions with no re-run.
+        Force a copy instead with `muxr --install-skill=copy`.
+      LINKED
+    else
+      <<~COPIED
+        ✓ Copied skill to: #{dst}
+          (source: #{src})
+
+        Re-run `muxr --install-skill` after `gem update muxr` to refresh the
+        skill contents. An installed gem is copied rather than linked because
+        RubyGems prunes the old versioned gem directory on upgrade, which
+        would leave a symlink dangling. If you know this path is stable, force
+        a symlink with `muxr --install-skill=link`.
+      COPIED
+    end
+  )
+  puts
   puts <<~MSG
-    ✓ Copied skill to: #{dst}
-      (source: #{src})
-
-    Re-run `muxr --install-skill` after `gem update muxr` to refresh the
-    skill contents.
-
     Next, register the muxr MCP bridge with Claude Code at USER scope
     (so every claude session sees it, not just ones started from your
     home directory):
@@ -86,7 +107,9 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       muxr <name>          attach (or start) the named session
       muxr -s <name>       same as above
       muxr --list          list running sessions and exit
-      muxr --install-skill symlink the MCP skill into ~/.claude/skills and exit
+      muxr --install-skill install the MCP skill into ~/.claude/skills and exit
+                           (symlinks from a source checkout, copies from an
+                            installed gem; force with --install-skill=copy|link)
       muxr --version       print version and exit
       muxr --help          this help
 

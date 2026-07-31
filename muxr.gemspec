@@ -39,6 +39,15 @@ Gem::Specification.new do |spec|
   ]
   spec.require_paths = ["lib"]
 
+  spec.post_install_message = <<~MSG
+    muxr ships a Claude Code skill for driving sessions over MCP. To install it
+    into ~/.claude/skills and print the `claude mcp add` line for the bridge:
+
+        muxr --install-skill
+
+    Re-run it after each `gem update muxr` to refresh the skill contents.
+  MSG
+
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"
 end
