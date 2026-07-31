@@ -3,9 +3,11 @@ name: muxr-control
 description: |
   Use when driving a muxr terminal session — running commands across panes,
   watching long-running processes, capturing terminal output, setting up
-  layouts, or working with the muxr drawer. Triggers when MUXR_SESSION is
-  set in the environment, or when the user asks to "run X in pane Y",
-  "what does pane N show", "switch the muxr layout", etc.
+  layouts, working with the muxr drawer, or driving a full-screen TUI app
+  (vim, a notebook, lazygit) that is already running inside a pane.
+  Triggers when MUXR_SESSION is set in the environment, or when the user
+  asks to "run X in pane Y", "what does pane N show", "drive the editor in
+  pane 1", "switch the muxr layout", etc.
 ---
 
 # muxr-control
@@ -21,7 +23,8 @@ settle — without taking control of the user's keyboard.
 Before doing anything else, call **`muxr_session_get`** and
 **`muxr_panes_list`**. These are cheap, idempotent reads. They tell you:
 
-- The session name, layout (tall / grid / monocle), and current dimensions.
+- The session name, current layout, the full `available_layouts` list, and
+  the session dimensions.
 - Each pane's stable id (6 hex chars, e.g. `a3f9b2`), its 1-based slot
   number as shown on screen (`#1`, `#2`, …), its cwd, and whether it's the
   focused or master pane.
@@ -70,7 +73,7 @@ the shell has redrawn the prompt, and you'll miss the output entirely.
 - **Long builds** (npm install, cargo build): bump `timeout_ms` to
   `120000` or higher. Default is 30s.
 
-### Wait without sending anything
+### Wait for something already running
 
 ```
 muxr_pane_run({ "pane": "a3f9b2", "input": "", "append_enter": false,
@@ -78,7 +81,19 @@ muxr_pane_run({ "pane": "a3f9b2", "input": "", "append_enter": false,
 ```
 
 Useful when the user has already typed a command and you want to capture
-its output once it finishes.
+its output once it finishes — but **only if output is still coming.**
+
+The idle timer is gated on having seen output at all: `pane.run` resolves
+early only once the pane has emitted *something* and then gone quiet. On a
+pane that stays silent for the whole wait, the only exit is the deadline,
+so the call blocks for the full `timeout_ms` and returns
+`timed_out: true` — which looks like a failure but just means "nothing
+happened." A 30s timeout on an already-finished command costs you 30s.
+
+So for a pane that may already be quiet, **poll with `muxr_pane_read`
+instead** — it returns instantly, has no side effects, and re-reading a
+few times is cheaper than one mis-sized wait. Reserve `pane.run` for input
+you expect to produce output.
 
 ### Send multi-line input (paste mode)
 
@@ -115,6 +130,79 @@ Avoid doing this unsolicited — the human owns the layout. Only restructure
 when the user explicitly asks ("set up a dev environment", "split this
 into 3 panes").
 
+## Driving a full-screen TUI app
+
+A pane may hold a full-screen application (vim, euporie, lazygit, htop, a
+TUI notebook) rather than a shell prompt. Everything below is about those;
+shells are more forgiving.
+
+### One key per call. Never batch repeats.
+
+Both `pane.send_input` and `pane.run` concatenate the entire `keys` array
+into one payload and hand it to the PTY in a **single write**, with no
+pacing between keys. A shell's line editor handles that fine. An app that
+kicks off async work per keypress often does not: sending
+`["<c-r>", "<c-r>", … ]` nine times to a TUI notebook produced **three**
+actions, not nine — the rest were swallowed while the app was mid-render.
+Sending the same key one call at a time worked every time.
+
+Batching is safe for a *heterogeneous* scripted sequence where each key
+does something different and cheap:
+
+```
+muxr_pane_send_input({ "pane": "a3f9b2",
+                       "keys": ["G", "o", "hello world", "<esc>", ":w", "<enter>"] })
+```
+
+Batching is **not** safe for "do this N times." Loop the call instead, and
+confirm the app actually advanced between iterations (see below).
+
+### The status bar is ground truth, not the layout
+
+Infer app state from whatever the app *prints* about itself — the status
+line, a mode indicator, an execution counter — never from where borders or
+highlights appear to be drawn. Box-drawing and reverse-video regions are
+easy to misread, and the cell/buffer/pane you think is selected is
+routinely not the one you think. If the app tells you `Cell 9`, believe
+that over a box that looks like it surrounds cell 8.
+
+This is also how you verify the previous point: read the indicator, send
+one key, re-read, confirm it moved.
+
+### Use the `cursor` field to find focus in a dialog
+
+`pane.read` and `pane.run` both return `cursor: {row, col}`. In a modal
+dialog from prompt_toolkit, ncurses, and friends, the cursor parks on the
+**focused widget** — so it is the reliable way to tell which of
+`[ Yes ] [ No ] [ Cancel ]` is armed, when the rendered text gives you
+nothing to go on.
+
+The safe gesture for any dialog you did not expect:
+
+1. `pane_read` — note `cursor`.
+2. Send one `<tab>` or `<right>`.
+3. Re-read and confirm the cursor **moved**.
+4. Only then press `<enter>`.
+
+Use cursor **deltas**, never absolute column arithmetic. `text` is trimmed
+of trailing whitespace per row, and double-width glyphs (box-drawing,
+block elements, emoji — heavily used by TUI dialogs) desync any attempt to
+map a `col` onto an index into the row string. Two adjacent buttons in one
+real dialog reported cols 63 and 75.
+
+### Scroll with the app's own keys, not muxr scrollback
+
+`pane.read` is viewport-only, and a full-screen app *owns* its viewport: it
+paints one screenful and keeps the rest in its own internal buffer. Content
+below the fold is invisible to `pane.read` **and** absent from muxr's
+scrollback, because it was never emitted as scrolled-off terminal output.
+`Ctrl-a [` will not find it.
+
+So to see the rest, drive the app's own scroll binding (euporie `]`/`}`,
+vim `Ctrl-d`, less `space`) and re-read. Corollary: a command's output can
+be sitting in the pane, already complete, and still absent from your last
+read — check the app's own indicator before concluding a step didn't run.
+
 ## Gotchas
 
 ### Reading is cheap. Writing is destructive.
@@ -139,6 +227,9 @@ whitespace trimmed per row. Lines that have scrolled into scrollback are
 not in the response. If you need older output, ask the user to scroll
 the pane up first (they have `Ctrl-a [` for scrollback mode), or watch
 the pane via `muxr_pane_run` while the command is running.
+
+If the pane holds a full-screen app, `Ctrl-a [` won't help either — see
+"Scroll with the app's own keys" above.
 
 ### Private panes
 
@@ -180,8 +271,10 @@ If a tool call returns `isError: true`, the text usually starts with
 - `muxr error -32602: pane: no pane with id "…"` — the pane has been
   killed, or you passed a stale id from before a kill/promote. Refetch
   `muxr_panes_list`.
-- `muxr error -32602: layout: unknown layout` — valid layouts are
-  `tall`, `grid`, `monocle`.
+- `muxr error -32602: layout: unknown layout` — the nine valid layouts are
+  `tall`, `wide`, `columns`, `rows`, `grid`, `spiral`, `centered`, `stack`,
+  `monocle`. `muxr_session_get` returns the live list in
+  `available_layouts`; trust that over any list written down here.
 
 ## Naming muxr in conversation
 
