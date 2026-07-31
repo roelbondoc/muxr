@@ -6,6 +6,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Kitty graphics protocol images are saved to `~/.muxr/images` and
+  announced in the pane as a clickable `file://` path (OSC 8) instead of
+  being drawn. muxr renders a cell grid and has nowhere to put pixels, so
+  `[image 640×480 → ~/.muxr/images/…png]` is the honest rendering —
+  Cmd-click opens it. Multi-chunk (`m=1`) transmissions are reassembled,
+  `t=f`/`t=t` file transmissions are read from disk, and raw `f=24`/`f=32`
+  pixel data is re-encoded into a PNG container so the saved file is
+  actually openable. A capability query (`a=q`) is answered `OK` so inner
+  programs pick the kitty path instead of falling back to sixel. The store
+  keeps the 200 most recent images.
+
+### Fixed
+- APC (`ESC _ … ST`) and DCS/SOS/PM (`ESC P`/`ESC X`/`ESC ^`) string
+  sequences are now consumed by the parser. Previously neither had a
+  parser state: the introducer was swallowed and the entire body printed
+  into the grid as text, so any program emitting kitty graphics or sixel
+  sprayed kilobytes of base64 across the pane.
+
 ## [0.1.11] - 2026-06-11
 
 ### Added

@@ -1,5 +1,6 @@
 require_relative "muxr/version"
 require_relative "muxr/pty_process"
+require_relative "muxr/image_store"
 require_relative "muxr/terminal"
 require_relative "muxr/pane"
 require_relative "muxr/drawer"

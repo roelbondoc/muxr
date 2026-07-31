@@ -377,6 +377,27 @@ OSC 8 hyperlink ids after each feed, so terminals like Ghostty, iTerm2,
 kitty, and WezTerm merge the wrapped halves back into one clickable
 link (program-emitted OSC 8 payloads are left untouched).
 
+### Images
+
+A tiling multiplexer that re-composites a cell grid every frame has
+nowhere to put pixels, so muxr does not draw images — it saves them.
+When an inner program transmits one over the kitty graphics protocol
+(matplotlib's kitty backend, `timg`, `icat`, notebook TUIs), muxr decodes
+it into `~/.muxr/images` and prints a single line in the pane:
+
+```
+[image 640×480 → ~/.muxr/images/20260730-161111-57b946.png]
+```
+
+The line carries an OSC 8 `file://` hyperlink, so Cmd-click (Ghostty,
+iTerm2, kitty, WezTerm) opens it in your image viewer. Multi-chunk
+transmissions are reassembled, raw RGB/RGBA pixel data is re-encoded into
+a PNG so the file is openable, and the 200 most recent images are kept.
+
+muxr answers the protocol's capability query, so programs that probe will
+choose kitty over sixel; sixel itself is consumed and discarded rather
+than decoded.
+
 ## Session persistence
 
 Sessions live in `~/.muxr/sessions/<name>.json`:

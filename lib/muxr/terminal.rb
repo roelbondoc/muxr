@@ -1,3 +1,5 @@
+require_relative "image_store"
+
 module Muxr
   # A minimal VT100/ANSI terminal emulator. It maintains a fixed grid of cells
   # plus a cursor and parser state. Bytes fed from a PTY are interpreted into
@@ -161,6 +163,10 @@ module Muxr
     # a noisy inner program would otherwise grow it without bound.
     NOTIFY_MAX = 64 * 1024
 
+    GRAPHICS_MAX_LEN = 8 * 1024 * 1024
+
+    IMAGE_LINK_PREFIX = "8;id=muxr-img-"
+
     # Match plain-text URLs the inner program printed without wrapping them
     # in OSC 8. We stamp the matching cells with a synthetic hyperlink so the
     # outer terminal treats a wrapped URL as one click target instead of two
@@ -205,9 +211,12 @@ module Muxr
 
     attr_reader :rows, :cols, :cursor_row, :cursor_col, :view_offset
 
-    def initialize(rows: 24, cols: 80)
+    def initialize(rows: 24, cols: 80, image_store: nil)
       @rows = rows
       @cols = cols
+      @image_store = image_store || ImageStore.new
+      @parser_apc = +""
+      @graphics_pending = nil
       @buffer = Array.new(rows) { Array.new(cols) { blank_cell } }
       @cursor_row = 0
       @cursor_col = 0
@@ -887,6 +896,93 @@ module Muxr
       @pending_clipboard = decoded unless decoded.nil? || decoded.empty?
     end
 
+    def finalize_apc
+      payload = @parser_apc
+      @parser_apc = +""
+      return unless payload.start_with?("G")
+      control, _, data = payload[1..].partition(";")
+      opts = parse_graphics_keys(control)
+      return reply_graphics_query(opts) if opts["a"] == "q"
+      if @graphics_pending
+        @graphics_pending[:data] << data
+      else
+        @graphics_pending = { opts: opts, data: +data }
+      end
+      return if opts["m"] == "1"
+      image = @graphics_pending
+      @graphics_pending = nil
+      save_graphics(image)
+    end
+
+    def parse_graphics_keys(control)
+      control.split(",").each_with_object({}) do |pair, acc|
+        key, _, value = pair.partition("=")
+        acc[key] = value unless key.empty?
+      end
+    end
+
+    def reply_graphics_query(opts)
+      ids = %w[i I].filter_map { |k| "#{k}=#{opts[k]}" if opts[k] }
+      ids << "i=0" if ids.empty?
+      @pending_replies << "\e_G#{ids.join(',')};OK\e\\"
+    end
+
+    def save_graphics(image)
+      bytes = graphics_bytes(image[:opts], image[:data])
+      return if bytes.nil? || bytes.empty?
+      announce_image(@image_store.write(bytes), bytes)
+    rescue SystemCallError
+      write_announcement("[image: could not be saved]", nil)
+    end
+
+    def graphics_bytes(opts, data)
+      raw = decode_graphics_data(opts, data)
+      return nil if raw.nil? || raw.empty?
+      case opts["f"] || "32"
+      when "100" then raw
+      when "24"  then ImageStore.encode_png(raw, opts["s"].to_i, opts["v"].to_i, 3)
+      when "32"  then ImageStore.encode_png(raw, opts["s"].to_i, opts["v"].to_i, 4)
+      end
+    end
+
+    def decode_graphics_data(opts, data)
+      return nil if data.empty?
+      decoded = data.unpack1("m")
+      return decoded unless %w[f t].include?(opts["t"])
+      return nil unless decoded && File.file?(decoded)
+      File.binread(decoded)
+    rescue SystemCallError
+      nil
+    end
+
+    def announce_image(path, bytes)
+      width, height = ImageStore.png_dimensions(bytes)
+      size = width && height ? " #{width}×#{height}" : ""
+      write_announcement("[image#{size} → #{abbreviate_home(path)}]", path)
+    end
+
+    def write_announcement(text, path)
+      if @cursor_col.positive? || @autowrap_pending
+        @cursor_col = 0
+        line_feed
+        @autowrap_pending = false
+      end
+      saved_hyperlink = @current_hyperlink
+      if path
+        link = "#{IMAGE_LINK_PREFIX}#{path.hash.abs.to_s(16)};file://#{path}"
+        @current_hyperlink = (@hyperlink_intern[link] ||= link.freeze)
+      end
+      text.each_char { |c| put_char(c) }
+      @current_hyperlink = saved_hyperlink
+      @cursor_col = 0
+      @autowrap_pending = false
+      line_feed
+    end
+
+    def abbreviate_home(path)
+      path.start_with?(Dir.home) ? path.sub(Dir.home, "~") : path
+    end
+
     def process_char(ch)
       b = ch.ord
       case @parser_state
@@ -910,6 +1006,23 @@ module Muxr
         # terminals are lenient here, and being strict would swallow the
         # payload on slightly buggy emitters.
         finalize_osc
+        @parser_state = :ground
+      when :apc
+        if b == 0x9c
+          finalize_apc
+          @parser_state = :ground
+        elsif b == 0x1b
+          @parser_state = :apc_esc
+        elsif @parser_apc.bytesize < GRAPHICS_MAX_LEN
+          @parser_apc << ch
+        end
+      when :apc_esc
+        finalize_apc
+        @parser_state = :ground
+      when :string_discard
+        @parser_state = :string_discard_esc if b == 0x1b
+        @parser_state = :ground if b == 0x9c
+      when :string_discard_esc
         @parser_state = :ground
       when :charset
         @parser_state = :ground
@@ -949,6 +1062,11 @@ module Muxr
       when 0x5d # ]
         @parser_state = :osc
         @parser_osc = +""
+      when 0x5f # _
+        @parser_state = :apc
+        @parser_apc = +""
+      when 0x50, 0x58, 0x5e # P X ^
+        @parser_state = :string_discard
       when 0x28, 0x29, 0x2a, 0x2b # ( ) * +
         @parser_state = :charset
       when 0x37 # 7  save cursor

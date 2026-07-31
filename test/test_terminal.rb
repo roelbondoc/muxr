@@ -966,4 +966,110 @@ class TestTerminal < Minitest::Test
     (Muxr::Terminal::NOTIFY_MAX + 1000).times { t.feed("\a") }
     assert_operator t.take_pending_notifications!.bytesize, :<=, Muxr::Terminal::NOTIFY_MAX
   end
+
+  class FakeImageStore
+    attr_reader :written
+
+    def initialize(path)
+      @path = path
+      @written = []
+    end
+
+    def write(bytes)
+      @written << bytes
+      @path
+    end
+  end
+
+  SAVED_PATH = "/tmp/muxr-test/pic.png".freeze
+
+  def graphics_terminal(rows: 5, cols: 60)
+    store = FakeImageStore.new(SAVED_PATH)
+    [Muxr::Terminal.new(rows: rows, cols: cols, image_store: store), store]
+  end
+
+  def sample_png
+    Muxr::ImageStore.encode_png(([0, 0, 255].pack("C3") * 8), 4, 2, 3)
+  end
+
+  def row_text(t, row)
+    (0...t.cols).map { |c| t.cell(row, c).char }.join.rstrip
+  end
+
+  def test_kitty_graphics_image_is_saved_and_announced_as_a_path
+    t, store = graphics_terminal
+    png = sample_png
+    t.feed("\e_Ga=T,f=100;#{[png].pack('m0')}\e\\")
+    assert_equal [png], store.written
+    assert_equal "[image 4×2 → #{SAVED_PATH}]", row_text(t, 0)
+  end
+
+  def test_saved_image_line_carries_an_osc_8_file_link
+    t, = graphics_terminal
+    t.feed("\e_Ga=T,f=100;#{[sample_png].pack('m0')}\e\\")
+    link = t.cell(0, 0).hyperlink
+    assert link.start_with?(Muxr::Terminal::IMAGE_LINK_PREFIX), "expected an image link, got #{link.inspect}"
+    assert link.end_with?(";file://#{SAVED_PATH}")
+  end
+
+  def test_chunked_kitty_transmission_is_reassembled
+    t, store = graphics_terminal
+    png = sample_png
+    b64 = [png].pack("m0")
+    t.feed("\e_Ga=T,f=100,m=1;#{b64[0, 8]}\e\\")
+    assert_empty store.written, "nothing saved until the final chunk"
+    t.feed("\e_Gm=0;#{b64[8..]}\e\\")
+    assert_equal [png], store.written
+  end
+
+  def test_kitty_query_is_answered_and_stores_nothing
+    t, store = graphics_terminal(cols: 20)
+    t.feed("\e_Gi=31,s=1,v=1,a=q,t=d,f=24;#{['aaa'].pack('m0')}\e\\")
+    assert_equal "\e_Gi=31;OK\e\\", t.take_pending_replies!
+    assert_empty store.written
+    assert_equal "", row_text(t, 0)
+  end
+
+  def test_raw_rgb_transmission_is_wrapped_in_a_png
+    t, store = graphics_terminal
+    t.feed("\e_Ga=T,f=24,s=3,v=2;#{[[255, 0, 0].pack('C3') * 6].pack('m0')}\e\\")
+    saved = store.written.first
+    assert Muxr::ImageStore.png?(saved)
+    assert_equal [3, 2], Muxr::ImageStore.png_dimensions(saved)
+  end
+
+  def test_graphics_payload_never_lands_on_the_grid
+    t, = graphics_terminal
+    t.feed("\e_Gf=100,a=T;iVBORw0KGgoAAAANSUhEUg\e\\AFTER")
+    refute_includes row_text(t, 0), "iVBOR"
+    assert_equal "AFTER", row_text(t, 1)
+  end
+
+  def test_sixel_payload_is_discarded_without_corrupting_the_grid
+    t, = graphics_terminal
+    t.feed("\eP0;0;0q\"1;1;2;2#0;2;0;0;0#0@@\e\\AFTER")
+    assert_equal "AFTER", row_text(t, 0)
+  end
+
+  def test_image_announcement_starts_on_its_own_line
+    t, = graphics_terminal
+    t.feed("prompt> ")
+    t.feed("\e_Ga=T,f=100;#{[sample_png].pack('m0')}\e\\")
+    assert_equal "prompt>", row_text(t, 0)
+    assert_equal "[image 4×2 → #{SAVED_PATH}]", row_text(t, 1)
+  end
+
+  def test_graphics_action_without_payload_stores_nothing
+    t, store = graphics_terminal(cols: 20)
+    t.feed("\e_Ga=d,d=A\e\\")
+    assert_empty store.written
+    assert_equal "", row_text(t, 0)
+  end
+
+  def test_graphics_buffer_is_capped
+    t, store = graphics_terminal
+    oversized = "A" * (Muxr::Terminal::GRAPHICS_MAX_LEN + 4096)
+    t.feed("\e_Ga=T,f=100;#{oversized}\e\\")
+    assert_operator store.written.first.bytesize, :<=, Muxr::Terminal::GRAPHICS_MAX_LEN
+  end
 end
