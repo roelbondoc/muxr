@@ -95,10 +95,9 @@ module Muxr
       0x2264..0x2267, 0x226A..0x226B, 0x226E..0x226F, 0x2282..0x2283,
       0x2286..0x2287, 0x2295..0x2295, 0x2299..0x2299, 0x22A5..0x22A5,
       0x22BF..0x22BF, 0x2312..0x2312, 0x2460..0x24E9, 0x24EB..0x24FF,
-      # NOTE: the box-drawing / block-element band 0x2500-0x259F is deliberately
-      # excluded — Renderer#contiguous_after? trusts it as width-1 and terminals
-      # draw it narrow regardless of the ambiguous setting. Geometric shapes
-      # (0x25A0+) are fair game.
+      # NOTE: the box-drawing / block-element band 0x2500-0x259F is excluded here
+      # because it gets its own measured class — see BOX_RANGES / box_wide.
+      # Geometric shapes (0x25A0+) are fair game.
       0x25A0..0x25A1,
       0x25A3..0x25A9, 0x25B2..0x25B3, 0x25B6..0x25B7, 0x25BC..0x25BD,
       0x25C0..0x25C1, 0x25C6..0x25C8, 0x25CB..0x25CB, 0x25CE..0x25D1,
@@ -110,12 +109,26 @@ module Muxr
       0x2776..0x277F, 0xFFFD..0xFFFD
     ].freeze
 
+    # Box-drawing and block elements. Much of this band is formally East Asian
+    # Ambiguous, so a terminal set to draw ambiguous glyphs wide draws these two
+    # columns wide too — but plenty of terminals special-case the band and keep
+    # it narrow even then, so it can't ride on `ambiguous_wide`. It gets its own
+    # probed verdict (`box_wide`) instead of a guess, because Renderer's
+    # contiguity shortcut trusts this band and a wrong guess here shifts every
+    # subsequent cell on the line: it's the band TUI borders are built from, and
+    # Claude Code's UI is mostly borders.
+    BOX_RANGES = [0x2500..0x259F].freeze
+
     class << self
       # Whether the outer terminal draws East Asian Ambiguous glyphs two columns
       # wide. Set per attach by the width probe (default narrow, matching most
       # modern terminals). Covers the long tail of ambiguous glyphs the probe
       # doesn't sample individually.
       attr_accessor :ambiguous_wide
+      # Whether the outer terminal draws the box-drawing / block band two columns
+      # wide. Set per attach by the width probe; default narrow, which is what
+      # nearly every terminal does.
+      attr_accessor :box_wide
       # Exact per-codepoint widths the probe measured against the live terminal,
       # cp => 1|2. These WIN over every heuristic below, because a direct
       # measurement is ground truth. This is what catches glyphs whose width no
@@ -128,6 +141,7 @@ module Muxr
     # terminal at a time, and both #char_width call sites (the emulator and the
     # Renderer) must agree.
     self.ambiguous_wide = false
+    self.box_wide = false
     @width_overrides = {}
 
     def self.width_overrides=(map)
@@ -146,6 +160,7 @@ module Muxr
       return ov if ov
       return 2 if WIDE_RANGES.any? { |r| r.cover?(cp) }
       return 2 if @ambiguous_wide && AMBIGUOUS_RANGES.any? { |r| r.cover?(cp) }
+      return 2 if @box_wide && BOX_RANGES.any? { |r| r.cover?(cp) }
       1
     end
 
@@ -731,6 +746,10 @@ module Muxr
       keep_rows = [rows, @rows].min
       keep_cols = [cols, @cols].min
       src_start = @rows - keep_rows
+      # Shrinking keeps the bottom `rows` lines. The ones falling off the top
+      # scrolled out of view exactly as if the program had emitted newlines, so
+      # they belong in history rather than being dropped.
+      src_start.times { |i| push_scrollback(@buffer[i]) }
       keep_rows.times do |i|
         keep_cols.times do |j|
           new_buf[i][j].copy_from(@buffer[src_start + i][j])
@@ -756,23 +775,41 @@ module Muxr
       @feed_remainder = +"".b
       str = bytes.dup.force_encoding(Encoding::UTF_8)
       unless str.valid_encoding?
-        # Find the longest valid UTF-8 prefix and stash the remainder for the
-        # next feed call so multi-byte characters don't get garbled across PTY
-        # read boundaries.
-        raw = bytes.bytes
-        while raw.any?
-          candidate = raw.pack("C*").force_encoding(Encoding::UTF_8)
-          break if candidate.valid_encoding?
-          @feed_remainder = ([raw.last] + @feed_remainder.bytes).pack("C*").b
-          raw.pop
+        # Hold back only a genuinely truncated multi-byte character at the very
+        # end, so a glyph split across PTY read boundaries still joins up. Any
+        # other malformed byte is substituted rather than deferred: deferring it
+        # would prepend the same bad byte to every later feed, so the stream
+        # could never become valid and the pane would stall forever.
+        hold = incomplete_tail_length(bytes)
+        if hold.positive?
+          @feed_remainder = bytes.byteslice(bytes.bytesize - hold, hold).b
+          bytes = bytes.byteslice(0, bytes.bytesize - hold)
         end
-        str = raw.pack("C*").force_encoding(Encoding::UTF_8)
-        # Bail out completely if we couldn't decode anything yet.
+        str = bytes.dup.force_encoding(Encoding::UTF_8)
+        str = str.scrub("�") unless str.valid_encoding?
         return if str.empty?
       end
       str.each_char { |c| process_char(c) }
       detect_urls!
       @dirty = true
+    end
+
+    # Byte length of an incomplete UTF-8 character at the end of +bytes+, or 0
+    # when the tail isn't a truncated character. A UTF-8 character is at most 4
+    # bytes, so only the last 3 can be waiting on continuation bytes.
+    def incomplete_tail_length(bytes)
+      max = [3, bytes.bytesize].min
+      (1..max).each do |back|
+        b = bytes.getbyte(bytes.bytesize - back)
+        return 0 if b < 0x80
+        next if b < 0xc0
+        needed = if b >= 0xf0 then 4
+                 elsif b >= 0xe0 then 3
+                 else 2
+                 end
+        return needed > back ? back : 0
+      end
+      0
     end
 
     # Walk the buffer (plus the last scrollback row so wraps across the
@@ -1073,7 +1110,7 @@ module Muxr
         @saved_cursor = [@cursor_row, @cursor_col]
         @parser_state = :ground
       when 0x38 # 8  restore cursor
-        @cursor_row, @cursor_col = @saved_cursor
+        restore_cursor
         @parser_state = :ground
       when 0x44 # D  index
         line_feed
@@ -1237,7 +1274,7 @@ module Muxr
       when "s"
         @saved_cursor = [@cursor_row, @cursor_col]
       when "u"
-        @cursor_row, @cursor_col = @saved_cursor
+        restore_cursor
       when "n"
         # DSR — Device Status Report. `\e[5n` asks if the terminal is OK,
         # `\e[6n` (CPR) asks for the cursor position. The reply rides back
@@ -1252,6 +1289,13 @@ module Muxr
         # Non-private mode set/reset — nothing we need to honor. (DEC private
         # `?`-prefixed mode sequences are short-circuited above.)
       end
+    end
+
+    def restore_cursor
+      row, col = @saved_cursor
+      @cursor_row = row.clamp(0, @rows - 1)
+      @cursor_col = col.clamp(0, @cols - 1)
+      @autowrap_pending = false
     end
 
     def put_char(ch)
@@ -1328,31 +1372,32 @@ module Muxr
       # Only the default full-screen region contributes to scrollback. Partial
       # regions (vi/less status lines) scroll inner content that's not really
       # "off the top of the screen" and shouldn't pollute history.
-      if @scroll_top.zero? && @scroll_bottom == @rows - 1
-        @scrollback << @buffer[0]
-        if @scrollback.size > SCROLLBACK_MAX
-          @scrollback.shift
-          # Selection coordinates are timeline-indexed; an eviction shifts the
-          # whole timeline down by one. Track that or selection points at the
-          # wrong row.
-          if @selection_anchor
-            @selection_anchor[0] = [@selection_anchor[0] - 1, 0].max
-            @selection_cursor[0] = [@selection_cursor[0] - 1, 0].max
-          end
-          unless @search_matches.empty?
-            @search_matches.each { |m| m[0] -= 1 }
-            @search_matches.reject! { |m| m[0] < 0 }
-            @search_current = nil if @search_current && @search_current >= @search_matches.length
-          end
-        end
-        # Keep the user's view frozen on the same content when new rows arrive
-        # while they're scrolled back.
-        if @view_offset.positive?
-          @view_offset = (@view_offset + 1).clamp(0, @scrollback.size)
-        end
-      end
+      push_scrollback(@buffer[0]) if @scroll_top.zero? && @scroll_bottom == @rows - 1
       @buffer[@scroll_top, @scroll_bottom - @scroll_top + 1] =
         @buffer[(@scroll_top + 1)..@scroll_bottom] + [Array.new(@cols) { blank_cell }]
+    end
+
+    def push_scrollback(row)
+      @scrollback << row
+      if @scrollback.size > SCROLLBACK_MAX
+        @scrollback.shift
+        # Selection coordinates are timeline-indexed; an eviction shifts the
+        # whole timeline down by one. Track that or selection points at the
+        # wrong row.
+        if @selection_anchor
+          @selection_anchor[0] = [@selection_anchor[0] - 1, 0].max
+          @selection_cursor[0] = [@selection_cursor[0] - 1, 0].max
+        end
+        unless @search_matches.empty?
+          @search_matches.each { |m| m[0] -= 1 }
+          @search_matches.reject! { |m| m[0] < 0 }
+          @search_current = nil if @search_current && @search_current >= @search_matches.length
+        end
+      end
+      # Keep the user's view frozen on the same content when new rows arrive
+      # while they're scrolled back.
+      return unless @view_offset.positive?
+      @view_offset = (@view_offset + 1).clamp(0, @scrollback.size)
     end
 
     def set_view_offset(v)

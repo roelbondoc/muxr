@@ -226,4 +226,15 @@ class TestRenderer < Minitest::Test
     refute_includes output, "\e[?25h",
       "a pane that hid its cursor must not get one painted back"
   end
+
+  def test_box_drawing_stays_contiguous_only_while_the_band_is_narrow
+    renderer = Muxr::Renderer.new(out: StringIO.new)
+    Muxr::Terminal.box_wide = false
+    assert renderer.send(:contiguous_after?, "\u2500")
+    Muxr::Terminal.box_wide = true
+    refute renderer.send(:contiguous_after?, "\u2500")
+    assert renderer.send(:contiguous_after?, "a")
+  ensure
+    Muxr::Terminal.box_wide = false
+  end
 end

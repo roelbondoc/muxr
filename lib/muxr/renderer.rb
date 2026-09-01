@@ -620,10 +620,11 @@ module Muxr
 
     # Whether we can trust the outer terminal's cursor to be exactly one
     # display-width past this glyph, so the next contiguous cell needs no
-    # cursor-position escape. Safe only for glyphs whose width every terminal
-    # agrees on: ASCII (always one column), and the box-drawing / block-element
-    # band 0x2500–0x259F (reliably one column, and we emit a lot of them for
-    # borders, so keeping them contiguous matters). Everything else non-ASCII —
+    # cursor-position escape. Safe for ASCII (always one column), and for the
+    # box-drawing / block-element band 0x2500–0x259F unless the width probe
+    # measured this terminal drawing that band wide — we emit a lot of those for
+    # borders, so keeping them contiguous matters when it's sound. Everything
+    # else non-ASCII —
     # CJK, emoji, and East Asian Ambiguous symbols like ·, …, ●, arrows, and
     # the ⏺/✻/❯ glyphs Claude Code's UI is full of — can be drawn two columns
     # wide by some terminals. We can't know which, so we force an absolute
@@ -633,7 +634,8 @@ module Muxr
     def contiguous_after?(char)
       return false if char.length > 1
       cp = char.ord
-      cp < 0x80 || (cp >= 0x2500 && cp <= 0x259F)
+      return true if cp < 0x80
+      !Terminal.box_wide && Terminal::BOX_RANGES.any? { |r| r.cover?(cp) }
     end
 
     def cursor_position(session, input_state:, command_buffer:, search_buffer: "")

@@ -984,6 +984,7 @@ module Muxr
     def apply_caps(caps)
       return if caps.nil? || caps.empty?
       Terminal.ambiguous_wide = (caps[:ambiguous] == 2) if caps.key?(:ambiguous)
+      Terminal.box_wide = (caps[:box] == 2) if caps.key?(:box)
       Terminal.width_overrides = caps[:glyphs] if caps.key?(:glyphs)
     end
 

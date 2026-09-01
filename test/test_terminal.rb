@@ -1072,4 +1072,67 @@ class TestTerminal < Minitest::Test
     t.feed("\e_Ga=T,f=100;#{oversized}\e\\")
     assert_operator store.written.first.bytesize, :<=, Muxr::Terminal::GRAPHICS_MAX_LEN
   end
+
+  def test_stray_invalid_utf8_byte_does_not_stall_the_stream
+    t = Muxr::Terminal.new(rows: 4, cols: 30)
+    t.feed("hello")
+    t.feed("\xFF".b)
+    t.feed(" world")
+    assert_equal "hello\uFFFD world", row_text(t, 0)
+    assert_empty t.instance_variable_get(:@feed_remainder)
+  end
+
+  def test_invalid_byte_does_not_grow_the_feed_remainder
+    t = Muxr::Terminal.new(rows: 4, cols: 30)
+    5.times { t.feed("\xFF".b) }
+    assert_operator t.instance_variable_get(:@feed_remainder).bytesize, :<=, 3
+  end
+
+  def test_multibyte_character_split_across_feeds_still_joins
+    bytes = "\u{1F680}".b
+    (1..3).each do |split|
+      t = Muxr::Terminal.new(rows: 4, cols: 30)
+      t.feed("x" + bytes.byteslice(0, split))
+      t.feed(bytes.byteslice(split, bytes.bytesize - split) + "y")
+      assert_equal "x\u{1F680}y", row_text(t, 0), "split after #{split} byte(s)"
+    end
+  end
+
+  def test_restore_cursor_after_shrink_stays_in_bounds
+    t = Muxr::Terminal.new(rows: 20, cols: 40)
+    t.feed("\e[18;30H\e7")
+    t.resize(6, 20)
+    t.feed("\e8")
+    t.feed("X")
+    assert_equal 5, t.cursor_row
+    assert_includes row_text(t, 5), "X"
+  end
+
+  def test_csi_restore_cursor_after_shrink_stays_in_bounds
+    t = Muxr::Terminal.new(rows: 20, cols: 40)
+    t.feed("\e[18;30H\e[s")
+    t.resize(6, 20)
+    t.feed("\e[u")
+    t.feed("Y")
+    assert_includes row_text(t, 5), "Y"
+  end
+
+  def test_shrinking_moves_the_lost_top_rows_into_scrollback
+    t = Muxr::Terminal.new(rows: 6, cols: 20)
+    t.feed("line0\r\nline1\r\nline2\r\nline3\r\nline4\r\nline5")
+    t.resize(3, 20)
+    scrollback = t.instance_variable_get(:@scrollback).map { |r| r.map(&:char).join.rstrip }
+    assert_equal %w[line0 line1 line2], scrollback
+    assert_equal "line3", row_text(t, 0)
+  end
+
+  def test_box_drawing_width_follows_the_probed_verdict
+    Muxr::Terminal.box_wide = false
+    assert_equal 1, Muxr::Terminal.char_width("\u2500".ord)
+    Muxr::Terminal.box_wide = true
+    assert_equal 2, Muxr::Terminal.char_width("\u2500".ord)
+    assert_equal 2, Muxr::Terminal.char_width("\u2588".ord)
+  ensure
+    Muxr::Terminal.box_wide = false
+  end
 end

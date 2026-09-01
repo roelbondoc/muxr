@@ -25,6 +25,15 @@ module Muxr
     # exact width as a per-codepoint override — ground truth beats any heuristic.
     GLYPH_SAMPLES = ["⏺", "✻", "❯", "✦", "✳", "◼", "▪"].freeze
 
+    # Box-drawing and block elements (Terminal::BOX_RANGES). Formally Ambiguous,
+    # but many terminals keep them narrow even in ambiguous-as-wide mode, so the
+    # AMBIGUOUS_SAMPLES verdict can't speak for them. They need their own vote
+    # because Renderer#contiguous_after? relies on this band being narrow to skip
+    # cursor repositioning — if the terminal actually draws them wide, every
+    # glyph after one on the same line lands a column off, which is what mangles
+    # a border-heavy TUI like Claude Code.
+    BOX_SAMPLES = ["─", "│", "█", "▌"].freeze
+
     # Overall wall-clock budget for the whole probe. A terminal that never
     # answers DSR (rare, but possible over flaky ttys / odd emulators) must not
     # wedge attach — we give up and fall back to defaults.
@@ -44,6 +53,12 @@ module Muxr
       return caps if amb.empty?
       wide = amb.count { |w| w >= 2 }
       caps[:ambiguous] = wide > (amb.length - wide) ? 2 : 1
+
+      box = BOX_SAMPLES.filter_map { |g| measure(g, out, input, deadline) }
+      unless box.empty?
+        box_wide = box.count { |w| w >= 2 }
+        caps[:box] = box_wide > (box.length - box_wide) ? 2 : 1
+      end
 
       glyphs = {}
       GLYPH_SAMPLES.each do |g|

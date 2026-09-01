@@ -69,4 +69,18 @@ class TestWidthProbe < Minitest::Test
   ensure
     [_r, w].each { |io| io.close rescue nil }
   end
+
+  def test_reports_box_band_wide_when_terminal_draws_two_columns
+    with_fake_terminal(width: 2) do |out, input|
+      caps = Muxr::WidthProbe.run(out: out, input: input, timeout: 1.0)
+      assert_equal 2, caps[:box]
+    end
+  end
+
+  def test_reports_box_band_narrow_when_terminal_draws_one_column
+    with_fake_terminal(width: 1) do |out, input|
+      caps = Muxr::WidthProbe.run(out: out, input: input, timeout: 1.0)
+      assert_equal 1, caps[:box]
+    end
+  end
 end
