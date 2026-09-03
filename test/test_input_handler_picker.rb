@@ -59,6 +59,13 @@ class TestInputHandlerPicker < Minitest::Test
     assert_equal :normal, @input.state
   end
 
+  def test_m_moves_the_pane_rather_than_sharing_it
+    open_picker
+    @input.feed("m")
+    assert_includes @app.calls, [:confirm_pane_picker, { move: true }]
+    assert_equal :normal, @input.state
+  end
+
   def test_escape_cancels_and_leaves_the_overlay
     open_picker
     @input.feed("\e")

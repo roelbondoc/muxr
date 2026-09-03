@@ -6,20 +6,31 @@ module Muxr
   class PTYProcess
     attr_reader :pid, :io, :rows, :cols
 
-    def initialize(command: nil, rows: 24, cols: 80, cwd: nil, env_overrides: {})
+    # +adopt_io+ / +adopt_pid+ take over a master pty handed across a Unix
+    # socket by another muxr server instead of spawning anything: the shell on
+    # the far end of that fd is already running and keeps running. The child is
+    # not ours, so it can be signalled and inspected but never waited on —
+    # #reap already tolerates ECHILD, which is exactly that case.
+    def initialize(command: nil, rows: 24, cols: 80, cwd: nil, env_overrides: {}, adopt_io: nil, adopt_pid: nil)
       @rows = rows
       @cols = cols
       @exited = false
       @write_buffer = +"".b
 
-      shell = command || ENV["SHELL"] || "/bin/sh"
-      env = ENV.to_h.merge("TERM" => "xterm-256color").merge(env_overrides)
-      env["LINES"]   = rows.to_s
-      env["COLUMNS"] = cols.to_s
+      if adopt_io
+        @reader = adopt_io
+        @writer = adopt_io.dup
+        @pid = adopt_pid
+      else
+        shell = command || ENV["SHELL"] || "/bin/sh"
+        env = ENV.to_h.merge("TERM" => "xterm-256color").merge(env_overrides)
+        env["LINES"]   = rows.to_s
+        env["COLUMNS"] = cols.to_s
 
-      chdir = (cwd && File.directory?(cwd)) ? cwd : Dir.pwd
+        chdir = (cwd && File.directory?(cwd)) ? cwd : Dir.pwd
 
-      @reader, @writer, @pid = PTY.spawn(env, shell, chdir: chdir)
+        @reader, @writer, @pid = PTY.spawn(env, shell, chdir: chdir)
+      end
       @io = @reader
       resize(rows, cols)
     end
@@ -114,6 +125,22 @@ module Muxr
       Process.waitpid(@pid, Process::WNOHANG)
     rescue Errno::ECHILD
       nil
+    end
+
+    # Give the child up to another server without killing it: drop our fds and
+    # hand the corpse-reaping duty to a detach thread, since the process stays
+    # our child in the kernel's eyes no matter who holds the pty now. After
+    # this the process looks exited to us, so #close is a no-op and nothing
+    # signals a shell that has a new owner.
+    def relinquish!
+      return if @exited
+      @exited = true
+      @write_buffer.clear
+      Process.detach(@pid) if @pid
+      @reader.close unless @reader.closed?
+      @writer.close if @writer != @reader && !@writer.closed?
+    rescue Errno::EBADF, IOError
+      # already closed
     end
 
     def close

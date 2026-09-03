@@ -166,6 +166,10 @@ module Muxr
       @process.cwd || @initial_cwd
     end
 
+    def relinquish!
+      @process.relinquish! if @process.respond_to?(:relinquish!)
+    end
+
     def close
       @process.close
     end

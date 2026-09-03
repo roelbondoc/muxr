@@ -260,11 +260,19 @@ owns it — with two differences worth knowing:
 - `muxr_pane_kill` only detaches the mirror. The shell keeps running in
   its home session. If the user asks you to kill it, say that's what
   happened rather than reporting the process gone.
+- It can vanish without dying: if the owning session goes away, or the
+  pane is moved somewhere else, it disappears from `muxr_panes_list`.
+  Re-read the list rather than assuming a stale id.
 - Its size is negotiated with the owner, so `muxr_layout_set` may not
   give it the dimensions you'd expect from the layout alone.
 
 Anything you type there is visible to whoever is looking at the owning
 session, live. Treat it the way you'd treat a shared screen.
+
+A pane the user *moved* here (rather than shared) has no `origin` — it is
+an ordinary local pane, even though the shell inside it has been running
+since before it arrived. Don't assume a pane's history started in this
+session.
 
 ### The drawer might be Claude itself
 

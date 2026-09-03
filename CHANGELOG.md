@@ -21,6 +21,18 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   are left out of `:save`. New control methods: `pane.mirror`,
   `pane.mirror_resize`, `pane.unmirror`, `pane.redraw`; `pane.send_input`
   and `pane.run` now also accept `base64: true` payloads.
+- Move a pane between sessions for real, with `m` in the same picker. The
+  master pty file descriptor crosses the socket via `SCM_RIGHTS`, so the
+  same shell process keeps running — environment, background jobs, screen
+  and full scrollback intact — and simply belongs to the receiving session
+  afterwards, as an ordinary local pane. The handoff is two-phase: nothing
+  is torn down until the receiver confirms it has a working pane, a failure
+  anywhere leaves the pane where it was, and an abandoned move times out
+  after ten seconds instead of pausing the pane forever. muxr refuses to
+  move the last pane out of a session (it would shut that session down) or
+  to move on a pane that is itself borrowed. Sessions mirroring a pane that
+  moves away are told it is gone and detach. New control methods:
+  `pane.move`, `pane.move_commit`, `pane.move_abort`.
 - Kitty graphics protocol images are saved to `~/.muxr/images` and
   announced in the pane as a clickable `file://` path (OSC 8) instead of
   being drawn. muxr renders a cell grid and has nowhere to put pixels, so

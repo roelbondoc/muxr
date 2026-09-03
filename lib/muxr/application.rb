@@ -1,6 +1,7 @@
 require "socket"
 require "fileutils"
 require "muxr/remote_pane"
+require "muxr/pane_transfer"
 require "muxr/pane_picker"
 require "muxr/session_directory"
 
@@ -526,11 +527,31 @@ module Muxr
       invalidate
     end
 
-    def confirm_pane_picker
+    def confirm_pane_picker(move: false)
       entry = @pane_picker&.selected
       cancel_pane_picker
       return unless entry
-      attach_remote_pane(entry)
+      move ? move_remote_pane(entry) : attach_remote_pane(entry)
+    end
+
+    # Take the pane away from its session rather than sharing it. The pty fd
+    # itself crosses over, so the shell and everything running under it carry
+    # on uninterrupted — it just answers to this session now, and disappears
+    # from the one it came from.
+    def move_remote_pane(entry)
+      result = PaneTransfer.claim(socket_path: entry.socket_path, pane_id: entry.pane_id)
+      pane = result.pane
+      pane.foreground_command = nil
+      @session.window.add_pane(pane)
+      @session.focus_drawer = false
+      @session.window.focused_index = @session.window.panes.length - 1
+      @renderer.reset_frame!
+      flash("moved #{result.session}:#{pane.id} here")
+      invalidate
+      pane
+    rescue PaneTransfer::Error => e
+      flash("move failed: #{e.message}")
+      nil
     end
 
     # Mount another session's pane here as a live mirror. The pane keeps
@@ -931,14 +952,14 @@ module Muxr
       while @running
         read_ios  = [@listening_socket]
         read_ios << @current_client if @current_client
-        @session.window.panes.each { |p| read_ios << p.io if p.alive? }
+        @session.window.panes.each { |p| read_ios << p.io if p.alive? && !handing_off?(p) }
         drawer_pane = @session.drawer&.pane
         read_ios << drawer_pane.io if drawer_pane&.alive?
         read_ios.concat(@control_server.read_ios) if @control_server
 
         write_ios = []
         @session.window.panes.each do |p|
-          write_ios << p.writer_io if p.alive? && p.pending_write?
+          write_ios << p.writer_io if p.alive? && p.pending_write? && !handing_off?(p)
         end
         if drawer_pane&.alive? && drawer_pane.pending_write?
           write_ios << drawer_pane.writer_io
@@ -1154,8 +1175,15 @@ module Muxr
       nil
     end
 
+    # A pane whose pty has been sent to another server but whose move is not
+    # committed yet. Its fd stays out of the select sets: two servers reading
+    # one master would split the byte stream between them.
+    def handing_off?(pane)
+      !!@control_server&.handing_off?(pane)
+    end
+
     def prune_dead_panes
-      dead = @session.window.panes.reject(&:alive?)
+      dead = @session.window.panes.reject { |p| p.alive? || handing_off?(p) }
       return if dead.empty?
       dead.each { |p| @session.window.remove_pane(p) }
       invalidate

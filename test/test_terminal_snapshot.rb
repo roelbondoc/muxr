@@ -89,6 +89,62 @@ class TestTerminalSnapshot < Minitest::Test
     assert_nil replica.cell(0, 5).hyperlink
   end
 
+  def test_the_scroll_region_is_carried_so_a_copy_scrolls_the_same_band
+    source = build { |t| t.feed("\e[2;4r\e[3;1Hinside") }
+    replica = replay(source)
+    replica.feed("\eM\eM\eM")
+    source.feed("\eM\eM\eM")
+    assert_equal source.dump_text, replica.dump_text
+  end
+
+  def test_bracketed_paste_mode_is_carried
+    assert replay(build { |t| t.feed("\e[?2004h") }).bracketed_paste?
+    refute replay(build { |t| t.feed("\e[?2004h\e[?2004l") }).bracketed_paste?
+  end
+
+  def test_the_pen_is_carried_so_later_writes_keep_their_color
+    source = build { |t| t.feed("\e[33mcolored") }
+    replica = replay(source)
+    replica.feed("more")
+    source.feed("more")
+    assert_equal 3, replica.cell(0, 7).fg
+    assert_equal source.cell(0, 7).fg, replica.cell(0, 7).fg
+  end
+
+  def test_dump_transfer_carries_the_history_above_the_screen
+    source = build(rows: 4, cols: 12) { |t| 20.times { |i| t.feed("row#{i}\r\n") } }
+    replica = Muxr::Terminal.new(rows: 4, cols: 12)
+    replica.restore_transfer!(source.dump_transfer)
+    assert_equal source.dump_text, replica.dump_text
+    assert_equal source.scrollback_size, replica.scrollback_size
+    replica.scroll_back(replica.scrollback_size)
+    source.scroll_back(source.scrollback_size)
+    assert_equal source.dump_text, replica.dump_text
+    assert_includes replica.dump_text, "row0"
+  end
+
+  def test_transferred_history_keeps_its_attributes
+    source = build(rows: 3, cols: 12) do |t|
+      t.feed("\e[1;34mblue bold\e[0m\r\n")
+      6.times { |i| t.feed("plain#{i}\r\n") }
+    end
+    replica = Muxr::Terminal.new(rows: 3, cols: 12)
+    replica.restore_transfer!(source.dump_transfer)
+    replica.scroll_back(replica.scrollback_size)
+    cell = replica.visible_cell(0, 0)
+    assert_equal "b", cell.char
+    assert_equal 4, cell.fg
+    assert_equal Muxr::Terminal::BOLD, cell.attrs & Muxr::Terminal::BOLD
+  end
+
+  def test_dump_transfer_survives_a_pane_with_no_history_yet
+    source = build(rows: 4, cols: 12) { |t| t.feed("fresh") }
+    replica = Muxr::Terminal.new(rows: 4, cols: 12)
+    replica.restore_transfer!(source.dump_transfer)
+    assert_equal 0, replica.scrollback_size
+    assert_equal source.dump_text, replica.dump_text
+  end
+
   def test_a_scrolled_screen_snapshots_what_is_live_not_the_scrollback_view
     source = build(rows: 4, cols: 10) do |t|
       12.times { |i| t.feed("line#{i}\r\n") }

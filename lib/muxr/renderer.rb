@@ -409,7 +409,7 @@ module Muxr
       "  r               refresh / redraw (fixes a corrupted pane)",
       "  s               enter scrollback",
       "  ~ / C / P       drawer / Claude drawer / toggle private",
-      "  A               attach a pane from another muxr session",
+      "  A               share or move a pane from another muxr session",
       "  : / ?           command prompt / toggle this help",
       "  ] / d / q       paste buffer / detach / kill session",
       "",
@@ -420,7 +420,7 @@ module Muxr
       "  C-a n / p / a   next / prev / last pane",
       "  C-a r           refresh / redraw (fixes a corrupted pane)",
       "  C-a [ ]         scrollback / paste buffer",
-      "  C-a A           attach a pane from another muxr session",
+      "  C-a A           share or move a pane from another muxr session",
       "  C-a C-a         send literal Ctrl-a to focused pane",
       "",
       "SCROLLBACK mode (pane-bound: follows you as you switch panes)",
@@ -478,7 +478,7 @@ module Muxr
     PICKER_DIM_FG      = [:c256, 245].freeze
     PICKER_SELECTED_BG = [:c256, 24].freeze
     PICKER_BORDER      = [:c256, 39].freeze
-    PICKER_HINT        = "j/k move · Enter attach · Esc cancel".freeze
+    PICKER_HINT        = "j/k select · Enter share · m move here · Esc cancel".freeze
 
     def compose_pane_picker(frame, session, picker)
       lines = picker_lines(picker)

@@ -85,6 +85,16 @@ class TestApplicationAttach < Minitest::Test
     assert_equal [@app.session.window.panes.first.id], ids
   end
 
+  def test_an_unreachable_owner_is_reported_rather_than_raised_on_a_move
+    entry = Muxr::SessionDirectory::Entry.new(
+      session: "gone", socket_path: File.join(@dir, "nope.ctrl.sock"),
+      pane_id: "abc123", slot: 1, cwd: "/tmp", rows: 24, cols: 80, focused: false
+    )
+    assert_nil @app.move_remote_pane(entry)
+    assert_equal 1, @app.session.window.panes.length
+    assert_match(/move failed/, flashed)
+  end
+
   def test_the_viewport_offered_to_the_owner_fits_the_layout_the_pane_will_land_in
     rows, cols = @app.mirror_viewport
     assert_operator rows, :>, 0

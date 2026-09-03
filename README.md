@@ -162,7 +162,7 @@ regardless of mode.
 | `a` / `1` … `9`      | toggle last pane / jump to pane by number           |
 | `s`                  | enter scrollback / copy-mode                        |
 | `~` / `C` / `P`      | drawer / Claude drawer / toggle private flag        |
-| `A`                  | attach a pane from another muxr session             |
+| `A`                  | share or move a pane in from another muxr session   |
 | `]`                  | paste internal yank buffer into focused pane        |
 | `:` / `?`            | command prompt / help                               |
 | `d` / `q`            | detach / kill session (asks `y/n`)                  |
@@ -194,7 +194,7 @@ the move falls back to linear next/prev shuffling.
 | `C-a ~`        | toggle drawer (shell)                                   |
 | `C-a C`        | toggle Claude Code drawer (MCP-aware)                   |
 | `C-a P`        | toggle private flag on focused pane (hides from MCP)    |
-| `C-a A`        | attach a pane from another muxr session                 |
+| `C-a A`        | share or move a pane in from another muxr session       |
 | `C-a [`        | enter scrollback / copy-mode                            |
 | `C-a ]`        | paste internal yank buffer into focused pane            |
 | `C-a d`        | detach (server keeps running)                           |
@@ -249,24 +249,32 @@ selection into an internal buffer, pipes it to `pbcopy` in the background
 `]` (normal) / `C-a ]` (passthrough) writes the yank buffer back into the
 focused pane.
 
-### Attaching a pane from another session
+### Sharing and moving panes between sessions
 
 `A` (or `C-a A`, or `:attach`) opens a picker listing every pane offered
 by the other muxr servers running on this machine, grouped by session.
-`j`/`k` or `↑`/`↓` move, `Enter` attaches, `Esc` backs out.
+`j`/`k` or `↑`/`↓` select, `Esc` backs out, and there are two ways to
+take a pane:
+
+| Key     | Action                                                     |
+|---------|------------------------------------------------------------|
+| `Enter` | **share** it — the pane lives in both sessions at once      |
+| `m`     | **move** it here — the pane leaves the session it came from |
 
 ```
-┌─ Attach pane ──────────────────────────────────────┐
-│ work                                               │
-│   #1 6021b5  ~/src/muxr                            │
-│   #2 c3a190  ~/src/muxr/lib                        │
-│ notes                                              │
-│   #1 71d7d1  ~/notes                               │
-│ j/k move · Enter attach · Esc cancel               │
-└────────────────────────────────────────────────────┘
+┌─ Attach pane ───────────────────────────────────────┐
+│ work                                                │
+│   #1 6021b5  ~/src/muxr                             │
+│   #2 c3a190  ~/src/muxr/lib                         │
+│ notes                                               │
+│   #1 71d7d1  ~/notes                                │
+│ j/k select · Enter share · m move here · Esc cancel │
+└─────────────────────────────────────────────────────┘
 ```
 
-The chosen pane is **shared, not moved** — it keeps running in its own
+#### Sharing (`Enter`)
+
+The chosen pane is shared, not moved — it keeps running in its own
 session, and both sessions show the same live shell. Either side can
 type into it; scrollback, colors, the alternate screen and full-screen
 TUIs (vim, htop, Claude Code) all work, because what crosses between the
@@ -292,6 +300,38 @@ settles the questions a shared pane raises:
 Programmatically the same thing is available over the control socket as
 `pane.mirror` / `pane.mirror_resize` / `pane.unmirror`.
 
+#### Moving (`m`)
+
+`m` takes the pane instead of borrowing it. The master pty file
+descriptor itself crosses the socket, so this is a true move rather than
+a re-spawn: the same shell process keeps running, with its environment,
+its background jobs, its scroll position and everything it had on
+screen. Afterwards the pane is an ordinary local pane — it just isn't in
+the other session any more, and that session carries on without it.
+
+What travels: the process, the screen, the full scrollback, the pane id,
+the cwd, and the emulator's mode state (scroll region, bracketed paste,
+cursor visibility, the current pen). What doesn't: nothing you'd notice
+— but the shell's parent is still the old server, which reaps it when it
+eventually exits.
+
+The move is two-phase, and a failure anywhere leaves the pane exactly
+where it was rather than dropping a live shell between two servers. If
+the receiving side never confirms, the owner resumes the pane after ten
+seconds. Two guards are worth knowing:
+
+- muxr refuses to move the **last** pane out of a session, since that
+  would shut the source session down as a side effect.
+- A pane that is itself borrowed (`@work:6021b5`) can't be moved on —
+  move it from the session that actually owns it.
+
+Panes other sessions are mirroring can be moved; their mirrors are told
+the pane is gone and detach.
+
+Over the control socket this is `pane.move` / `pane.move_commit` /
+`pane.move_abort`, though the fd handoff means it needs a real client
+rather than a line of `nc`.
+
 ## Commands (typed after `:` in normal mode, or `C-a :` in passthrough)
 
 ```
@@ -305,7 +345,7 @@ private                        # toggle private flag on focused pane
 save                           # persist session to ~/.muxr/sessions/<name>.json
 restore                        # show path to saved session
 sessions | ls                  # list saved sessions and live servers
-attach                         # open the attach picker (same as A / C-a A)
+attach                         # open the pane picker (same as A / C-a A)
 new | close | next | prev | master
 detach | quit                  # quit asks for y/n confirmation
 ```

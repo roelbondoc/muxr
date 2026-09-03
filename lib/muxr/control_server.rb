@@ -34,6 +34,10 @@ module Muxr
     INTERNAL_ERROR   = -32603
 
     READ_CHUNK = 64 * 1024
+    # How long a half-finished pane move may hold a pane's pty paused before we
+    # assume the receiver is never coming back and resume reading it.
+    HANDOFF_TIMEOUT = 10.0
+    FLUSH_TIMEOUT = 2.0
 
     def initialize(app, socket_path)
       @app = app
@@ -44,6 +48,7 @@ module Muxr
       @pending_runs  = []  # in-flight pane.run waiters (populated in step 3)
       @mirrors   = {}      # pane_id => { io => [rows, cols] }
       @mirror_geometry = {} # pane_id => [rows, cols] last announced to mirrors
+      @handoffs  = {}      # io => { pane:, deadline_at: }  in-flight pane moves
       @dispatcher = Dispatcher.new(app, self)
     end
 
@@ -61,6 +66,7 @@ module Muxr
       @subscriptions.clear
       @pending_runs.clear
       @mirrors.clear
+      @handoffs.each_key { |io| abort_handoff(io) }
       @mirror_geometry.clear
       if @server
         @server.close rescue nil
@@ -221,7 +227,74 @@ module Muxr
 
     # Called once per IO.select tick. Resolves any pane.run waiters whose
     # idle window has elapsed or whose timeout has fired.
+    # A pane whose fd has been sent to another server but whose move hasn't
+    # been committed yet. It stays in the layout and keeps its Terminal, but we
+    # stop reading its pty: two servers reading one master would split the byte
+    # stream between them.
+    def handing_off?(pane)
+      @handoffs.any? { |_io, h| h[:pane].equal?(pane) }
+    end
+
+    def handoff_count
+      @handoffs.length
+    end
+
+    # Phase one of a move. The fd goes across first and the emulator state
+    # follows, because the receiver has to take the fd out of the socket with
+    # recvmsg before any plain read swallows the byte carrying it. Nothing is
+    # torn down here — until the far side commits, the pane is still ours and
+    # #abort_handoff puts it straight back to work.
+    def begin_handoff(io, request_id, pane)
+      state = pane.terminal.dump_transfer.merge(
+        "pane"    => pane.id.to_s,
+        "pid"     => pane.pid,
+        "cwd"     => safe_pane_cwd(pane),
+        "session" => @app.session.name
+      )
+      respond_result(io, id: request_id, result: { "ready" => true })
+      return unless flush_blocking(io)
+      io.send_io(pane.io)
+      @handoffs[io] = { pane: pane, deadline_at: monotonic_now + HANDOFF_TIMEOUT }
+      write_json(io, { "id" => request_id, "result" => state })
+      @app.invalidate
+      true
+    rescue SystemCallError, IOError
+      abort_handoff(io)
+      false
+    end
+
+    # Phase two: the receiver has the fd and a working pane, so let go for
+    # real. The pty is closed here and the child is detached rather than
+    # killed — it belongs to the other server now.
+    def commit_handoff(io)
+      handoff = @handoffs.delete(io)
+      return nil unless handoff
+      pane = handoff[:pane]
+      pane.relinquish!
+      @app.session.window.remove_pane(pane)
+      @app.renderer.reset_frame! if @app.respond_to?(:renderer) && @app.renderer
+      @app.invalidate
+      pane
+    end
+
+    # The move fell through (receiver died, gave up, or never answered). We
+    # never stopped owning the pane, so there is nothing to undo but the
+    # read pause.
+    def abort_handoff(io)
+      handoff = @handoffs.delete(io)
+      return false unless handoff
+      @app.invalidate
+      true
+    end
+
+    def expire_handoffs
+      return if @handoffs.empty?
+      now = monotonic_now
+      @handoffs.select { |_io, h| now >= h[:deadline_at] }.each_key { |io| abort_handoff(io) }
+    end
+
     def tick
+      expire_handoffs
       push_mirror_geometry
       return if @pending_runs.empty?
       now = monotonic_now
@@ -322,6 +395,7 @@ module Muxr
     end
 
     def drop_client(io)
+      abort_handoff(io)
       @clients.delete(io)
       @subscriptions.delete(io)
       # A mirroring server that went away releases its claim on pane geometry:
@@ -402,6 +476,28 @@ module Muxr
       write_json(io, { "method" => method, "params" => params })
     end
 
+    # Push everything queued for +io+ out now. Only used ahead of send_io,
+    # where the fd has to land after bytes the receiver has already been told
+    # to expect; everywhere else the event loop's buffered drain is right.
+    def flush_blocking(io)
+      state = @clients[io]
+      return false unless state
+      deadline = monotonic_now + FLUSH_TIMEOUT
+      until state[:write_buffer].empty?
+        return false if monotonic_now >= deadline
+        drain_client(io)
+        next if state[:write_buffer].empty?
+        IO.select(nil, [io], nil, deadline - monotonic_now)
+      end
+      true
+    end
+
+    def safe_pane_cwd(pane)
+      pane.respond_to?(:cwd) ? pane.cwd : nil
+    rescue StandardError
+      nil
+    end
+
     def write_json(io, hash)
       return unless @clients.key?(io)
       line = JSON.generate(hash) + "\n"
@@ -454,6 +550,9 @@ module Muxr
       when "pane.mirror_resize" then pane_mirror_resize(params, client_io)
       when "pane.unmirror"      then pane_unmirror(params, client_io)
       when "pane.redraw"        then pane_redraw(params)
+      when "pane.move"          then pane_move(params, client_io, request_id)
+      when "pane.move_commit"   then pane_move_commit(client_io)
+      when "pane.move_abort"    then pane_move_abort(client_io)
       when "layout.set"       then layout_set(params)
       when "layout.cycle"     then layout_cycle
       when "drawer.toggle"    then drawer_action(:toggle_drawer)
@@ -679,6 +778,38 @@ module Muxr
       removed = @server.remove_mirror(client_io, pane.id)
       @app.invalidate
       { "pane" => pane.id.to_s, "mirrored" => false, "was_mirrored" => removed }
+    end
+
+    # Hand the pane over for good: the pty fd itself crosses the socket, so the
+    # shell keeps running with all its state and simply belongs to the other
+    # server afterwards. Deferred because the reply, the fd and the emulator
+    # state have to be interleaved in one exact order — see #begin_handoff.
+    def pane_move(params, client_io, request_id)
+      raise Error.new("pane.move: missing request id") unless request_id
+      pane = find_pane(params)
+      ensure_not_private!(pane, "pane.move")
+      if pane.respond_to?(:mirror?) && pane.mirror?
+        raise Error.new("pane.move: pane #{pane.id} is itself borrowed from #{pane.origin}; move it from there")
+      end
+      # Panes already promised to another server don't count as ours: two moves
+      # in flight at once must not be able to empty the session between them,
+      # which would shut the server down out from under the user.
+      if @app.session.window.panes.length - @server.handoff_count <= 1
+        raise Error.new("pane.move: pane #{pane.id} is the last pane in session #{@app.session.name}; moving it would end that session")
+      end
+      raise Error.new("pane.move: pane #{pane.id} is already being moved") if @server.handing_off?(pane)
+      @server.begin_handoff(client_io, request_id, pane)
+      :deferred
+    end
+
+    def pane_move_commit(client_io)
+      pane = @server.commit_handoff(client_io)
+      raise Error.new("pane.move_commit: no move in flight") unless pane
+      { "pane" => pane.id.to_s, "moved" => true }
+    end
+
+    def pane_move_abort(client_io)
+      { "aborted" => @server.abort_handoff(client_io) }
     end
 
     def pane_redraw(params)

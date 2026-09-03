@@ -176,6 +176,9 @@ module Muxr
 
     PICKER_CANCEL = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
     PICKER_CONFIRM = ["\r", "\n", " "].freeze
+    # `m` takes the pane instead of sharing it: it leaves the session it came
+    # from and this one owns the shell afterwards.
+    PICKER_MOVE = ["m"].freeze
 
     SELECTION_YANK = ["\r", "\n", "y"].freeze
     SELECTION_CANCEL = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
@@ -551,6 +554,11 @@ module Muxr
       if PICKER_CONFIRM.include?(ch)
         @state = @base_mode
         @app.confirm_pane_picker
+        return
+      end
+      if PICKER_MOVE.include?(ch)
+        @state = @base_mode
+        @app.confirm_pane_picker(move: true)
         return
       end
       if PICKER_CANCEL.include?(ch)

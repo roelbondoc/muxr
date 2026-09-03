@@ -394,47 +394,113 @@ module Muxr
       sgr = nil
       link = nil
       @rows.times do |r|
-        last = last_significant_column(r)
+        last = last_significant_column(@buffer[r])
         next if last.nil?
         out << "\e[#{r + 1};1H"
-        skip = 0
-        (0..last).each do |c|
-          if skip.positive?
-            skip -= 1
-            next
-          end
-          cell = @buffer[r][c]
-          char = cell.char.to_s
-          if (s = self.class.sgr(cell)) != sgr
-            out << s
-            sgr = s
-          end
-          if cell.hyperlink != link
-            out << "\e]8;;\e\\" if link
-            out << "\e]#{cell.hyperlink}\e\\" if cell.hyperlink
-            link = cell.hyperlink
-          end
-          if char.empty?
-            out << " "
-          else
-            out << char
-            skip = 1 if self.class.char_width(char.codepoints.first) == 2
-          end
-        end
+        sgr, link = emit_row(out, @buffer[r], last, sgr, link)
       end
       out << "\e]8;;\e\\" if link
-      out << "\e[0m\e[#{@cursor_row + 1};#{@cursor_col + 1}H"
+      out << "\e[0m"
+      out << dump_modes
+      out << "\e[#{@cursor_row + 1};#{@cursor_col + 1}H"
       out << (@cursor_visible ? "\e[?25h" : "\e[?25l")
+      out << self.class.sgr(Cell.new(" ", @fg, @bg, @attrs, nil))
       out
     end
 
-    # Rightmost column in row +r+ that differs from a freshly-erased cell, or
-    # nil when the whole row is blank. The dump opens with \e[2J, so blank
-    # tails (the common case) cost nothing on the wire.
-    def last_significant_column(r)
-      row = @buffer[r]
-      (@cols - 1).downto(0) do |c|
+    # Modes a repaint has to carry alongside the cells. The scroll region is
+    # the load-bearing one: a full-screen program sets DECSTBM once and then
+    # relies on plain index/reverse-index to scroll only that band, so a copy
+    # of this screen that missed it scrolls the whole display instead.
+    # DECSTBM homes the cursor, hence emitting this before the final position.
+    def dump_modes
+      out = +""
+      unless @scroll_top.zero? && @scroll_bottom == @rows - 1
+        out << "\e[#{@scroll_top + 1};#{@scroll_bottom + 1}r"
+      end
+      out << "\e[?2004h" if @bracketed_paste
+      out
+    end
+
+    # Everything a blank emulator needs to become this one, including the
+    # history above the screen. Only used when a pane moves between servers —
+    # dropping scrollback there would put exactly the kind of hole in the
+    # timeline that #resize goes out of its way to avoid.
+    def dump_transfer
+      {
+        "rows"       => @rows,
+        "cols"       => @cols,
+        "screen"     => dump_ansi,
+        "scrollback" => @scrollback.map { |row| row_ansi(row) }
+      }
+    end
+
+    def restore_transfer!(state)
+      restore_scrollback!(state["scrollback"])
+      feed(state["screen"].to_s)
+    end
+
+    # Rebuild the scrollback ring by replaying each row through a one-row
+    # emulator, which keeps the cell attributes the ANSI encoding carries
+    # without duplicating the parser here.
+    def restore_scrollback!(lines)
+      return if lines.nil? || lines.empty?
+      scratch = self.class.new(rows: 1, cols: @cols)
+      @scrollback = lines.last(SCROLLBACK_MAX).map do |line|
+        scratch.feed("\e[0m\e[H\e[2K")
+        scratch.feed(line.to_s)
+        Array.new(@cols) { |c| scratch.cell(0, c).dup }
+      end
+      @view_offset = 0
+    end
+
+    def row_ansi(row)
+      last = last_significant_column(row)
+      return "" if last.nil?
+      out = +""
+      _sgr, link = emit_row(out, row, last, nil, nil)
+      out << "\e]8;;\e\\" if link
+      out
+    end
+
+    # Append cells 0..last of +row+ to +out+, carrying the caller's current SGR
+    # and hyperlink so a multi-row dump only re-states them when they change.
+    # Returns the state it left the stream in.
+    def emit_row(out, row, last, sgr, link)
+      skip = 0
+      (0..last).each do |c|
+        if skip.positive?
+          skip -= 1
+          next
+        end
+        cell = row[c] || blank_cell
+        char = cell.char.to_s
+        if (s = self.class.sgr(cell)) != sgr
+          out << s
+          sgr = s
+        end
+        if cell.hyperlink != link
+          out << "\e]8;;\e\\" if link
+          out << "\e]#{cell.hyperlink}\e\\" if cell.hyperlink
+          link = cell.hyperlink
+        end
+        if char.empty?
+          out << " "
+        else
+          out << char
+          skip = 1 if self.class.char_width(char.codepoints.first) == 2
+        end
+      end
+      [sgr, link]
+    end
+
+    # Rightmost cell in +row+ that differs from a freshly-erased one, or nil
+    # when the whole row is blank. A dump opens with \e[2J, so blank tails
+    # (the common case) cost nothing on the wire.
+    def last_significant_column(row)
+      (row.length - 1).downto(0) do |c|
         cell = row[c]
+        next if cell.nil?
         next if cell.fg.nil? && cell.bg.nil? && cell.attrs.to_i.zero? &&
                 cell.hyperlink.nil? && (cell.char == " " || cell.char == "")
         return c
