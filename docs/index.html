@@ -1,0 +1,1509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>muxr — a tiling terminal multiplexer in pure Ruby</title>
+<meta name="description" content="muxr is a keyboard-driven terminal multiplexer written in pure Ruby: nine automatic tiling layouts, a Quake-style drawer, detachable sessions, live panes shared between sessions, and a control socket built for coding agents.">
+<meta property="og:title" content="muxr — a tiling terminal multiplexer in pure Ruby">
+<meta property="og:description" content="Nine automatic tiling layouts, a Quake-style drawer, detachable sessions, panes shared across sessions, and a control socket built for coding agents. Zero runtime dependencies.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://roelbondoc.github.io/muxr/">
+<meta property="og:image" content="https://roelbondoc.github.io/muxr/screenshots/hero.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%2314151d'/><rect x='5' y='6' width='11' height='20' rx='1' fill='%235fd4ea'/><rect x='18.5' y='6' width='8.5' height='9' rx='1' fill='%235fd4ea' opacity='.5'/><rect x='18.5' y='17' width='8.5' height='9' rx='1' fill='%235fd4ea' opacity='.5'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root {
+  color-scheme: light dark;
+
+  --ground:      #f4f6fa;
+  --ground-deep: #e9edf5;
+  --surface:     #ffffff;
+  --line:        #d9dfec;
+  --line-soft:   #e7ebf4;
+  --ink:         #161822;
+  --ink-soft:    #3d4356;
+  --muted:       #5d6479;
+  --accent:      #0d7f9a;
+  --accent-ink:  #ffffff;
+  --accent-wash: #e2f2f6;
+  --warm:        #a75a25;
+
+  /* Deliberately not theme-swapped: screenshots keep the palette they were captured in. */
+  --term-bg:     #14151d;
+  --term-line:   #2b2f40;
+  --term-ink:    #c9cee0;
+  --term-accent: #5fd4ea;
+
+  --shell:  min(1140px, 100% - 3rem);
+  --cell:   0.62rem;
+  --radius: 3px;
+
+  --step--1: clamp(0.78rem, 0.76rem + 0.1vw, 0.84rem);
+  --step-0:  clamp(0.98rem, 0.95rem + 0.15vw, 1.06rem);
+  --step-1:  clamp(1.16rem, 1.1rem + 0.3vw, 1.32rem);
+  --step-2:  clamp(1.45rem, 1.3rem + 0.7vw, 1.9rem);
+  --step-3:  clamp(1.95rem, 1.6rem + 1.5vw, 2.9rem);
+  --step-4:  clamp(2.7rem, 2rem + 3.4vw, 5.1rem);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:      #14151d;
+    --ground-deep: #101119;
+    --surface:     #1a1c26;
+    --line:        #2b2e3d;
+    --line-soft:   #23252f;
+    --ink:         #e5e7f2;
+    --ink-soft:    #c2c7d8;
+    --muted:       #8d93aa;
+    --accent:      #5fd4ea;
+    --accent-ink:  #0d1017;
+    --accent-wash: #182833;
+    --warm:        #f0a56f;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground:      #14151d;
+  --ground-deep: #101119;
+  --surface:     #1a1c26;
+  --line:        #2b2e3d;
+  --line-soft:   #23252f;
+  --ink:         #e5e7f2;
+  --ink-soft:    #c2c7d8;
+  --muted:       #8d93aa;
+  --accent:      #5fd4ea;
+  --accent-ink:  #0d1017;
+  --accent-wash: #182833;
+  --warm:        #f0a56f;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: "Archivo", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: var(--step-0);
+  line-height: 1.62;
+  font-variant-numeric: tabular-nums;
+  padding-bottom: 3.4rem;
+}
+
+img { max-width: 100%; display: block; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 0.2em; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+h1, h2, h3 {
+  font-family: "Archivo", ui-sans-serif, system-ui, sans-serif;
+  font-stretch: 112%;
+  font-weight: 700;
+  letter-spacing: -0.018em;
+  line-height: 1.08;
+  text-wrap: balance;
+  margin: 0;
+}
+
+code, pre, .mono, kbd {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-variant-ligatures: none;
+}
+
+.shell { width: var(--shell); margin-inline: auto; }
+
+section { padding-block: clamp(3.2rem, 7vw, 5.6rem); }
+section + section { border-top: 1px solid var(--line-soft); }
+
+.eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin-bottom: 1.4rem;
+}
+.eyebrow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+.eyebrow .key { color: var(--accent); text-transform: none; letter-spacing: 0.08em; }
+
+.lede {
+  font-size: var(--step-1);
+  color: var(--ink-soft);
+  max-width: 60ch;
+  margin: 1.1rem 0 0;
+}
+.prose { max-width: 66ch; color: var(--ink-soft); }
+.prose p { margin: 0 0 1rem; }
+.prose p:last-child { margin-bottom: 0; }
+.prose strong { color: var(--ink); font-weight: 600; }
+
+.hero { padding-top: clamp(3rem, 8vw, 6rem); padding-bottom: clamp(2.4rem, 5vw, 3.6rem); }
+
+.hero-mark {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.hero-mark b { color: var(--accent); font-weight: 500; }
+
+h1 {
+  font-size: var(--step-4);
+  font-stretch: 118%;
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  margin: 0.5rem 0 0;
+}
+h1 .caret {
+  color: var(--accent);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-weight: 400;
+  font-size: 0.62em;
+  vertical-align: 0.12em;
+  margin-left: 0.12em;
+  animation: blink 1.15s steps(1) infinite;
+}
+@keyframes blink { 0%, 55% { opacity: 1; } 56%, 100% { opacity: 0; } }
+
+.hero-tagline {
+  font-size: var(--step-2);
+  font-weight: 500;
+  font-stretch: 105%;
+  letter-spacing: -0.02em;
+  line-height: 1.24;
+  max-width: 22ch;
+  margin: 1.1rem 0 0;
+  text-wrap: balance;
+}
+.hero-sub { max-width: 54ch; color: var(--ink-soft); margin: 1.2rem 0 0; }
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: clamp(2rem, 5vw, 4rem);
+  align-items: end;
+}
+@media (max-width: 860px) { .hero-grid { grid-template-columns: 1fr; align-items: start; } }
+
+.hero-facts {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--line);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+}
+.hero-facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.62rem 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.hero-facts dt { color: var(--muted); }
+.hero-facts dd { margin: 0; color: var(--ink); font-weight: 500; text-align: right; }
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  align-items: center;
+  margin-top: 1.9rem;
+}
+
+.install {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.9rem;
+  background: var(--term-bg);
+  color: var(--term-ink);
+  border: 1px solid var(--term-line);
+  border-radius: var(--radius);
+  padding: 0.62rem 0.62rem 0.62rem 0.95rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step-0);
+}
+.install .prompt { color: var(--term-accent); }
+.install .cmd { color: #f0f2fa; }
+.install button {
+  font: inherit;
+  font-size: var(--step--1);
+  border: 1px solid var(--term-line);
+  background: transparent;
+  color: var(--term-ink);
+  border-radius: 2px;
+  padding: 0.22rem 0.6rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.install button:hover { background: var(--term-accent); color: #0d1017; border-color: var(--term-accent); }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.68rem 1.05rem;
+  color: var(--ink);
+  background: var(--surface);
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.term {
+  background: var(--term-bg);
+  border: 1px solid var(--term-line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.term-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.42rem 0.85rem;
+  border-bottom: 1px solid var(--term-line);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: #6f778f;
+  text-transform: lowercase;
+}
+.term-bar b { color: var(--term-accent); font-weight: 500; }
+.term-bar .rule { flex: 1; height: 1px; background: var(--term-line); }
+.term img { display: block; width: 100%; }
+
+figure { margin: 0; }
+figcaption {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  color: var(--muted);
+  margin-top: 0.75rem;
+  max-width: 70ch;
+}
+figcaption b { color: var(--ink-soft); font-weight: 500; }
+
+.play {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 15.5rem;
+  gap: 1.6rem;
+  align-items: start;
+}
+@media (max-width: 900px) { .play { grid-template-columns: 1fr; } }
+
+#stage {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: var(--term-bg);
+  border: 1px solid var(--term-line);
+  border-radius: var(--radius);
+  padding: 0.55rem;
+  overflow: hidden;
+}
+#stage:focus-visible { outline: 2px solid var(--term-accent); outline-offset: 2px; }
+
+.pane {
+  position: absolute;
+  border: 1px solid #383d52;
+  border-radius: 2px;
+  padding: 0.3rem 0.5rem;
+  overflow: hidden;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #666e88;
+  background: #171923;
+  transition: all 180ms cubic-bezier(0.3, 0.8, 0.3, 1);
+}
+@media (prefers-reduced-motion: reduce) { .pane { transition: none; } }
+.pane .title { white-space: nowrap; color: #7d8499; }
+.pane .body { color: #4b5268; margin-top: 0.15rem; white-space: pre; }
+.pane.focused {
+  border-color: var(--term-accent);
+  background: #17222c;
+  color: var(--term-accent);
+}
+.pane.focused .title { color: var(--term-accent); }
+.pane.focused .body { color: #6f8b99; }
+.pane .star { color: var(--warm); }
+
+.statusline {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.72rem;
+  color: #8d93aa;
+  background: #1e2130;
+  border: 1px solid var(--term-line);
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  padding: 0.35rem 0.7rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.statusline .chip { color: var(--term-accent); }
+#stage { border-radius: var(--radius) var(--radius) 0 0; }
+
+.keypad { display: grid; gap: 1.1rem; }
+.keypad h3 {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  font-weight: 500;
+  font-stretch: 100%;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.55rem;
+}
+.keys { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+
+kbd, .keycap {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  line-height: 1;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0.34rem 0.46rem;
+  min-width: 1.75rem;
+  text-align: center;
+  display: inline-block;
+}
+button.keycap { cursor: pointer; transition: border-color 120ms ease, color 120ms ease, background 120ms ease; }
+button.keycap:hover { border-color: var(--accent); color: var(--accent); }
+button.keycap[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+.keycap-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+.hint {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  color: var(--muted);
+  border-left: 2px solid var(--accent);
+  padding-left: 0.8rem;
+}
+
+.spec { border-top: 1px solid var(--line); }
+.spec-row {
+  display: grid;
+  grid-template-columns: 13.5rem minmax(0, 1fr);
+  gap: 1.5rem;
+  padding: 1.15rem 0;
+  border-bottom: 1px solid var(--line-soft);
+  align-items: baseline;
+}
+@media (max-width: 700px) { .spec-row { grid-template-columns: 1fr; gap: 0.35rem; } }
+.spec-row dt {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  font-weight: 500;
+}
+.spec-row dd { margin: 0; color: var(--ink-soft); }
+
+.keymap {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+  gap: 2.2rem 3rem;
+}
+.keymap table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
+.keymap caption {
+  text-align: left;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink);
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 0.3rem;
+}
+.keymap caption span { color: var(--muted); letter-spacing: 0; text-transform: none; }
+.keymap td { padding: 0.42rem 0; vertical-align: baseline; border-bottom: 1px solid var(--line-soft); }
+.keymap td:first-child { width: 11.5rem; white-space: nowrap; }
+.keymap td:last-child { color: var(--ink-soft); }
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  gap: clamp(1.8rem, 4vw, 3.4rem);
+  align-items: center;
+}
+.split.reverse > :first-child { order: 2; }
+@media (max-width: 880px) {
+  .split, .split.reverse { grid-template-columns: 1fr; }
+  .split.reverse > :first-child { order: 0; }
+}
+
+.stack-2 { display: grid; gap: 1.6rem; }
+
+pre.snippet {
+  background: var(--term-bg);
+  color: #cdd3e6;
+  border: 1px solid var(--term-line);
+  border-radius: var(--radius);
+  padding: 0.95rem 1.1rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.65;
+  margin: 0;
+}
+pre.snippet .c { color: #6c7590; }
+pre.snippet .k { color: var(--term-accent); }
+pre.snippet .w { color: #f0a56f; }
+
+ul.ticks { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.7rem; }
+ul.ticks li {
+  display: grid;
+  grid-template-columns: 1.1rem 1fr;
+  gap: 0.4rem;
+  color: var(--ink-soft);
+  font-size: var(--step--1);
+}
+ul.ticks li::before {
+  content: "▸";
+  color: var(--accent);
+  font-family: "JetBrains Mono", monospace;
+}
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.6rem; }
+
+.closer { text-align: center; }
+.closer h2 { font-size: var(--step-3); }
+.closer .cta-row { justify-content: center; }
+
+footer {
+  border-top: 1px solid var(--line-soft);
+  padding: 2.2rem 0 2.6rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: var(--step--1);
+  color: var(--muted);
+}
+footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content: space-between; }
+
+.sitebar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 40;
+  background: var(--ground-deep);
+  border-top: 1px solid var(--line);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  backdrop-filter: blur(6px);
+}
+.sitebar .shell {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem 1.1rem;
+  height: 2.7rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+.sitebar .shell::-webkit-scrollbar { display: none; }
+.sitebar .mode {
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.sitebar a { color: var(--muted); text-decoration: none; }
+.sitebar a:hover, .sitebar a.here { color: var(--ink); }
+.sitebar a .k { color: var(--accent); }
+.sitebar .spacer { flex: 1; }
+.sitebar .gh { color: var(--ink-soft); }
+@media (max-width: 620px) { .sitebar .hide-sm { display: none; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="shell">
+    <div class="hero-grid">
+      <div>
+        <p class="hero-mark">ruby <b>·</b> tiling <b>·</b> pty</p>
+        <h1>muxr<span class="caret">▊</span></h1>
+        <p class="hero-tagline">Stop resizing panes. Pick a layout instead.</p>
+        <p class="hero-sub">
+          A keyboard-driven terminal multiplexer written in pure Ruby. GNU Screen's
+          keybindings, xmonad's automatic tiling, and a Quake-style drop-down drawer —
+          in about eight thousand lines of stdlib, with no runtime gems at all.
+        </p>
+        <div class="cta-row">
+          <div class="install">
+            <span class="prompt">$</span><span class="cmd" id="install-cmd">gem install muxr</span>
+            <button type="button" id="copy-btn" aria-label="Copy install command">copy</button>
+          </div>
+          <a class="btn" href="https://github.com/roelbondoc/muxr">github ↗</a>
+        </div>
+      </div>
+
+      <dl class="hero-facts">
+        <div><dt>layouts</dt><dd>9, automatic</dd></div>
+        <div><dt>runtime deps</dt><dd>none</dd></div>
+        <div><dt>ruby</dt><dd>≥ 3.4</dd></div>
+        <div><dt>emulator</dt><dd>VT100, written here</dd></div>
+        <div><dt>scrollback</dt><dd>5 000 rows / pane</dd></div>
+        <div><dt>tests</dt><dd>470+</dd></div>
+        <div><dt>licence</dt><dd>MIT</dd></div>
+      </dl>
+    </div>
+  </div>
+</header>
+
+<section id="layouts">
+  <div class="shell">
+    <p class="eyebrow"><span class="key">t w | - g f e S m</span> nine layouts</p>
+
+    <div class="split" style="align-items:end; margin-bottom:2.2rem;">
+      <div>
+        <h2 style="font-size:var(--step-3)">Geometry is a function, not a memory.</h2>
+      </div>
+      <p class="prose">
+        A layout in muxr is a pure function of <em>(name, pane count, screen area)</em>.
+        There is no saved per-pane geometry to drift out of sync, so opening, closing,
+        or promoting a pane just recomputes the tiling on the next frame — and a
+        detach onto a different-sized terminal simply re-tiles.
+        <strong>The playground below runs muxr's real layout code.</strong>
+      </p>
+    </div>
+
+    <div class="play">
+      <div>
+        <div id="stage" tabindex="0" role="application" aria-label="Interactive muxr layout playground"></div>
+        <div class="statusline">
+          <span><span class="chip">[NORMAL]</span> <span id="sl-left"></span></span>
+          <span class="hide-sm">muxr ^a ?</span>
+        </div>
+      </div>
+
+      <div class="keypad">
+        <div>
+          <h3>Layout</h3>
+          <div class="keys" id="layout-keys"></div>
+        </div>
+        <div>
+          <h3>Panes &amp; focus</h3>
+          <div class="keys" id="action-keys"></div>
+        </div>
+        <p class="hint">
+          Click a key, or just type it — this page listens for the same
+          bindings muxr does. <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd>
+          moves focus spatially, exactly as muxr's neighbour lookup does.
+        </p>
+      </div>
+    </div>
+
+    <figure style="margin-top:2.6rem;">
+      <div class="term">
+        <div class="term-bar"><b id="shot-name">tall</b><span class="rule"></span><span>the real thing · 5 panes</span></div>
+        <img id="shot-img" src="screenshots/layout-tall.png" width="1200" height="760" decoding="async"
+             alt="muxr in the tall layout: a master pane on the left with four stacked panes on the right">
+      </div>
+      <figcaption id="shot-caption"><b>tall</b> — master on the left, everything else stacked down the right. The workhorse.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="tour">
+  <div class="shell">
+    <p class="eyebrow">the screen</p>
+    <div class="split" style="align-items:start; margin-bottom:2.4rem;">
+      <h2 style="font-size:var(--step-3)">Everything you need to know, in the border.</h2>
+      <p class="prose">
+        Each pane's title carries a positional slot (<code>#1</code>) and a stable six-hex
+        id (<code>a3f9b2</code>) minted once and kept for life — through layout changes,
+        detach and reattach, a move to another session, and a cold restart from disk.
+        <code>★</code> marks the layout master; <code>· npm&nbsp;test</code> appears when
+        something other than the shell holds the foreground.
+      </p>
+    </div>
+
+    <figure>
+      <div class="term">
+        <div class="term-bar"><b>muxr</b><span>work</span><span class="rule"></span><span>tall · 5 panes</span></div>
+        <img src="screenshots/hero.png" alt="muxr running five panes in the tall layout, showing git history, source file sizes, a passing test run, a directory listing, and version output" width="1440" height="860">
+      </div>
+      <figcaption>
+        The <b>[MODE]</b> chip and the focused border track your input mode — cyan normal,
+        green passthrough, orange scrollback, magenta selection, yellow command prompt,
+        red confirmation, blue help.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="keys">
+  <div class="shell">
+    <p class="eyebrow">two modes</p>
+    <div class="split" style="align-items:start; margin-bottom:2.6rem;">
+      <h2 style="font-size:var(--step-3)">Modal, like vim. Prefixed, like Screen.</h2>
+      <p class="prose">
+        <strong>Normal mode</strong> is where muxr starts: single keys drive the
+        multiplexer, no chord required. Press <code>i</code> and you're in
+        <strong>passthrough</strong> — every keystroke reaches the shell, and muxr's own
+        commands move behind the historical <code>Ctrl-a</code> prefix. If your fingers
+        already know Screen, nothing has been taken away.
+      </p>
+    </div>
+
+    <div class="keymap">
+      <table>
+        <caption>Normal mode <span>— no prefix</span></caption>
+        <tbody>
+          <tr><td><kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd></td><td>focus pane left / down / up / right, spatially</td></tr>
+          <tr><td><kbd>H</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd></td><td>drag the focused pane in that direction</td></tr>
+          <tr><td><kbd>i</kbd></td><td>drop into passthrough mode</td></tr>
+          <tr><td><kbd>c</kbd> <kbd>x</kbd></td><td>new pane / close pane (asks <code>y/n</code>)</td></tr>
+          <tr><td><kbd>t</kbd><kbd>w</kbd><kbd>g</kbd><kbd>m</kbd></td><td>tall / wide / grid / monocle</td></tr>
+          <tr><td><kbd>|</kbd><kbd>-</kbd><kbd>f</kbd><kbd>e</kbd><kbd>S</kbd></td><td>columns / rows / spiral / centered / stack</td></tr>
+          <tr><td><kbd>Tab</kbd> <kbd>Enter</kbd></td><td>cycle layout / promote to master</td></tr>
+          <tr><td><kbd>a</kbd> <kbd>1</kbd>…<kbd>9</kbd></td><td>last pane / jump by number</td></tr>
+          <tr><td><kbd>s</kbd> <kbd>]</kbd></td><td>scrollback / paste the yank buffer</td></tr>
+          <tr><td><kbd>~</kbd> <kbd>C</kbd> <kbd>P</kbd></td><td>drawer / Claude drawer / private flag</td></tr>
+          <tr><td><kbd>A</kbd> <kbd>r</kbd></td><td>borrow a pane / force a redraw</td></tr>
+          <tr><td><kbd>:</kbd> <kbd>?</kbd></td><td>command prompt / help</td></tr>
+          <tr><td><kbd>d</kbd> <kbd>q</kbd></td><td>detach / kill session (asks <code>y/n</code>)</td></tr>
+        </tbody>
+      </table>
+
+      <table>
+        <caption>Passthrough <span>— Ctrl-a prefix</span></caption>
+        <tbody>
+          <tr><td><kbd>C-a</kbd> <kbd>Esc</kbd></td><td>back to normal mode</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>c</kbd> <kbd>x</kbd></td><td>new / close pane</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>n</kbd> <kbd>p</kbd> <kbd>a</kbd></td><td>next / previous / last pane</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>1</kbd>…<kbd>9</kbd></td><td>jump by number</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>Tab</kbd></td><td>cycle layout</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>Enter</kbd></td><td>promote to master</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>scrollback / paste</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>~</kbd> <kbd>C</kbd> <kbd>P</kbd></td><td>drawer / Claude drawer / private</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>A</kbd> <kbd>r</kbd></td><td>borrow a pane / redraw</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>d</kbd> <kbd>q</kbd></td><td>detach / kill session</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>:</kbd> <kbd>?</kbd></td><td>command prompt / help</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>C-a</kbd></td><td>send a literal <code>Ctrl-a</code> through</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="split" style="margin-top:3rem;">
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>?</b><span class="rule"></span><span>help overlay</span></div>
+          <img src="screenshots/help.png" alt="muxr's built-in help overlay listing every keybinding for normal, passthrough, scrollback and command modes" loading="lazy" width="1200" height="1320">
+        </div>
+        <figcaption>Nothing to memorise up front — <b>?</b> prints the whole map.</figcaption>
+      </figure>
+      <div class="stack-2">
+        <figure>
+          <div class="term">
+            <div class="term-bar"><b>:</b><span class="rule"></span><span>command prompt</span></div>
+            <img src="screenshots/command-prompt.png" alt="muxr's command prompt completing the layout argument with the nine layout names" loading="lazy" width="1200" height="760">
+          </div>
+        </figure>
+        <div class="prose">
+          <p>
+            <code>:</code> opens a command line across the status bar with
+            <kbd>Tab</kbd> completion for commands and their arguments. Any unambiguous
+            prefix works — <code>:layout t</code> is enough; ambiguous ones flash the
+            candidates rather than guessing.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="scrollback">
+  <div class="shell">
+    <p class="eyebrow">scrollback &amp; copy-mode</p>
+    <div class="split" style="align-items:start; margin-bottom:2.4rem;">
+      <h2 style="font-size:var(--step-3)">Search it, sweep it, yank it.</h2>
+      <div class="prose">
+        <p>
+          Every pane keeps a 5 000-row scrollback ring. <code>s</code> enters copy-mode
+          with vi navigation; <code>/</code> searches with smart-case across the ring
+          <em>and</em> the live grid, centring the match and highlighting every hit.
+        </p>
+        <p>
+          <code>v</code> gives you a movable cursor with real vim motions —
+          <code>w e b</code>, <code>0 ^ $</code>, <code>H M L</code> — plus
+          <code>Ctrl-v</code> for rectangular blocks. <code>y</code> yanks to muxr's
+          buffer <em>and</em> the system clipboard. Scrollback is
+          <strong>pane-bound, not modal</strong>: switch panes while you're in it and
+          each one remembers where you were reading.
+        </p>
+      </div>
+    </div>
+
+    <div class="gallery">
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>/</b><span class="rule"></span><span>search</span></div>
+          <img src="screenshots/scrollback-search.png" alt="muxr scrollback search: every match for the query highlighted in yellow with an orange focused border" loading="lazy" width="1200" height="760">
+        </div>
+        <figcaption>Smart-case, wrapping, and centred on the match — across the ring and the live grid at once.</figcaption>
+      </figure>
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>v</b><span class="rule"></span><span>selection</span></div>
+          <img src="screenshots/selection.png" alt="muxr visual selection inside scrollback: a magenta border and six highlighted lines swept by the cursor" loading="lazy" width="1200" height="760">
+        </div>
+        <figcaption>A movable cursor with vim motions; <b>Ctrl-v</b> switches to a rectangular block.</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="drawer">
+  <div class="shell">
+    <p class="eyebrow"><span class="key">~</span> the drawer</p>
+    <div class="split">
+      <div class="stack-2">
+        <h2 style="font-size:var(--step-2)">A shell that drops in from nowhere.</h2>
+        <div class="prose">
+          <p>
+            <code>~</code> drops a persistent overlay shell over the whole layout — the
+            terminal equivalent of a Quake console. It's the right home for the command
+            you keep needing but don't want to spend a pane on.
+          </p>
+          <p>
+            Hiding it <strong>never kills its PTY</strong>. The shell keeps running, so the
+            next toggle brings back exactly what was on screen, scrollback and all. Only
+            <code>:drawer reset</code> respawns it.
+          </p>
+        </div>
+      </div>
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>drawer</b><span class="rule"></span><span>overlay shell</span></div>
+          <img src="screenshots/drawer.png" alt="muxr's Quake-style drawer overlay dropped over a grid of five panes" loading="lazy" width="1200" height="760">
+        </div>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<section id="sessions">
+  <div class="shell">
+    <p class="eyebrow"><span class="key">A</span> panes across sessions</p>
+    <div class="split" style="align-items:start; margin-bottom:2.4rem;">
+      <h2 style="font-size:var(--step-3)">Borrow a pane. Or take it with you.</h2>
+      <p class="prose">
+        <code>A</code> lists every pane the other muxr servers on this machine are
+        offering, grouped by session. <kbd>Enter</kbd> <strong>shares</strong> it;
+        <kbd>m</kbd> <strong>moves</strong> it here for good.
+      </p>
+    </div>
+
+    <div class="gallery" style="margin-bottom:2.6rem;">
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>A</b><span class="rule"></span><span>pane picker</span></div>
+          <img src="screenshots/pane-picker.png" alt="muxr's pane picker listing panes offered by two other sessions, with share and move options" loading="lazy" width="1200" height="760">
+        </div>
+        <figcaption>Every live server on the box, asked in parallel over its control socket.</figcaption>
+      </figure>
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>@api</b><span class="rule"></span><span>borrowed pane</span></div>
+          <img src="screenshots/pane-share.png" alt="a pane borrowed from another muxr session, its title naming the owning session" loading="lazy" width="1200" height="760">
+        </div>
+        <figcaption>A borrowed pane names its owner in the title: <b>@api:b338b0</b> — and keeps the owner's working directory.</figcaption>
+      </figure>
+    </div>
+
+    <div class="split">
+      <div class="stack-2">
+        <h3 style="font-size:var(--step-1)">Sharing keeps one reader</h3>
+        <div class="prose">
+          <p>
+            A shared pane keeps running where it lives; both sessions show the same live
+            shell and either can type into it. What crosses between servers is the raw
+            PTY byte stream, not a screen scrape — so colours, the alternate screen and
+            full-screen TUIs all mirror faithfully.
+          </p>
+        </div>
+        <ul class="ticks">
+          <li>The PTY runs at the smallest viewport looking at it, so it fits both layouts at once.</li>
+          <li>Owner stops → the socket closes and the borrower drops the pane on its next tick.</li>
+          <li>Borrower stops → only the mirror goes away; the pane carries on at home.</li>
+          <li>Private panes are never offered, and borrowed panes are left out of <code>:save</code>.</li>
+        </ul>
+      </div>
+
+      <div class="stack-2">
+        <h3 style="font-size:var(--step-1)">Moving hands over the file descriptor</h3>
+        <div class="prose">
+          <p>
+            <kbd>m</kbd> is a real handover, not a re-spawn. The master pty <em>file
+            descriptor itself</em> crosses the socket over <code>SCM_RIGHTS</code>, so the
+            same shell process keeps running — environment, background jobs, scroll
+            position, everything on screen. Afterwards it's an ordinary local pane that
+            simply isn't in the other session any more.
+          </p>
+        </div>
+<pre class="snippet"><span class="c"># wire order is load-bearing</span>
+preamble  <span class="c">→ a refusal has no fd to send</span>
+<span class="w">fd</span>        <span class="c">→ recvmsg(SCM_RIGHTS), byte at a time</span>
+state     <span class="c">→ grid, scrollback, modes, pane id</span>
+
+<span class="k">two-phase</span>: nothing is torn down until the
+receiver confirms a working pane. A failure
+anywhere leaves the pane where it was.</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="agents">
+  <div class="shell">
+    <p class="eyebrow">built for agents</p>
+    <div class="split" style="align-items:start; margin-bottom:2.4rem;">
+      <h2 style="font-size:var(--step-3)">A second socket, for the other kind of user.</h2>
+      <p class="prose">
+        Alongside the TTY socket, every muxr server exposes a JSON-RPC control listener at
+        <code>~/.muxr/sockets/&lt;name&gt;.ctrl.sock</code>. It takes many concurrent clients
+        and is independent of TTY attach, so a coding agent and a human can drive the same
+        session at the same time — neither locks the other out.
+      </p>
+    </div>
+
+    <div class="split" style="align-items:start;">
+      <div class="stack-2">
+<pre class="snippet"><span class="c"># the surface</span>
+session.get   panes.list    pane.read
+pane.send_input             pane.run
+pane.focus    pane.new      pane.kill
+pane.promote  pane.redraw   layout.set
+pane.subscribe / unsubscribe
+pane.mirror / mirror_resize / unmirror
+pane.move / move_commit / move_abort
+drawer.toggle / show / hide / reset
+drawer.read / send_input    session.save
+
+<span class="c"># and the bridge</span>
+<span class="k">$</span> muxr --install-skill</pre>
+        <div class="prose">
+          <p>
+            <code>muxr --install-skill</code> installs the Claude Code skill and prints the
+            <code>claude mcp add</code> line for <code>muxr-mcp</code>, a standalone
+            MCP-over-stdio bridge. <code>C</code> opens a drawer running
+            <code>claude</code> with the session already wired into its environment: a
+            Quake-style agent overlay that knows which panes it is looking at.
+          </p>
+        </div>
+      </div>
+
+      <div class="stack-2">
+        <dl class="spec" style="margin:0">
+          <div class="spec-row">
+            <dt>pane.run</dt>
+            <dd>Sends input, then <strong>waits server-side for the PTY to go idle</strong> before
+              responding — no bytes for <code>idle_ms</code> (default 500). That kills the
+              send-then-poll race naive automation always loses.</dd>
+          </div>
+          <div class="spec-row">
+            <dt>named keys</dt>
+            <dd>Callers pass <code>&lt;esc&gt;</code>, <code>&lt;c-c&gt;</code>,
+              <code>&lt;cr&gt;</code> and arrows interleaved with literal text, instead of
+              remembering that Escape is <code>"\e"</code>.</dd>
+          </div>
+          <div class="spec-row">
+            <dt>private panes</dt>
+            <dd><code>P</code> marks a pane <code>[P]</code>: programmatic callers can't read it,
+              type into it, kill it, or see its working directory, and it's never offered to
+              another session. <strong>The control surface has no method to unset the flag</strong> —
+              only a human at the keyboard can.</dd>
+          </div>
+        </dl>
+        <figure>
+          <div class="term">
+            <div class="term-bar"><b>P</b><span class="rule"></span><span>private pane</span></div>
+            <img src="screenshots/private-pane.png" alt="a muxr pane marked private, showing the P badge in its title bar" loading="lazy" width="1200" height="760">
+          </div>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="internals">
+  <div class="shell">
+    <p class="eyebrow">under the hood</p>
+    <div class="split" style="align-items:start; margin-bottom:2.4rem;">
+      <h2 style="font-size:var(--step-3)">One process holds the shells. The other holds the terminal.</h2>
+      <p class="prose">
+        <code>Ctrl-a d</code> closes the client and leaves every PTY alive in the server.
+        Reattach and you're back in the same shells with their full history, because the
+        session never left the server process. Killing it takes a <code>y/n</code> — there
+        is no kill-without-confirm binding, by design.
+      </p>
+    </div>
+
+<pre class="snippet">Client <span class="c">(foreground, owns the TTY)</span>              Server <span class="c">(daemon, owns the PTYs)</span>
+ ├─ STDIN raw mode + alternate screen           <span class="k">Application</span> <span class="c">(single-threaded IO.select)</span>
+ ├─ SIGWINCH → RESIZE frame                      ├─ Session ─ Window ─ Pane[] ─ Terminal + PTYProcess
+ ├─ WidthProbe <span class="c">(DSR-CPR glyph measurement)</span>       │      └─ Drawer ─ Pane
+ └─ Protocol                                     ├─ <span class="k">Renderer</span>        <span class="c">diff-emits ANSI, cell by cell</span>
+     ◄── OUTPUT bytes ──── Renderer ◄────────────┤   <span class="k">InputHandler</span>    <span class="c">normal / passthrough machine</span>
+     ──── INPUT bytes ───► InputHandler          ├─ <span class="k">LayoutManager</span>   <span class="c">pure (layout, count, area)</span>
+     ──── HELLO/RESIZE ──► apply_size            ├─ UNIXServer  <span class="c">&lt;name&gt;.sock — one TTY client</span>
+     ◄── BYE ───────────── disconnect_client     └─ UNIXServer  <span class="c">&lt;name&gt;.ctrl.sock — many</span></pre>
+
+    <dl class="spec" style="margin-top:2.4rem;">
+      <div class="spec-row">
+        <dt>real emulation</dt>
+        <dd>Each pane runs a VT100/xterm emulator written for this project: a cell grid with
+          cursor, scroll region and pen, truecolor SGR with colon-subparameters, the
+          alternate screen, bracketed paste, and wide CJK/emoji cells stored with a
+          continuation-cell convention so grids still line up.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>width probing</dt>
+        <dd>Terminals disagree about how wide ambiguous symbols and box-drawing glyphs
+          really are, and one disagreement shifts the rest of a line. muxr doesn't guess —
+          on attach the client prints test glyphs and reads the cursor column back over
+          DSR-CPR, then ships the measurement to the server. It's why border-heavy TUIs
+          stay aligned.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>diff rendering</dt>
+        <dd>The renderer compares each composed frame against the last and emits only the
+          cells that changed, so a busy pane costs a handful of bytes per tick. Detached,
+          rendering is skipped entirely while PTY data is still drained — the grids stay
+          current for the next attach.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>passthrough</dt>
+        <dd>Bells and OSC 9 / 777 notifications are forwarded out of band from
+          <em>any</em> pane. An OSC 52 clipboard write reaches <code>pbcopy</code> for real.
+          URLs that wrap across rows are re-stamped with matching OSC 8 ids so they stay
+          one clickable link.</dd>
+      </div>
+      <div class="spec-row">
+        <dt>images</dt>
+        <dd>A grid has nowhere to put pixels, so kitty-protocol graphics are decoded to
+          <code>~/.muxr/images</code> and announced as one clickable <code>file://</code>
+          line. Multi-chunk transfers are reassembled and raw RGBA is re-encoded into a
+          real PNG.</dd>
+      </div>
+    </dl>
+
+    <figure style="margin-top:2.2rem;">
+      <div class="term">
+        <div class="term-bar"><b>kitty graphics</b><span class="rule"></span><span>saved, not drawn</span></div>
+        <img src="screenshots/images.png" alt="muxr announcing two decoded kitty-protocol images as clickable file paths, alongside a listing of the saved PNGs" loading="lazy" width="1200" height="760">
+      </div>
+      <figcaption>The honest rendering: <b>[image 640×400 → ~/.muxr/images/….png]</b>, Cmd-clickable.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="install" class="closer">
+  <div class="shell">
+    <h2>Nine layouts. Zero dependencies.</h2>
+    <p class="lede" style="margin-inline:auto;">
+      Ruby ≥ 3.4 and nothing else. The first <code>muxr</code> in a directory starts a
+      server named after it; every one after that attaches.
+    </p>
+    <div class="cta-row">
+      <div class="install">
+        <span class="prompt">$</span><span class="cmd">gem install muxr &amp;&amp; muxr</span>
+      </div>
+      <a class="btn" href="https://github.com/roelbondoc/muxr">source ↗</a>
+      <a class="btn" href="https://rubygems.org/gems/muxr">rubygems ↗</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="shell">
+    <span>muxr — MIT licence · built with Ruby stdlib only</span>
+    <span>
+      <a href="https://github.com/roelbondoc/muxr">github</a> ·
+      <a href="https://github.com/roelbondoc/muxr/blob/main/CHANGELOG.md">changelog</a> ·
+      <a href="https://rubygems.org/gems/muxr">rubygems</a>
+    </span>
+  </div>
+</footer>
+
+<nav class="sitebar" aria-label="Sections">
+  <div class="shell">
+    <span class="mode">[NORMAL]</span>
+    <a href="#layouts"><span class="k">layout:</span>nine</a>
+    <a href="#keys"><span class="k">keys:</span>two&nbsp;modes</a>
+    <a href="#scrollback" class="hide-sm"><span class="k">scrollback:</span>5000</a>
+    <a href="#sessions"><span class="k">panes:</span>shared</a>
+    <a href="#agents"><span class="k">ctrl:</span>mcp</a>
+    <a href="#internals" class="hide-sm"><span class="k">deps:</span>0</a>
+    <span class="spacer"></span>
+    <a class="gh" href="https://github.com/roelbondoc/muxr">github ↗</a>
+  </div>
+</nav>
+
+<script>
+/* Port of lib/muxr/layout_manager.rb — keep the arithmetic in step with it. */
+const R = (x, y, w, h) => ({ x, y, w, h });
+const idiv = (a, b) => Math.floor(a / b);
+const LAYOUTS = ["tall", "wide", "columns", "rows", "grid", "spiral", "centered", "stack", "monocle"];
+
+function tall(count, a, master) {
+  if (count === 1) return [R(a.x, a.y, a.w, a.h)];
+  const masterW = Math.max(idiv(a.w, 2), 1);
+  const stackW = Math.max(a.w - masterW, 1);
+  const others = [...Array(count).keys()].filter((i) => i !== master);
+  const baseH = idiv(a.h, others.length);
+  const rem = a.h - baseH * others.length;
+  const rects = new Array(count);
+  rects[master] = R(a.x, a.y, masterW, a.h);
+  let y = a.y;
+  others.forEach((idx, i) => {
+    const h = baseH + (i < rem ? 1 : 0);
+    rects[idx] = R(a.x + masterW, y, stackW, h);
+    y += h;
+  });
+  return rects;
+}
+
+function wide(count, a, master) {
+  if (count === 1) return [R(a.x, a.y, a.w, a.h)];
+  const masterH = Math.max(idiv(a.h, 2), 1);
+  const stackH = Math.max(a.h - masterH, 1);
+  const others = [...Array(count).keys()].filter((i) => i !== master);
+  const baseW = idiv(a.w, others.length);
+  const rem = a.w - baseW * others.length;
+  const rects = new Array(count);
+  rects[master] = R(a.x, a.y, a.w, masterH);
+  let x = a.x;
+  others.forEach((idx, i) => {
+    const w = baseW + (i < rem ? 1 : 0);
+    rects[idx] = R(x, a.y + masterH, w, stackH);
+    x += w;
+  });
+  return rects;
+}
+
+function columns(count, a) {
+  const baseW = idiv(a.w, count), rem = a.w - baseW * count, out = [];
+  let x = a.x;
+  for (let i = 0; i < count; i++) {
+    const w = baseW + (i < rem ? 1 : 0);
+    out.push(R(x, a.y, w, a.h));
+    x += w;
+  }
+  return out;
+}
+
+function rows(count, a) {
+  const baseH = idiv(a.h, count), rem = a.h - baseH * count, out = [];
+  let y = a.y;
+  for (let i = 0; i < count; i++) {
+    const h = baseH + (i < rem ? 1 : 0);
+    out.push(R(a.x, y, a.w, h));
+    y += h;
+  }
+  return out;
+}
+
+function spiral(count, a) {
+  let { x, y, w, h } = a;
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    if (i === count - 1) { out.push(R(x, y, w, h)); }
+    else if (i % 2 === 0) {
+      const left = Math.max(idiv(w, 2), 1);
+      out.push(R(x, y, left, h));
+      x += left; w = Math.max(w - left, 1);
+    } else {
+      const top = Math.max(idiv(h, 2), 1);
+      out.push(R(x, y, w, top));
+      y += top; h = Math.max(h - top, 1);
+    }
+  }
+  return out;
+}
+
+function stackColumn(rects, indices, x, y, w, totalH) {
+  if (!indices.length) return;
+  const baseH = idiv(totalH, indices.length);
+  const rem = totalH - baseH * indices.length;
+  let cy = y;
+  indices.forEach((idx, i) => {
+    const h = baseH + (i < rem ? 1 : 0);
+    rects[idx] = R(x, cy, w, h);
+    cy += h;
+  });
+}
+
+function centered(count, a, master) {
+  if (count === 1) return [R(a.x, a.y, a.w, a.h)];
+  const others = [...Array(count).keys()].filter((i) => i !== master);
+  const rects = new Array(count);
+  if (others.length === 1) {
+    const masterW = Math.max(idiv(a.w, 2), 1);
+    rects[master] = R(a.x, a.y, masterW, a.h);
+    rects[others[0]] = R(a.x + masterW, a.y, Math.max(a.w - masterW, 1), a.h);
+    return rects;
+  }
+  const masterW = Math.max(idiv(a.w, 2), 1);
+  const sideW = a.w - masterW;
+  const leftW = Math.max(idiv(sideW, 2), 1);
+  const rightW = Math.max(sideW - leftW, 1);
+  rects[master] = R(a.x + leftW, a.y, masterW, a.h);
+  stackColumn(rects, others.filter((_, i) => i % 2 === 0), a.x, a.y, leftW, a.h);
+  stackColumn(rects, others.filter((_, i) => i % 2 === 1), a.x + leftW + masterW, a.y, rightW, a.h);
+  return rects;
+}
+
+function stackLayout(count, a, focused) {
+  if (count === 1) return [R(a.x, a.y, a.w, a.h)];
+  const others = count - 1;
+  let sliver = Math.min(3, idiv(Math.max(a.h - 3, 0), others));
+  sliver = Math.max(sliver, 1);
+  const focusH = a.h - sliver * others;
+  const rects = new Array(count);
+  let y = a.y;
+  for (let i = 0; i < count; i++) {
+    const h = i === focused ? focusH : sliver;
+    rects[i] = R(a.x, y, a.w, h);
+    y += h;
+  }
+  return rects;
+}
+
+function grid(count, a) {
+  const colsPerRow = Math.ceil(Math.sqrt(count));
+  const rowCount = Math.ceil(count / colsPerRow);
+  const baseH = idiv(a.h, rowCount);
+  const hRem = a.h - baseH * rowCount;
+  const out = [];
+  let idx = 0, y = a.y;
+  for (let r = 0; r < rowCount; r++) {
+    const inRow = Math.min(colsPerRow, count - idx);
+    const rowH = baseH + (r < hRem ? 1 : 0);
+    const colW = idiv(a.w, inRow);
+    const wRem = a.w - colW * inRow;
+    let x = a.x;
+    for (let c = 0; c < inRow; c++) {
+      const w = colW + (c < wRem ? 1 : 0);
+      out.push(R(x, y, w, rowH));
+      x += w; idx++;
+    }
+    y += rowH;
+  }
+  return out;
+}
+
+function compute(layout, count, area, focused, master) {
+  if (count <= 0) return [];
+  switch (layout) {
+    case "tall": return tall(count, area, master);
+    case "wide": return wide(count, area, master);
+    case "columns": return columns(count, area);
+    case "rows": return rows(count, area);
+    case "grid": return grid(count, area);
+    case "spiral": return spiral(count, area);
+    case "centered": return centered(count, area, master);
+    case "stack": return stackLayout(count, area, focused);
+    default: return Array.from({ length: count }, () => R(area.x, area.y, area.w, area.h));
+  }
+}
+
+const overlapExtent = (aS, aZ, bS, bZ) => Math.max(Math.min(aS + aZ, bS + bZ) - Math.max(aS, bS), 0);
+
+function neighbor(rects, focusedIndex, direction) {
+  const f = rects[focusedIndex];
+  if (!f) return null;
+  let best = null;
+  rects.forEach((rect, idx) => {
+    if (idx === focusedIndex || !rect) return;
+    let axis, overlap, center;
+    if (direction === "right") {
+      if (!(rect.x >= f.x + f.w)) return;
+      axis = rect.x - (f.x + f.w);
+      overlap = overlapExtent(f.y, f.h, rect.y, rect.h);
+      center = Math.abs(rect.y + rect.h / 2 - (f.y + f.h / 2));
+    } else if (direction === "left") {
+      if (!(rect.x + rect.w <= f.x)) return;
+      axis = f.x - (rect.x + rect.w);
+      overlap = overlapExtent(f.y, f.h, rect.y, rect.h);
+      center = Math.abs(rect.y + rect.h / 2 - (f.y + f.h / 2));
+    } else if (direction === "down") {
+      if (!(rect.y >= f.y + f.h)) return;
+      axis = rect.y - (f.y + f.h);
+      overlap = overlapExtent(f.x, f.w, rect.x, rect.w);
+      center = Math.abs(rect.x + rect.w / 2 - (f.x + f.w / 2));
+    } else {
+      if (!(rect.y + rect.h <= f.y)) return;
+      axis = f.y - (rect.y + rect.h);
+      overlap = overlapExtent(f.x, f.w, rect.x, rect.w);
+      center = Math.abs(rect.x + rect.w / 2 - (f.x + f.w / 2));
+    }
+    const score = [-overlap, axis, center];
+    if (!best || cmp(score, best[0]) < 0) best = [score, idx];
+  });
+  return best ? best[1] : null;
+}
+
+function cmp(a, b) {
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
+  }
+  return 0;
+}
+
+const COLS = 132, ROWS = 38;
+const AREA = R(0, 0, COLS, ROWS);
+const SAMPLES = [
+  ["$ rake test", "474 runs, 0 failures"],
+  ["$ git log --oneline", "61df55c Move a pane"],
+  ["$ vim lib/muxr/pane.rb", "-- INSERT --"],
+  ["$ tail -f log/dev.log", "GET /health 200"],
+  ["$ irb", ">> Muxr::VERSION"],
+  ["$ claude", "⏺ reading terminal.rb"],
+  ["$ ls lib/muxr", "renderer.rb  window.rb"],
+  ["$ htop", "cpu 4%  mem 1.2G"],
+  ["$ npm run dev", "ready on :3000"]
+];
+
+const state = { layout: "tall", count: 5, focused: 0, master: 0, ids: [] };
+const rand = () => Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
+while (state.ids.length < 9) state.ids.push(rand());
+
+const stage = document.getElementById("stage");
+const slLeft = document.getElementById("sl-left");
+
+function render() {
+  const rects = compute(state.layout, state.count, AREA, state.focused, state.master);
+  stage.replaceChildren();
+  rects.forEach((r, i) => {
+    if (!r) return;
+    const el = document.createElement("div");
+    el.className = "pane" + (i === state.focused ? " focused" : "");
+    el.style.left = (r.x / COLS) * 100 + "%";
+    el.style.top = (r.y / ROWS) * 100 + "%";
+    el.style.width = (r.w / COLS) * 100 + "%";
+    el.style.height = (r.h / ROWS) * 100 + "%";
+    el.style.zIndex = state.layout === "monocle" && i === state.focused ? 2 : 1;
+
+    const title = document.createElement("div");
+    title.className = "title";
+    title.textContent = "#" + (i + 1) + " " + state.ids[i] + (i === state.master ? " " : "");
+    if (i === state.master) {
+      const star = document.createElement("span");
+      star.className = "star";
+      star.textContent = "★";
+      title.append(star);
+    }
+    el.append(title);
+
+    if (r.h >= 5) {
+      const body = document.createElement("div");
+      body.className = "body";
+      body.textContent = SAMPLES[i % SAMPLES.length].join("\n");
+      el.append(body);
+    }
+    stage.append(el);
+  });
+
+  slLeft.textContent =
+    "[playground] panes:" + state.count +
+    " layout:" + state.layout +
+    " focused:#" + (state.focused + 1) +
+    " drawer:hidden";
+
+  document.querySelectorAll("#layout-keys button").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.layout === state.layout));
+  });
+}
+
+const BLURB = {
+  tall:     "master on the left, everything else stacked down the right. The workhorse.",
+  wide:     "the transpose of tall — master across the top, the rest side by side beneath.",
+  columns:  "equal-width, full-height strips. No master, no hierarchy.",
+  rows:     "equal-height, full-width strips — the dual of columns.",
+  grid:     "a roughly square tiling; every row stretches to fill the width.",
+  spiral:   "a Fibonacci wind-in, each pane half the last. muxr's default.",
+  centered: "master in a centre column, the rest dealt alternately to both sides.",
+  stack:    "an accordion — the focused pane expands, the others collapse to title slivers.",
+  monocle:  "the focused pane, fullscreen. The rest are still there, and hjkl still reaches them."
+};
+
+const shotImg = document.getElementById("shot-img");
+const shotName = document.getElementById("shot-name");
+const shotCaption = document.getElementById("shot-caption");
+
+function setLayout(name) {
+  state.layout = name;
+  shotImg.src = "screenshots/layout-" + name + ".png";
+  shotImg.alt = "muxr running five panes in the " + name + " layout";
+  shotName.textContent = name;
+  shotCaption.innerHTML = "<b>" + name + "</b> — " + BLURB[name];
+  render();
+}
+
+function addPane() {
+  if (state.count >= 9) return;
+  state.count++;
+  state.focused = state.count - 1;
+  render();
+}
+
+function closePane() {
+  if (state.count <= 1) return;
+  state.count--;
+  state.focused = Math.min(state.focused, state.count - 1);
+  state.master = Math.min(state.master, state.count - 1);
+  render();
+}
+
+function promote() { state.master = state.focused; render(); }
+
+function move(dir) {
+  const rects = compute(state.layout, state.count, AREA, state.focused, state.master);
+  const n = neighbor(rects, state.focused, dir);
+  if (n !== null) { state.focused = n; }
+  else if (state.layout === "monocle") {
+    state.focused = (state.focused + (dir === "right" || dir === "down" ? 1 : state.count - 1)) % state.count;
+  }
+  render();
+}
+
+const LAYOUT_KEYS = {
+  t: "tall", w: "wide", "|": "columns", "-": "rows",
+  g: "grid", f: "spiral", e: "centered", S: "stack", m: "monocle"
+};
+
+const layoutKeyRow = document.getElementById("layout-keys");
+Object.entries(LAYOUT_KEYS).forEach(([key, name]) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "keycap";
+  b.textContent = key;
+  b.dataset.layout = name;
+  b.title = name;
+  b.setAttribute("aria-label", name + " layout");
+  b.addEventListener("click", () => { setLayout(name); stage.focus(); });
+  layoutKeyRow.append(b);
+});
+
+const ACTIONS = [
+  ["c", "new pane", addPane],
+  ["x", "close", closePane],
+  ["⏎", "master", promote],
+  ["h", "left", () => move("left")],
+  ["j", "down", () => move("down")],
+  ["k", "up", () => move("up")],
+  ["l", "right", () => move("right")],
+  ["⇥", "cycle", () => setLayout(LAYOUTS[(LAYOUTS.indexOf(state.layout) + 1) % LAYOUTS.length])]
+];
+const actionRow = document.getElementById("action-keys");
+ACTIONS.forEach(([label, title, fn]) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "keycap";
+  b.textContent = label;
+  b.title = title;
+  b.setAttribute("aria-label", title);
+  b.addEventListener("click", () => { fn(); stage.focus(); });
+  actionRow.append(b);
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const tag = (e.target.tagName || "").toLowerCase();
+  if (tag === "input" || tag === "textarea" || e.target.isContentEditable) return;
+
+  const k = e.key;
+  if (LAYOUT_KEYS[k]) { setLayout(LAYOUT_KEYS[k]); e.preventDefault(); return; }
+  if (k === "c") { addPane(); e.preventDefault(); return; }
+  if (k === "x") { closePane(); e.preventDefault(); return; }
+  if (k === "Enter" && e.target === stage) { promote(); e.preventDefault(); return; }
+  if (k === "Tab" && e.target === stage) {
+    setLayout(LAYOUTS[(LAYOUTS.indexOf(state.layout) + 1) % LAYOUTS.length]);
+    e.preventDefault(); return;
+  }
+  const dirs = { h: "left", j: "down", k: "up", l: "right",
+                 ArrowLeft: "left", ArrowDown: "down", ArrowUp: "up", ArrowRight: "right" };
+  if (dirs[k]) {
+    if (k.startsWith("Arrow") && e.target !== stage) return;
+    move(dirs[k]);
+    e.preventDefault();
+  }
+});
+
+render();
+
+function preloadRemainingLayoutStills() {
+  LAYOUTS.filter((n) => n !== state.layout).forEach((n) => {
+    const img = new Image();
+    img.src = "screenshots/layout-" + n + ".png";
+  });
+}
+window.addEventListener("load", preloadRemainingLayoutStills);
+
+const copyBtn = document.getElementById("copy-btn");
+copyBtn.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById("install-cmd").textContent.trim());
+    copyBtn.textContent = "copied";
+  } catch {
+    copyBtn.textContent = "⌘C";
+  }
+  setTimeout(() => { copyBtn.textContent = "copy"; }, 1600);
+});
+
+const navLinks = [...document.querySelectorAll(".sitebar a[href^='#']")];
+const targets = navLinks
+  .map((a) => document.querySelector(a.getAttribute("href")))
+  .filter(Boolean);
+
+if ("IntersectionObserver" in window) {
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (!entry.isIntersecting) return;
+      navLinks.forEach((a) => a.classList.toggle("here", a.getAttribute("href") === "#" + entry.target.id));
+    });
+  }, { rootMargin: "-45% 0px -45% 0px" });
+  targets.forEach((t) => io.observe(t));
+}
+</script>
+</body>
+</html>

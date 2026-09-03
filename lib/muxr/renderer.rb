@@ -415,7 +415,7 @@ module Muxr
       "",
       "PASSTHROUGH mode (keys reach the focused pane; prefix is Ctrl-a)",
       "  C-a Esc         return to normal mode",
-      "  C-a c x t w g m same as normal-mode bindings",
+      "  C-a c / x       new / close pane (close asks y/n)",
       "  C-a Tab Enter   cycle layout / promote master",
       "  C-a n / p / a   next / prev / last pane",
       "  C-a r           refresh / redraw (fixes a corrupted pane)",

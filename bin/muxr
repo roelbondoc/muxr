@@ -116,7 +116,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
     Keybindings (Ctrl-a prefix):
       C-a c   new pane            C-a n / p   next / prev pane
       C-a a   toggle last pane    C-a 1..9    jump to pane by number
-      C-a k   close pane          C-a Tab     cycle layout
+      C-a x   close pane          C-a Tab     cycle layout
       C-a ~   toggle drawer       C-a Enter   promote to master
       C-a C   Claude drawer       (MCP-aware; needs `muxr --install-skill` + bridge configured)
       C-a :   command prompt      C-a ?       toggle help

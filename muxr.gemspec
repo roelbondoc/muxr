@@ -18,6 +18,7 @@ Gem::Specification.new do |spec|
   spec.required_ruby_version = ">= 3.4"
 
   spec.metadata = {
+    "homepage_uri"          => "https://roelbondoc.github.io/muxr/",
     "source_code_uri"       => "https://github.com/roelbondoc/muxr",
     "bug_tracker_uri"       => "https://github.com/roelbondoc/muxr/issues",
     "changelog_uri"         => "https://github.com/roelbondoc/muxr/blob/main/CHANGELOG.md",

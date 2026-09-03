@@ -43,8 +43,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   actually openable. A capability query (`a=q`) is answered `OK` so inner
   programs pick the kitty path instead of falling back to sixel. The store
   keeps the 200 most recent images.
+- A project page at https://roelbondoc.github.io/muxr/, served from `docs/`.
+  Its layout playground runs a port of `LayoutManager` in the browser, so
+  pressing muxr's own layout and `hjkl` keys tiles with the real algorithm.
 
 ### Fixed
+- The help overlay claimed `C-a t w g m` set layouts and `muxr --help`
+  claimed `C-a k` closed a pane. Neither binding exists: layout keys are
+  normal-mode only, and close is `C-a x`.
 - `--list` and `:sessions` no longer report a phantom `<name>.ctrl`
   session. Both enumerated `~/.muxr/sockets/*.sock`, which also matches
   the sibling control socket `<name>.ctrl.sock`.
