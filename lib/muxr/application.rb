@@ -1,5 +1,8 @@
 require "socket"
 require "fileutils"
+require "muxr/remote_pane"
+require "muxr/pane_picker"
+require "muxr/session_directory"
 
 module Muxr
   # The Application is the muxr server. It owns the Session, panes, Renderer,
@@ -25,7 +28,7 @@ module Muxr
     DEFAULT_WIDTH  = 80
     DEFAULT_HEIGHT = 24
 
-    attr_reader :session, :renderer, :input, :session_name, :control_server
+    attr_reader :session, :renderer, :input, :session_name, :control_server, :pane_picker
 
     def self.socket_path_for(name)
       File.join(SOCKETS_DIR, "#{name}.sock")
@@ -48,11 +51,13 @@ module Muxr
 
     # Names of sessions whose server socket is currently accepting connections.
     # Stale sockets (file exists, no listener) are skipped but left in place;
-    # cleanup happens on the next attach attempt.
+    # cleanup happens on the next attach attempt. The sibling control socket
+    # lives in the same directory under <name>.ctrl.sock and is not a session.
     def self.list_active
       return [] unless File.directory?(SOCKETS_DIR)
       Dir.children(SOCKETS_DIR).filter_map do |entry|
         next unless entry.end_with?(".sock")
+        next if entry.end_with?(".ctrl.sock")
         path = File.join(SOCKETS_DIR, entry)
         next unless alive_socket?(path)
         File.basename(entry, ".sock")
@@ -75,6 +80,7 @@ module Muxr
       @message = nil
       @message_expires = nil
       @help_visible = false
+      @pane_picker = nil
       @current_client = nil
       @client_write_buffer = +"".b
       @listening_socket = nil
@@ -494,6 +500,82 @@ module Muxr
       invalidate
     end
 
+    # Open the attach overlay: every pane every other live muxr server is
+    # willing to share, grouped by session. Building the list means a short
+    # blocking round-trip to each server's control socket, which is fine for a
+    # deliberate keypress and bounded by SessionDirectory::QUERY_TIMEOUT.
+    def open_pane_picker
+      entries = SessionDirectory.panes(exclude: @session_name)
+      if entries.empty?
+        flash("no panes to attach (no other muxr sessions running)")
+        return
+      end
+      @pane_picker = PanePicker.new(entries)
+      @input.enter_pane_picker_mode
+      invalidate
+    end
+
+    def move_pane_picker(delta)
+      @pane_picker&.move(delta)
+      invalidate
+    end
+
+    def cancel_pane_picker
+      @pane_picker = nil
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def confirm_pane_picker
+      entry = @pane_picker&.selected
+      cancel_pane_picker
+      return unless entry
+      attach_remote_pane(entry)
+    end
+
+    # Mount another session's pane here as a live mirror. The pane keeps
+    # running where it is — both sessions see the same shell, and either can
+    # type into it. Closing it here (or quitting) only drops the mirror; losing
+    # the owning server is what makes the pane go away, and prune_dead_panes
+    # takes care of that.
+    def attach_remote_pane(entry)
+      remote = RemotePane.connect(
+        socket_path: entry.socket_path,
+        pane_id: entry.pane_id,
+        rows: mirror_viewport[0],
+        cols: mirror_viewport[1]
+      )
+      pane = Pane.new(rows: remote.rows, cols: remote.cols, process: remote)
+      remote.bind(pane.terminal)
+      pane.origin = remote.origin
+      @session.window.add_pane(pane)
+      @session.focus_drawer = false
+      @session.window.focused_index = @session.window.panes.length - 1
+      @renderer.reset_frame!
+      flash("attached #{remote.origin}")
+      invalidate
+      pane
+    rescue RemotePane::Error => e
+      flash("attach failed: #{e.message}")
+      nil
+    end
+
+    # Size to ask the owner for before the Renderer has laid the new pane out.
+    # One more pane in the current layout is the honest guess, and the very next
+    # frame corrects it through Pane#resize.
+    def mirror_viewport
+      rects = LayoutManager.compute(
+        @session.window.layout,
+        @session.window.panes.length + 1,
+        LayoutManager::Rect.new(0, 0, @session.width, @session.height - 1),
+        focused_index: @session.window.panes.length,
+        master_index: @session.window.master_index
+      )
+      rect = rects.last
+      return [DEFAULT_HEIGHT, DEFAULT_WIDTH] unless rect
+      [[rect.h - 2, 1].max, [rect.w - 2, 1].max]
+    end
+
     def show_help
       @help_visible = true
       @input.enter_help_mode
@@ -710,7 +792,7 @@ module Muxr
     end
 
     def list_sessions
-      names = Session.list
+      names = (Session.list | self.class.list_active).sort
       if names.empty?
         flash("no saved sessions")
       else
@@ -1016,7 +1098,14 @@ module Muxr
     def consume_pane_io(io)
       pane = pane_for_io(io)
       return unless pane
-      data = pane.read_from_pty
+      control = @control_server
+      relay = pane.id.is_a?(String) && control&.mirrored?(pane.id)
+      data =
+        if relay
+          pane.read_from_pty { |chunk| control.on_pane_raw(pane.id, chunk) }
+        else
+          pane.read_from_pty
+        end
       if data
         invalidate
         # Notify the control surface so any pending pane.run waiters reset
@@ -1114,7 +1203,8 @@ module Muxr
         search_buffer: @input.search_buffer,
         search_direction: @input.search_direction,
         message: @message,
-        help: @help_visible
+        help: @help_visible,
+        picker: @pane_picker
       )
     end
 

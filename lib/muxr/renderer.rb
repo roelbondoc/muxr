@@ -27,7 +27,8 @@ module Muxr
       selection:    [:c256, 201].freeze,  # magenta
       confirm_quit:  [:c256, 196].freeze, # red
       confirm_close: [:c256, 196].freeze, # red
-      help:          [:c256, 39].freeze   # blue
+      help:          [:c256, 39].freeze,  # blue
+      pane_picker:   [:c256, 39].freeze   # blue
     }.freeze
 
     # Background applied to cells that match the active scrollback search.
@@ -74,7 +75,7 @@ module Muxr
       @prev = nil
     end
 
-    def render(session, input_state: :normal, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false)
+    def render(session, input_state: :normal, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil)
       w = session.width
       h = session.height
       return if w < 4 || h < 3
@@ -93,6 +94,7 @@ module Muxr
         message: message
       )
       compose_help(frame, session) if help
+      compose_pane_picker(frame, session, picker) if picker
 
       emit_frame(frame, session, input_state: input_state, command_buffer: command_buffer, search_buffer: search_buffer)
     end
@@ -134,6 +136,9 @@ module Muxr
         # from blowing up when a pane stand-in doesn't implement #id.
         title += " #{pane.id}" if pane.respond_to?(:id) && pane.id.is_a?(String)
         title += " [P]" if pane.respond_to?(:private?) && pane.private?
+        # A borrowed pane names the session that actually owns its shell, so
+        # "who am I about to type at" is answerable without leaving the layout.
+        title += " @#{pane.origin}" if pane.respond_to?(:origin) && pane.origin
         title += " ★" if i == win.master_index
         # Foreground command (e.g. "npm test", "vim"). Set by the poller
         # thread; nil when the shell itself is foreground. Truncate so a
@@ -156,7 +161,7 @@ module Muxr
         # the same edge as the title but on the opposite side keeps both
         # readable without one crowding the other.
         draw_mode_chip(frame, rect, input_state, title) if focused
-        copy_terminal(frame, pane, rect.x + 1, rect.y + 1)
+        copy_terminal(frame, pane, rect)
       end
     end
 
@@ -199,7 +204,7 @@ module Muxr
                title: title,
                title_focused: focused)
       draw_mode_chip(frame, rect, input_state, title) if focused
-      copy_terminal(frame, drawer.pane, rect.x + 1, rect.y + 1)
+      copy_terminal(frame, drawer.pane, rect)
     end
 
     def mode_color(input_state)
@@ -237,6 +242,7 @@ module Muxr
       when :confirm_quit  then "QUIT?"
       when :confirm_close then "CLOSE?"
       when :help          then "HELP"
+      when :pane_picker   then "ATTACH"
       else                    "?"
       end
     end
@@ -403,6 +409,7 @@ module Muxr
       "  r               refresh / redraw (fixes a corrupted pane)",
       "  s               enter scrollback",
       "  ~ / C / P       drawer / Claude drawer / toggle private",
+      "  A               attach a pane from another muxr session",
       "  : / ?           command prompt / toggle this help",
       "  ] / d / q       paste buffer / detach / kill session",
       "",
@@ -413,6 +420,7 @@ module Muxr
       "  C-a n / p / a   next / prev / last pane",
       "  C-a r           refresh / redraw (fixes a corrupted pane)",
       "  C-a [ ]         scrollback / paste buffer",
+      "  C-a A           attach a pane from another muxr session",
       "  C-a C-a         send literal Ctrl-a to focused pane",
       "",
       "SCROLLBACK mode (pane-bound: follows you as you switch panes)",
@@ -427,7 +435,7 @@ module Muxr
       "COMMAND prompt (: to open;  Tab completes,  Esc/C-c cancels)",
       "Commands: layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle},",
       "          drawer {toggle|show|hide|reset},",
-      "          claude, save, restore, sessions, quit, new, close, next, prev",
+      "          claude, save, restore, sessions, attach, quit, new, close, next, prev",
       "",
       "press any key to dismiss"
     ].freeze
@@ -464,6 +472,75 @@ module Muxr
       end
     end
 
+    PICKER_BG          = [:c256, 236].freeze
+    PICKER_FG          = [:c256, 252].freeze
+    PICKER_SESSION_FG  = [:c256, 45].freeze
+    PICKER_DIM_FG      = [:c256, 245].freeze
+    PICKER_SELECTED_BG = [:c256, 24].freeze
+    PICKER_BORDER      = [:c256, 39].freeze
+    PICKER_HINT        = "j/k move · Enter attach · Esc cancel".freeze
+
+    def compose_pane_picker(frame, session, picker)
+      lines = picker_lines(picker)
+      w = session.width
+      h = session.height
+      box_w = [lines.map { |l| l[0].length }.max + 4, PICKER_HINT.length + 4, 30].max
+      box_w = [box_w, w - 4].min
+      box_h = [lines.length + 4, h - 4].min
+      rect = LayoutManager::Rect.new((w - box_w) / 2, (h - box_h) / 2, box_w, box_h)
+
+      (rect.y...(rect.y + rect.h)).each do |yy|
+        (rect.x...(rect.x + rect.w)).each do |xx|
+          set_cell(frame, yy, xx, " ", fg: PICKER_FG, bg: PICKER_BG)
+        end
+      end
+      draw_box(frame, rect, border: PICKER_BORDER, bold_border: true,
+               title: "Attach pane", title_focused: true)
+
+      inner_w = box_w - 4
+      visible = picker_window(lines, picker.index, box_h - 4)
+      visible.each_with_index do |(text, fg, selected), i|
+        bg = selected ? PICKER_SELECTED_BG : PICKER_BG
+        row = text[0, inner_w].ljust(inner_w)
+        row.chars.each_with_index do |ch, j|
+          set_cell(frame, rect.y + 1 + i, rect.x + 2 + j, ch,
+                   fg: fg, bg: bg, attrs: selected ? Terminal::BOLD : 0)
+        end
+      end
+
+      hint_y = rect.y + rect.h - 2
+      PICKER_HINT[0, inner_w].chars.each_with_index do |ch, j|
+        set_cell(frame, hint_y, rect.x + 2 + j, ch, fg: PICKER_DIM_FG, bg: PICKER_BG)
+      end
+    end
+
+    def picker_lines(picker)
+      picker.rows.each_with_index.map do |row, i|
+        selected = i == picker.index
+        if row.selectable?
+          entry = row.entry
+          text = "  ##{entry.slot} #{entry.pane_id}"
+          text += "  #{shorten_path(entry.cwd)}" if entry.cwd
+          [text, PICKER_FG, selected]
+        else
+          ["#{row.session}", PICKER_SESSION_FG, false]
+        end
+      end
+    end
+
+    # Scroll the list so the selected row stays on screen without moving more
+    # than it has to — the cursor sits still until it reaches an edge.
+    def picker_window(lines, index, height)
+      return lines if height <= 0 || lines.length <= height
+      start = (index - height / 2).clamp(0, lines.length - height)
+      lines[start, height]
+    end
+
+    def shorten_path(path)
+      home = Dir.home
+      path.to_s.start_with?(home) ? path.to_s.sub(home, "~") : path.to_s
+    end
+
     def draw_box(frame, rect, border:, bold_border:, title: nil, title_focused: false)
       attrs = bold_border ? Terminal::BOLD : 0
       x2 = rect.x + rect.w - 1
@@ -490,10 +567,16 @@ module Muxr
       end
     end
 
-    def copy_terminal(frame, pane, dst_x, dst_y)
+    # Paint a pane's grid into the inside of its box. Clipped to the box, not
+    # just to the frame: a mirrored pane's grid is sized by the session that
+    # owns it, so it can be a row or column out of step with the box we drew
+    # for it here, and overrunning would eat the border.
+    def copy_terminal(frame, pane, rect)
       term = pane.terminal
-      rows = term.rows
-      cols = term.cols
+      dst_x = rect.x + 1
+      dst_y = rect.y + 1
+      rows = [term.rows, rect.h - 2].min
+      cols = [term.cols, rect.w - 2].min
       selection = term.selection_active?
       search = term.search_active?
       rows.times do |r|
@@ -639,6 +722,7 @@ module Muxr
     end
 
     def cursor_position(session, input_state:, command_buffer:, search_buffer: "")
+      return "\e[?25l" if input_state == :pane_picker
       if input_state == :command
         col = 1 + command_buffer.length + 1 # ':' + buffer
         return "\e[#{session.height};#{col}H\e[?25h"
@@ -677,34 +761,7 @@ module Muxr
     end
 
     def sgr(cell)
-      parts = ["0"]
-      attrs = cell.attrs.to_i
-      parts << "1" if (attrs & Terminal::BOLD) != 0
-      parts << "2" if (attrs & Terminal::DIM) != 0
-      parts << "4" if (attrs & Terminal::UNDERLINE) != 0
-      parts << "7" if (attrs & Terminal::REVERSE) != 0
-      append_color(parts, cell.fg, true)
-      append_color(parts, cell.bg, false)
-      "\e[#{parts.join(';')}m"
-    end
-
-    def append_color(parts, color, fg)
-      return if color.nil?
-      case color
-      when Integer
-        if color < 8
-          parts << ((fg ? 30 : 40) + color).to_s
-        else
-          parts << ((fg ? 90 : 100) + (color - 8)).to_s
-        end
-      when Array
-        case color[0]
-        when :c256
-          parts << "#{fg ? 38 : 48};5;#{color[1]}"
-        when :rgb
-          parts << "#{fg ? 38 : 48};2;#{color[1]};#{color[2]};#{color[3]}"
-        end
-      end
+      Terminal.sgr(cell)
     end
   end
 end

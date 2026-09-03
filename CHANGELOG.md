@@ -7,6 +7,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Attach a pane from another muxr session: `A` (or `C-a A`, or `:attach`)
+  opens a picker listing every pane the other live servers on this machine
+  are willing to share, grouped by session. The chosen pane is *shared, not
+  moved* — it keeps running where it is, both sessions show the same live
+  shell, and either can type into it. The owner keeps the PTY and remains
+  its only reader; what crosses the control socket is the raw byte stream
+  and keystrokes, so colors, the alternate screen and full-screen TUIs all
+  mirror faithfully. The PTY runs at the smallest viewport looking at it so
+  it fits both layouts. If the owning session stops, the borrower drops the
+  pane; if the borrower stops, only the mirror goes away and the pane
+  carries on at home. Private panes are never offered, and borrowed panes
+  are left out of `:save`. New control methods: `pane.mirror`,
+  `pane.mirror_resize`, `pane.unmirror`, `pane.redraw`; `pane.send_input`
+  and `pane.run` now also accept `base64: true` payloads.
 - Kitty graphics protocol images are saved to `~/.muxr/images` and
   announced in the pane as a clickable `file://` path (OSC 8) instead of
   being drawn. muxr renders a cell grid and has nowhere to put pixels, so
@@ -19,6 +33,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keeps the 200 most recent images.
 
 ### Fixed
+- `--list` and `:sessions` no longer report a phantom `<name>.ctrl`
+  session. Both enumerated `~/.muxr/sockets/*.sock`, which also matches
+  the sibling control socket `<name>.ctrl.sock`.
+- A pane whose grid is larger than the box drawn for it is now clipped to
+  the box instead of painting over its own border. Only reachable with a
+  borrowed pane, whose geometry belongs to another session.
 - APC (`ESC _ … ST`) and DCS/SOS/PM (`ESC P`/`ESC X`/`ESC ^`) string
   sequences are now consumed by the parser. Previously neither had a
   parser state: the introducer was swallowed and the entire body printed

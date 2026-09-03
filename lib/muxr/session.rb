@@ -45,7 +45,7 @@ module Muxr
         "focused_index"  => @window.focused_index,
         "master_index"   => @window.master_index,
         "focus_drawer"   => @focus_drawer,
-        "panes"          => @window.panes.map { |p| { "id" => safe_id(p), "cwd" => safe_cwd(p), "private" => safe_private(p) } },
+        "panes"          => own_panes.map { |p| { "id" => safe_id(p), "cwd" => safe_cwd(p), "private" => safe_private(p) } },
         "drawer"         => serialize_drawer
       }
     end
@@ -71,6 +71,13 @@ module Muxr
     end
 
     private
+
+    # Panes borrowed from another session are that session's to restore, not
+    # ours: persisting one here would cold-start a second shell in its cwd and
+    # quietly fork the thing the user was sharing.
+    def own_panes
+      @window.panes.reject { |p| p.respond_to?(:mirror?) && p.mirror? }
+    end
 
     def safe_cwd(pane)
       pane.respond_to?(:cwd) ? pane.cwd : nil

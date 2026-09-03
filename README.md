@@ -162,6 +162,7 @@ regardless of mode.
 | `a` / `1` … `9`      | toggle last pane / jump to pane by number           |
 | `s`                  | enter scrollback / copy-mode                        |
 | `~` / `C` / `P`      | drawer / Claude drawer / toggle private flag        |
+| `A`                  | attach a pane from another muxr session             |
 | `]`                  | paste internal yank buffer into focused pane        |
 | `:` / `?`            | command prompt / help                               |
 | `d` / `q`            | detach / kill session (asks `y/n`)                  |
@@ -193,6 +194,7 @@ the move falls back to linear next/prev shuffling.
 | `C-a ~`        | toggle drawer (shell)                                   |
 | `C-a C`        | toggle Claude Code drawer (MCP-aware)                   |
 | `C-a P`        | toggle private flag on focused pane (hides from MCP)    |
+| `C-a A`        | attach a pane from another muxr session                 |
 | `C-a [`        | enter scrollback / copy-mode                            |
 | `C-a ]`        | paste internal yank buffer into focused pane            |
 | `C-a d`        | detach (server keeps running)                           |
@@ -247,6 +249,49 @@ selection into an internal buffer, pipes it to `pbcopy` in the background
 `]` (normal) / `C-a ]` (passthrough) writes the yank buffer back into the
 focused pane.
 
+### Attaching a pane from another session
+
+`A` (or `C-a A`, or `:attach`) opens a picker listing every pane offered
+by the other muxr servers running on this machine, grouped by session.
+`j`/`k` or `↑`/`↓` move, `Enter` attaches, `Esc` backs out.
+
+```
+┌─ Attach pane ──────────────────────────────────────┐
+│ work                                               │
+│   #1 6021b5  ~/src/muxr                            │
+│   #2 c3a190  ~/src/muxr/lib                        │
+│ notes                                              │
+│   #1 71d7d1  ~/notes                               │
+│ j/k move · Enter attach · Esc cancel               │
+└────────────────────────────────────────────────────┘
+```
+
+The chosen pane is **shared, not moved** — it keeps running in its own
+session, and both sessions show the same live shell. Either side can
+type into it; scrollback, colors, the alternate screen and full-screen
+TUIs (vim, htop, Claude Code) all work, because what crosses between the
+servers is the raw PTY byte stream, not a screen scrape. The borrowed
+pane's title names its owner: `#2 e64caf @work:6021b5`.
+
+The pane's owner keeps the PTY and stays the only reader of it, which
+settles the questions a shared pane raises:
+
+- **Size.** The PTY runs at the smallest viewport looking at it, so it
+  fits in both layouts at once. Give a borrowed pane a small box and the
+  pane shrinks in its home session too, exactly like tmux.
+- **The owning session stops.** The mirror's socket closes, and the
+  borrowing session drops the pane on its next tick.
+- **The borrowing session stops** (or you close the pane with `x`, or
+  detach). Only the mirror goes away. The pane carries on at home and
+  returns to full size the next time its own layout is drawn.
+- **Private panes** (`P`) are never offered in the picker, the same way
+  they're hidden from the MCP surface.
+- Borrowed panes are left out of `:save` — they belong to the session
+  that owns them, and restoring one here would cold-start a second shell.
+
+Programmatically the same thing is available over the control socket as
+`pane.mirror` / `pane.mirror_resize` / `pane.unmirror`.
+
 ## Commands (typed after `:` in normal mode, or `C-a :` in passthrough)
 
 ```
@@ -259,7 +304,8 @@ claude                         # toggle the Claude Code drawer
 private                        # toggle private flag on focused pane
 save                           # persist session to ~/.muxr/sessions/<name>.json
 restore                        # show path to saved session
-sessions | ls                  # list saved sessions
+sessions | ls                  # list saved sessions and live servers
+attach                         # open the attach picker (same as A / C-a A)
 new | close | next | prev | master
 detach | quit                  # quit asks for y/n confirmation
 ```

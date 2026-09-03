@@ -385,6 +385,97 @@ module Muxr
       lines.join("\n")
     end
 
+    # Serialize the live grid as a self-contained ANSI repaint: feeding these
+    # bytes to a blank emulator of the same size reproduces this screen exactly.
+    # Seeds a mirrored copy of the pane in another muxr server, which then keeps
+    # up from the raw PTY byte stream alone.
+    def dump_ansi
+      out = +"\e[0m\e[H\e[2J"
+      sgr = nil
+      link = nil
+      @rows.times do |r|
+        last = last_significant_column(r)
+        next if last.nil?
+        out << "\e[#{r + 1};1H"
+        skip = 0
+        (0..last).each do |c|
+          if skip.positive?
+            skip -= 1
+            next
+          end
+          cell = @buffer[r][c]
+          char = cell.char.to_s
+          if (s = self.class.sgr(cell)) != sgr
+            out << s
+            sgr = s
+          end
+          if cell.hyperlink != link
+            out << "\e]8;;\e\\" if link
+            out << "\e]#{cell.hyperlink}\e\\" if cell.hyperlink
+            link = cell.hyperlink
+          end
+          if char.empty?
+            out << " "
+          else
+            out << char
+            skip = 1 if self.class.char_width(char.codepoints.first) == 2
+          end
+        end
+      end
+      out << "\e]8;;\e\\" if link
+      out << "\e[0m\e[#{@cursor_row + 1};#{@cursor_col + 1}H"
+      out << (@cursor_visible ? "\e[?25h" : "\e[?25l")
+      out
+    end
+
+    # Rightmost column in row +r+ that differs from a freshly-erased cell, or
+    # nil when the whole row is blank. The dump opens with \e[2J, so blank
+    # tails (the common case) cost nothing on the wire.
+    def last_significant_column(r)
+      row = @buffer[r]
+      (@cols - 1).downto(0) do |c|
+        cell = row[c]
+        next if cell.fg.nil? && cell.bg.nil? && cell.attrs.to_i.zero? &&
+                cell.hyperlink.nil? && (cell.char == " " || cell.char == "")
+        return c
+      end
+      nil
+    end
+
+    # SGR prelude that puts a terminal into the cell's colors and attributes.
+    # Shared with the Renderer's diff-emit so a snapshot and an incremental
+    # frame describe the same cell identically.
+    def self.sgr(cell)
+      parts = ["0"]
+      attrs = cell.attrs.to_i
+      parts << "1" if (attrs & BOLD) != 0
+      parts << "2" if (attrs & DIM) != 0
+      parts << "4" if (attrs & UNDERLINE) != 0
+      parts << "7" if (attrs & REVERSE) != 0
+      append_color(parts, cell.fg, true)
+      append_color(parts, cell.bg, false)
+      "\e[#{parts.join(';')}m"
+    end
+
+    def self.append_color(parts, color, fg)
+      return if color.nil?
+      case color
+      when Integer
+        if color < 8
+          parts << ((fg ? 30 : 40) + color).to_s
+        else
+          parts << ((fg ? 90 : 100) + (color - 8)).to_s
+        end
+      when Array
+        case color[0]
+        when :c256
+          parts << "#{fg ? 38 : 48};5;#{color[1]}"
+        when :rgb
+          parts << "#{fg ? 38 : 48};2;#{color[1]};#{color[2]};#{color[3]}"
+        end
+      end
+    end
+
     # Returns the Cell that should be visible at (r, c) given the current
     # scrollback view_offset. When view_offset == 0 this is the live grid.
     # When view_offset > 0, rows in the top of the visible area are sourced

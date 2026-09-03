@@ -37,6 +37,32 @@ class TestRenderer < Minitest::Test
     out.string
   end
 
+  # A borrowed pane's grid is sized by the session that owns it, so it can be
+  # a row or column out of step with the box drawn for it here. Painting past
+  # the box would eat the border, which is how a mirrored pane first showed up
+  # as a frame with two sides missing.
+  class OversizedPane < FakePane
+    def resize(_rows, _cols); end
+  end
+
+  def test_a_pane_bigger_than_its_box_is_clipped_not_allowed_to_eat_the_border
+    session = Muxr::Session.new(name: "spec", width: 40, height: 12)
+    session.window.add_pane(OversizedPane.new(label: "X" * 200, rows: 40, cols: 200))
+    session.window.set_layout(:monocle)
+    lines = strip_ansi_grid(render(session))
+    top = lines.find { |l| l.include?("┌") }
+    body = lines.find { |l| l.start_with?("│") && l.include?("X") }
+    assert_equal top.length, body.length
+    assert body.end_with?("│"), "right border was overwritten: #{body.inspect}"
+    assert lines.any? { |l| l.include?("└") }, "bottom border was pushed off the frame"
+  end
+
+  def strip_ansi_grid(output)
+    out = Muxr::Terminal.new(rows: 12, cols: 40)
+    out.feed(output)
+    out.dump_text.lines.map(&:chomp)
+  end
+
   def test_monocle_renders_focused_pane_not_last_pane
     session = build_session(layout: :monocle, focused_index: 0)
     output = render(session)

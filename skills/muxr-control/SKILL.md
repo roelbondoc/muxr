@@ -249,6 +249,23 @@ is no `muxr_pane_unmark_private` tool.
 (they're layout ops, not content ops) — useful if the user asks to
 "bring my private pane to the front" without exposing it.
 
+### Borrowed panes belong to another session
+
+A pane the user attached from another muxr session (`A` / `C-a A`) shows
+up in `muxr_panes_list` with an `"origin"` of `"<session>:<pane id>"`,
+and in the pane title as `@work:6021b5`. It behaves like any other pane
+for reads and input — those reach the real shell, in the session that
+owns it — with two differences worth knowing:
+
+- `muxr_pane_kill` only detaches the mirror. The shell keeps running in
+  its home session. If the user asks you to kill it, say that's what
+  happened rather than reporting the process gone.
+- Its size is negotiated with the owner, so `muxr_layout_set` may not
+  give it the dimensions you'd expect from the layout alone.
+
+Anything you type there is visible to whoever is looking at the owning
+session, live. Treat it the way you'd treat a shared screen.
+
 ### The drawer might be Claude itself
 
 If the bridge sees the env var `MUXR_DRAWER_SELF=1` it refuses

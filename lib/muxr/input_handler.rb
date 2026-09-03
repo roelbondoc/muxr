@@ -14,7 +14,7 @@ module Muxr
   #
   # Plus the sub-states pre-existing from before modes existed:
   #   :prefix, :command, :confirm_quit, :confirm_close, :help, :scrollback,
-  #   :search, :selection.
+  #   :search, :selection, :pane_picker.
   #
   # One-shot sub-states (prefix, command, confirm_quit, help) return to
   # @base_mode (whichever of :normal/:passthrough is active) when they
@@ -67,6 +67,7 @@ module Muxr
       "C"  => :toggle_claude_drawer,
       "P"  => :toggle_private_focused,
       "d"  => :detach,
+      "A"  => :open_pane_picker,
       "?"  => :show_help,
       "q"  => :quit_immediate,
       "s"  => :enter_scrollback,
@@ -87,6 +88,7 @@ module Muxr
       "C"    => :toggle_claude_drawer,
       "P"    => :toggle_private_focused,
       "d"    => :detach,
+      "A"    => :open_pane_picker,
       "?"    => :show_help,
       "q"    => :quit_immediate,
       "["    => :enter_scrollback,
@@ -157,6 +159,24 @@ module Muxr
       # `v` so the right thumb has a one-key way to anchor/release.
     }.freeze
 
+    # Attach overlay. Navigation mirrors scrollback's j/k plus the arrow keys
+    # (peeled off by the same CSI lookahead), Enter attaches, and every quit
+    # gesture the other one-shot overlays accept backs out.
+    PICKER_BINDINGS = {
+      "j"    => 1,
+      "k"    => -1,
+      "\x0e" => 1,  # Ctrl-n
+      "\x10" => -1  # Ctrl-p
+    }.freeze
+
+    PICKER_CSI = {
+      "\e[A" => -1, # Up
+      "\e[B" => 1   # Down
+    }.freeze
+
+    PICKER_CANCEL = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
+    PICKER_CONFIRM = ["\r", "\n", " "].freeze
+
     SELECTION_YANK = ["\r", "\n", "y"].freeze
     SELECTION_CANCEL = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
 
@@ -206,7 +226,7 @@ module Muxr
         # doesn't kick the user out of the prompt. An incomplete `\e[…`
         # (rare in raw-mode TTY) falls through and the bare `\e` exits as
         # before.
-        if (@state == :scrollback || @state == :search) && remaining.start_with?("\e[")
+        if (@state == :scrollback || @state == :search || @state == :pane_picker) && remaining.start_with?("\e[")
           consumed = consume_csi_escape(remaining)
           if consumed > 0
             remaining = remaining[consumed..] || ""
@@ -236,6 +256,8 @@ module Muxr
           handle_search_input(ch)
         when :selection
           handle_selection_input(ch)
+        when :pane_picker
+          handle_pane_picker_input(ch)
         end
       end
     end
@@ -264,6 +286,10 @@ module Muxr
 
     def enter_selection_mode
       @state = :selection
+    end
+
+    def enter_pane_picker_mode
+      @state = :pane_picker
     end
 
     # Drop into passthrough — every key reaches the focused pane until the
@@ -473,9 +499,13 @@ module Muxr
         b = remaining.getbyte(i)
         if b >= 0x40 && b <= 0x7e
           seq = remaining.byteslice(0, i + 1)
-          if @state == :scrollback
+          case @state
+          when :scrollback
             action = SCROLLBACK_CSI[seq]
             @app.scroll_focused(action) if action
+          when :pane_picker
+            delta = PICKER_CSI[seq]
+            @app.move_pane_picker(delta) if delta
           end
           return i + 1
         end
@@ -514,6 +544,22 @@ module Muxr
       end
       action = SELECTION_BINDINGS[ch]
       @app.move_selection(action) if action
+      # Unknown keys ignored — same rationale as scrollback mode.
+    end
+
+    def handle_pane_picker_input(ch)
+      if PICKER_CONFIRM.include?(ch)
+        @state = @base_mode
+        @app.confirm_pane_picker
+        return
+      end
+      if PICKER_CANCEL.include?(ch)
+        @state = @base_mode
+        @app.cancel_pane_picker
+        return
+      end
+      delta = PICKER_BINDINGS[ch]
+      @app.move_pane_picker(delta) if delta
       # Unknown keys ignored — same rationale as scrollback mode.
     end
 

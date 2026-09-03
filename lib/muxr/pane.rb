@@ -14,6 +14,12 @@ module Muxr
   class Pane
     attr_reader :id, :terminal, :process
     attr_accessor :rect
+    # "<session>:<pane id>" when this pane mirrors a pane owned by another muxr
+    # server; nil for a locally-owned PTY.
+    attr_accessor :origin
+    # Smallest viewport any remote mirror is showing this pane through, as
+    # [rows, cols], or nil when nobody is mirroring.
+    attr_accessor :mirror_size
     # Last value written by Application's foreground poller thread. nil when
     # the shell itself is foreground (the common empty-prompt case) or when
     # the lookup hasn't run / couldn't read. Renderer surfaces this in the
@@ -36,6 +42,12 @@ module Muxr
       @initial_cwd = cwd || @process.cwd
       @private_flag = false
       @foreground_command = nil
+      @origin = nil
+      @mirror_size = nil
+    end
+
+    def mirror?
+      @process.respond_to?(:mirror?) && @process.mirror?
     end
 
     def pid
@@ -96,13 +108,16 @@ module Muxr
         chunk = @process.read_nonblock
         break unless chunk
         @terminal.feed(chunk)
+        yield chunk if block_given?
         total += chunk.bytesize
       end
       # The emulator may owe the inner program a reply (DSR / CPR — see
       # Terminal#take_pending_replies!). Ship it back through the PTY's
       # input side as if it had been typed. Failure here is non-fatal: the
-      # process can have exited between read and write.
-      if (reply = @terminal.take_pending_replies!)
+      # process can have exited between read and write. A mirror stays quiet:
+      # the pane's owner already answered, and a second answer would reach the
+      # program as spurious keystrokes.
+      if (reply = @terminal.take_pending_replies!) && !mirror?
         begin
           @process.write(reply)
         rescue Errno::EIO, Errno::EPIPE
@@ -111,7 +126,27 @@ module Muxr
       total.positive? ? total : nil
     end
 
+    # A mirror's grid is sized by the pane's owner: the relayed stream carries
+    # absolute cursor addresses for *that* geometry. We only forward the
+    # viewport we can offer and wait for the size the owner settles on.
     def resize(rows, cols)
+      return @process.resize(rows, cols) if mirror?
+      rows, cols = fit_to_mirrors(rows, cols)
+      return if rows == @terminal.rows && cols == @terminal.cols
+      @terminal.resize(rows, cols)
+      @process.resize(rows, cols)
+    end
+
+    def fit_to_mirrors(rows, cols)
+      return [rows, cols] unless @mirror_size
+      [[rows, @mirror_size[0]].min.clamp(1, rows), [cols, @mirror_size[1]].min.clamp(1, cols)]
+    end
+
+    # Shrink to fit a mirror that just arrived, without waiting for a render —
+    # this session may be detached, in which case no render is coming. Growing
+    # back is the layout's call on the next frame it draws.
+    def clamp_to_mirrors!
+      rows, cols = fit_to_mirrors(@terminal.rows, @terminal.cols)
       return if rows == @terminal.rows && cols == @terminal.cols
       @terminal.resize(rows, cols)
       @process.resize(rows, cols)

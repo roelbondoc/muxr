@@ -1,3 +1,4 @@
+require "base64"
 require "json"
 require "socket"
 require "set"
@@ -41,6 +42,8 @@ module Muxr
       @clients = {}        # io => { read_buffer:, write_buffer: }
       @subscriptions = {}  # io => Set[pane_id]  (populated in step 3)
       @pending_runs  = []  # in-flight pane.run waiters (populated in step 3)
+      @mirrors   = {}      # pane_id => { io => [rows, cols] }
+      @mirror_geometry = {} # pane_id => [rows, cols] last announced to mirrors
       @dispatcher = Dispatcher.new(app, self)
     end
 
@@ -57,6 +60,8 @@ module Muxr
       @clients.clear
       @subscriptions.clear
       @pending_runs.clear
+      @mirrors.clear
+      @mirror_geometry.clear
       if @server
         @server.close rescue nil
         @server = nil
@@ -120,9 +125,104 @@ module Muxr
       end
     end
 
+    def mirrored?(pane_id)
+      @mirrors.key?(pane_id.to_s)
+    end
+
+    # Relay one chunk of a pane's raw PTY output to every muxr server mirroring
+    # it. Base64 because NDJSON can't carry arbitrary binary; the receiving
+    # server feeds the decoded bytes straight into its replica emulator, so the
+    # mirror is a byte-exact copy rather than a text snapshot.
+    def on_pane_raw(pane_id, chunk)
+      viewers = @mirrors[pane_id.to_s]
+      return if viewers.nil? || viewers.empty?
+      encoded = Base64.strict_encode64(chunk)
+      viewers.each_key do |io|
+        emit_event(io, "event.pane.mirror", { "pane" => pane_id.to_s, "data" => encoded })
+      end
+    end
+
+    def add_mirror(io, pane, rows, cols)
+      id = pane.id.to_s
+      (@mirrors[id] ||= {})[io] = [rows, cols]
+      apply_mirror_constraint(pane)
+    end
+
+    def update_mirror(io, pane, rows, cols)
+      viewers = @mirrors[pane.id.to_s]
+      return false unless viewers&.key?(io)
+      viewers[io] = [rows, cols]
+      apply_mirror_constraint(pane)
+      true
+    end
+
+    def remove_mirror(io, pane_id)
+      viewers = @mirrors[pane_id.to_s]
+      return false unless viewers&.delete(io)
+      if viewers.empty?
+        @mirrors.delete(pane_id.to_s)
+        @mirror_geometry.delete(pane_id.to_s)
+      end
+      pane = pane_by_id(pane_id)
+      apply_mirror_constraint(pane) if pane
+      true
+    end
+
+    # The PTY has to fit inside every viewport looking at it — this server's own
+    # layout and each mirroring server's — so the owner runs it at the smallest.
+    # nil once the last mirror leaves, which hands the pane back to the local
+    # layout at full size.
+    def apply_mirror_constraint(pane)
+      viewers = @mirrors[pane.id.to_s]
+      if viewers.nil? || viewers.empty?
+        pane.mirror_size = nil
+      else
+        pane.mirror_size = [viewers.values.map(&:first).min, viewers.values.map(&:last).min]
+      end
+      pane.clamp_to_mirrors!
+      @app.invalidate
+    end
+
+    def mirror_geometry_event(pane)
+      term = pane.terminal
+      {
+        "pane"     => pane.id.to_s,
+        "rows"     => term.rows,
+        "cols"     => term.cols,
+        "snapshot" => Base64.strict_encode64(term.dump_ansi)
+      }
+    end
+
+    # A mirror's replica emulator must match the owner's geometry exactly — the
+    # relayed byte stream addresses absolute rows and columns. Whenever the
+    # owner's grid changes shape we push the new size along with a full repaint
+    # so the replica can resize and resync in one step.
+    def push_mirror_geometry
+      return if @mirrors.empty?
+      gone = []
+      @mirrors.each do |pane_id, viewers|
+        pane = pane_by_id(pane_id)
+        unless pane
+          viewers.each_key { |io| emit_event(io, "event.pane.gone", { "pane" => pane_id }) }
+          gone << pane_id
+          next
+        end
+        size = [pane.terminal.rows, pane.terminal.cols]
+        next if @mirror_geometry[pane_id] == size
+        @mirror_geometry[pane_id] = size
+        payload = mirror_geometry_event(pane)
+        viewers.each_key { |io| emit_event(io, "event.pane.geometry", payload) }
+      end
+      gone.each do |pane_id|
+        @mirrors.delete(pane_id)
+        @mirror_geometry.delete(pane_id)
+      end
+    end
+
     # Called once per IO.select tick. Resolves any pane.run waiters whose
     # idle window has elapsed or whose timeout has fired.
     def tick
+      push_mirror_geometry
       return if @pending_runs.empty?
       now = monotonic_now
       completed = []
@@ -224,6 +324,9 @@ module Muxr
     def drop_client(io)
       @clients.delete(io)
       @subscriptions.delete(io)
+      # A mirroring server that went away releases its claim on pane geometry:
+      # the pane snaps back to the owner's own layout size.
+      @mirrors.keys.each { |pane_id| remove_mirror(io, pane_id) }
       # Any pane.run waiters owned by this client are silently abandoned —
       # there's nobody to respond to.
       @pending_runs.reject! { |r| r[:client_io] == io } unless @pending_runs.empty?
@@ -347,6 +450,10 @@ module Muxr
       when "pane.run"         then pane_run(params, client_io, request_id)
       when "pane.subscribe"   then pane_subscribe(params, client_io)
       when "pane.unsubscribe" then pane_unsubscribe(params, client_io)
+      when "pane.mirror"        then pane_mirror(params, client_io)
+      when "pane.mirror_resize" then pane_mirror_resize(params, client_io)
+      when "pane.unmirror"      then pane_unmirror(params, client_io)
+      when "pane.redraw"        then pane_redraw(params)
       when "layout.set"       then layout_set(params)
       when "layout.cycle"     then layout_cycle
       when "drawer.toggle"    then drawer_action(:toggle_drawer)
@@ -406,6 +513,10 @@ module Muxr
           entry["cwd"] = safe_cwd(pane)
           entry["rows"] = pane.terminal.rows
           entry["cols"] = pane.terminal.cols
+          # Present on a pane borrowed from another session: "<session>:<id>"
+          # there. Reads and input work as usual and reach the real shell, but
+          # pane.kill only drops the mirror.
+          entry["origin"] = pane.origin if pane.respond_to?(:origin) && pane.origin
         end
         entry
       end
@@ -536,6 +647,47 @@ module Muxr
       { "pane" => pane.id.to_s, "subscribed" => false, "was_subscribed" => removed }
     end
 
+    # Hand a pane to another muxr server as a live mirror: it gets a full ANSI
+    # snapshot of the grid now and every subsequent raw PTY byte as it arrives,
+    # while the pane itself stays right here, running and usable. Input the
+    # mirror collects comes back through pane.send_input.
+    def pane_mirror(params, client_io)
+      pane = find_pane(params)
+      ensure_not_private!(pane, "pane.mirror")
+      rows = clamp_int(params["rows"], min: 1, max: 1000, default: pane.terminal.rows)
+      cols = clamp_int(params["cols"], min: 1, max: 1000, default: pane.terminal.cols)
+      @server.add_mirror(client_io, pane, rows, cols)
+      @app.invalidate
+      @server.mirror_geometry_event(pane).merge(
+        "session" => @app.session.name,
+        "cwd"     => safe_cwd(pane)
+      )
+    end
+
+    def pane_mirror_resize(params, client_io)
+      pane = find_pane(params)
+      rows = clamp_int(params["rows"], min: 1, max: 1000, default: pane.terminal.rows)
+      cols = clamp_int(params["cols"], min: 1, max: 1000, default: pane.terminal.cols)
+      unless @server.update_mirror(client_io, pane, rows, cols)
+        raise Error.new("pane.mirror_resize: not mirroring pane #{pane.id}")
+      end
+      { "pane" => pane.id.to_s, "rows" => rows, "cols" => cols }
+    end
+
+    def pane_unmirror(params, client_io)
+      pane = find_pane(params)
+      removed = @server.remove_mirror(client_io, pane.id)
+      @app.invalidate
+      { "pane" => pane.id.to_s, "mirrored" => false, "was_mirrored" => removed }
+    end
+
+    def pane_redraw(params)
+      pane = find_pane(params)
+      ensure_not_private!(pane, "pane.redraw")
+      pane.request_redraw
+      { "pane" => pane.id.to_s }
+    end
+
     def layout_set(params)
       name = params["layout"].to_s
       sym = name.to_sym
@@ -602,13 +754,23 @@ module Muxr
         end
         [raw, wire]
       elsif params[text_key].is_a?(String)
-        text = params[text_key]
+        text = decode_text(params[text_key], params["base64"])
         [text.b, wrap_bracketed(text, bracketed)]
       elsif required
         raise Error.new("missing #{text_key} (or `keys`)")
       else
         ["".b, "".b]
       end
+    end
+
+    # Keystrokes relayed from a mirroring server arrive base64-encoded: input
+    # bytes are not always valid UTF-8 (Alt- sequences, mouse reports) and JSON
+    # strings must be.
+    def decode_text(text, base64)
+      return text unless base64
+      Base64.strict_decode64(text)
+    rescue ArgumentError
+      raise Error.new("data: malformed base64")
     end
 
     def clamp_int(value, min:, max:, default:)
