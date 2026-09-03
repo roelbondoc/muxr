@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="https://rubygems.org/gems/muxr"><img alt="gem version" src="https://img.shields.io/gem/v/muxr?color=%23c94f4f&label=gem"></a>
-  <img alt="ruby >= 3.4" src="https://img.shields.io/badge/ruby-%E2%89%A5%203.4-c94f4f">
+  <img alt="ruby 3.4 or newer" src="https://img.shields.io/badge/ruby-%E2%89%A5%203.4-c94f4f">
   <img alt="zero runtime dependencies" src="https://img.shields.io/badge/runtime%20deps-0-4c9a72">
   <a href="LICENSE.txt"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
 </p>
