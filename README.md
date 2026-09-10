@@ -37,7 +37,7 @@ protocol, the tiling maths — is stdlib Ruby with no runtime gems.
 | **Detach and reattach** | the server keeps every PTY alive; reattaching gives you back the same shells with full history |
 | **Quake-style drawer** | a persistent overlay shell that drops from the top of the screen and never loses its scrollback |
 | **Real terminal emulation** | truecolor SGR, scroll regions, alternate screen, bracketed paste, wide/CJK/emoji cells, OSC 8 hyperlinks |
-| **Scrollback with vi motions** | 10,000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard |
+| **Scrollback with vi motions** | 50,000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard |
 | **Panes across sessions** | borrow a live pane from another muxr session, or hand it over for good by passing its pty file descriptor down a socket |
 | **Built for agents** | a JSON-RPC control socket, an MCP bridge, and private panes that programmatic callers cannot see or touch |
 
@@ -275,16 +275,12 @@ in the session's origin directory — wherever `muxr` was first launched.
 ## Scrollback, search, and copy-mode
 
 Every pane keeps a bounded scrollback ring — 50,000 rows by default, or
-whatever `MUXR_SCROLLBACK` is set to when the server starts. History rows are
-trimmed to their content and stored packed — a string of characters plus
-run-length attributes, unpacked into cells only when something reads them — so
-the cost tracks what a pane actually printed rather than how wide it is, and a
-pane only pays for the rows it has really scrolled. Budget under 1 MB of
-resident memory per 1000 filled rows per pane. `s` (normal) or `C-a [`
-(passthrough) enters scrollback with vi-style navigation; the pane title gains
-`[scrollback N/M]` and the border turns orange. Search reads the packed bytes
-directly rather than unpacking, so `/` over a full 50,000-row ring lands in
-well under a tenth of a second.
+whatever `MUXR_SCROLLBACK` is set to when the server starts. A row costs
+roughly what it printed rather than the full width of the pane, and a pane
+only pays for the rows it has actually scrolled, so the default is deep enough
+to stop thinking about. `s` (normal) or `C-a [` (passthrough) enters
+scrollback with vi-style navigation; the pane title gains `[scrollback N/M]`
+and the border turns orange.
 
 Full-screen programs — pagers, editors, `fzf`, anything that asks for the
 alternate screen — draw on a grid of their own, so paging through `less` does
@@ -306,8 +302,9 @@ declines to open on such a pane.
 
 Search is smart-case (case-insensitive unless the query contains an uppercase
 letter), scans the scrollback ring and the live buffer together, and centres
-the chosen match in the viewport. Matches stay highlighted in yellow for as
-long as you are in scrollback.
+the chosen match in the viewport. A full 50,000-row ring searches in well
+under a tenth of a second. Matches stay highlighted in yellow for as long as
+you are in scrollback.
 
 ![scrollback search highlighting every match](docs/screenshots/scrollback-search.png)
 
@@ -385,7 +382,9 @@ session any more.
 
 What travels: the process, the screen, the full scrollback, the pane id, the
 working directory, and the emulator's mode state (scroll region, bracketed
-paste, cursor visibility, the current pen).
+paste, cursor visibility, the current pen). Move a pane while it is running a
+pager and both grids come with it, so quitting the pager still uncovers the
+shell that was underneath.
 
 The handover is two-phase, so a failure anywhere leaves the pane exactly where
 it was rather than dropping a live shell between two servers; an abandoned
@@ -401,6 +400,10 @@ The per-pane `Terminal` is a real VT100/xterm emulator, not a line buffer: a
 
 - **Colour and attributes.** 16-colour, 256-colour and truecolor SGR,
   including colon-subparameter and underline-colour forms.
+- **Alternate screen.** A pager, editor or `fzf` that asks for the alternate
+  screen gets a second grid to draw on, and the screen it covered is set aside
+  untouched until it exits. Nothing drawn there is history, so its frames never
+  enter the scrollback ring.
 - **Wide and combining characters.** CJK, emoji, and zero-width marks are
   measured and stored with a continuation-cell convention, so a grid row
   containing them still lines up — including search highlights and selection.
@@ -589,12 +592,13 @@ ruby -Ilib -Itest test/test_layout_manager.rb      # one file
 ruby -Ilib -Itest test/test_terminal.rb -n test_csi_cursor_position
 ```
 
-The suite is 470+ tests covering the layout algorithms (including spatial
+The suite is 500+ tests covering the layout algorithms (including spatial
 neighbour lookup), the input-handler state machine, the drawer, window pane
 ordering, session JSON round-trips, the client/server framing protocol, the
 control server and MCP bridge, pane mirroring and fd handoff, the width probe,
-the renderer's diff-emit, and the VT100 emulator's cursor movement, SGR,
-erase, scroll-region, autowrap, and snapshot round-trip behaviour.
+the renderer's diff-emit, scrollback storage, and the VT100 emulator's cursor
+movement, SGR, erase, scroll-region, autowrap, alternate-screen, and snapshot
+round-trip behaviour.
 PTY-spawning code paths are dependency-injected, so tests never spawn a shell.
 
 ### Regenerating the screenshots

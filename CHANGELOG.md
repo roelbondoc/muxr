@@ -57,9 +57,29 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   detaching onto a laptop or plugging in a monitor re-resolves on the next
   frame. The status bar names the verdict, e.g. `layout:auto:stack`.
 
+- The alternate screen buffer (DECSET 47/1047/1049, and 1048 for its cursor
+  slot). A full-screen program — a pager, an editor, `fzf` — now draws on a
+  grid of its own, and the screen it covered is set aside untouched until it
+  exits. Nothing drawn there reaches scrollback and the view offset is pinned
+  to the live screen, so there is nothing to page into; scrollback declines to
+  open on such a pane, and a pane that enters an alternate screen under a
+  reader drops them out of the mode. `Terminal#dump_ansi` leads with a repaint
+  of the covered screen, so a mirrored or moved pane carries both grids and
+  quitting the pager on the far side uncovers the same shell it uncovers at
+  home.
+- `MUXR_SCROLLBACK` sets the scrollback depth at server start, clamped to a
+  sane range.
+
 ### Changed
 - `auto` is the default layout for new windows (was `spiral`). Saved
   sessions are unaffected.
+- Scrollback holds 50,000 rows per pane by default, up from 5,000. Rows are
+  now stored packed — one string of characters plus run-length attributes,
+  trimmed to their content and materialized into cells only when read — which
+  cut a filled ring from ~330 MB of resident memory per pane to ~12 MB at
+  20,000 rows and made the deeper default affordable. Search and the transfer
+  serializer read the packed bytes directly, so `/` over a full 50,000-row
+  ring completes in tens of milliseconds.
 
 ### Fixed
 - The help overlay claimed `C-a t w g m` set layouts and `muxr --help`
@@ -71,6 +91,12 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A pane whose grid is larger than the box drawn for it is now clipped to
   the box instead of painting over its own border. Only reachable with a
   borrowed pane, whose geometry belongs to another session.
+- Paging through a full-screen program no longer destroys scrollback. Without
+  an alternate screen buffer, a pager drew straight onto the primary grid and
+  every page-down pushed a screenful of its own frames into history, evicting
+  real output at the ring's cap — twenty page-downs of `less` cost 232 rows —
+  and quitting left the program's last frame on screen instead of uncovering
+  the shell.
 - APC (`ESC _ … ST`) and DCS/SOS/PM (`ESC P`/`ESC X`/`ESC ^`) string
   sequences are now consumed by the parser. Previously neither had a
   parser state: the introducer was swallowed and the entire body printed

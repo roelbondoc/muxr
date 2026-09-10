@@ -169,4 +169,26 @@ class TestTerminalSnapshot < Minitest::Test
     assert_equal "kept history", source.dump_text.lines.first.strip
     assert_equal source.dump_text, replica.dump_text
   end
+
+  def test_dump_transfer_carries_both_grids_of_a_pane_on_the_alternate_screen
+    source = build(rows: 6, cols: 30) do |t|
+      t.feed("shell one\r\nshell two\r\nprompt$ less big\r\n")
+      t.feed("\e[?1049h\e[Hpager frame")
+    end
+    assert source.alt_screen?
+
+    state = source.dump_transfer
+    replica = Muxr::Terminal.new(rows: state["rows"], cols: state["cols"])
+    replica.restore_transfer!(state)
+
+    assert replica.alt_screen?
+    assert_equal "pager frame", replica.dump_text.lines.first.strip
+    assert_equal source.dump_text, replica.dump_text
+
+    source.feed("\e[?1049l")
+    replica.feed("\e[?1049l")
+    refute replica.alt_screen?
+    assert_equal "prompt$ less big", replica.dump_text.lines.map(&:strip).reject(&:empty?).last
+    assert_equal source.dump_text, replica.dump_text
+  end
 end
