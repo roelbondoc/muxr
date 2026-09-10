@@ -296,9 +296,9 @@ If a tool call returns `isError: true`, the text usually starts with
 - `muxr error -32602: pane: no pane with id "…"` — the pane has been
   killed, or you passed a stale id from before a kill/promote. Refetch
   `muxr_panes_list`.
-- `muxr error -32602: layout: unknown layout` — the nine valid layouts are
+- `muxr error -32602: layout: unknown layout` — the ten valid layouts are
   `tall`, `wide`, `columns`, `rows`, `grid`, `spiral`, `centered`, `stack`,
-  `monocle`. `muxr_session_get` returns the live list in
+  `monocle`, `auto`. `muxr_session_get` returns the live list in
   `available_layouts`; trust that over any list written down here.
 
 ## Naming muxr in conversation

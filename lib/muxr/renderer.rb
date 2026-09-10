@@ -101,18 +101,28 @@ module Muxr
 
     private
 
+    def content_area(session)
+      LayoutManager::Rect.new(0, 0, session.width, session.height - 1)
+    end
+
+    def layout_label(win, session)
+      return win.layout.to_s unless win.layout == :auto
+      "auto:#{LayoutManager.resolve(:auto, content_area(session))}"
+    end
+
     def compose_panes(frame, session, input_state: :normal)
       win = session.window
-      content_area = LayoutManager::Rect.new(0, 0, session.width, session.height - 1)
+      area = content_area(session)
+      layout = LayoutManager.resolve(win.layout, area)
       rects = LayoutManager.compute(
-        win.layout,
+        layout,
         win.panes.length,
-        content_area,
+        area,
         focused_index: win.focused_index,
         master_index: win.master_index
       )
 
-      monocle = win.layout == :monocle
+      monocle = layout == :monocle
 
       win.panes.each_with_index do |pane, i|
         rect = rects[i]
@@ -260,7 +270,7 @@ module Muxr
       left = " [#{mode_label(input_state)}]"
       left << " [#{session.name}]"
       left << " panes:#{win.panes.length}"
-      left << " layout:#{win.layout}"
+      left << " layout:#{layout_label(win, session)}"
       focused_label =
         if session.focus_drawer && session.drawer&.visible?
           "drawer"
@@ -404,6 +414,7 @@ module Muxr
       "  c / x           new / close pane (close asks y/n)",
       "  t / w / g / m   layout: tall / wide / grid / monocle",
       "  | - f e S       layout: columns / rows / spiral / centered / stack",
+      "  F               layout: auto (spiral on a roomy screen, else stack)",
       "  Tab / Enter     cycle layout / promote to master",
       "  a / 1..9        last pane / jump by number",
       "  r               refresh / redraw (fixes a corrupted pane)",
@@ -433,7 +444,7 @@ module Muxr
       "          q/Esc cancel   C-a n/p/a/1-9 switch pane",
       "",
       "COMMAND prompt (: to open;  Tab completes,  Esc/C-c cancels)",
-      "Commands: layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle},",
+      "Commands: layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle|auto},",
       "          drawer {toggle|show|hide|reset},",
       "          claude, save, restore, sessions, attach, quit, new, close, next, prev",
       "",

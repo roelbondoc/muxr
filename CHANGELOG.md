@@ -46,6 +46,20 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A project page at https://roelbondoc.github.io/muxr/, served from `docs/`.
   Its layout playground runs a port of `LayoutManager` in the browser, so
   pressing muxr's own layout and `hjkl` keys tiles with the real algorithm.
+  A **Screen** control switches the simulated terminal between 132×38 and
+  220×54 so `auto` can be seen changing its mind.
+- An `auto` layout (`F`, or `:layout auto`) that picks its geometry from the
+  screen it is on: `spiral` once the content area is at least 180×30,
+  `stack` below that. It is a resolver rather than a tenth geometry —
+  `LayoutManager.resolve` maps it to a real layout and `compute` resolves
+  before dispatching, so nothing downstream sees `:auto`. No new size
+  plumbing: SIGWINCH already reaches the server as a `RESIZE` frame, so
+  detaching onto a laptop or plugging in a monitor re-resolves on the next
+  frame. The status bar names the verdict, e.g. `layout:auto:stack`.
+
+### Changed
+- `auto` is the default layout for new windows (was `spiral`). Saved
+  sessions are unaffected.
 
 ### Fixed
 - The help overlay claimed `C-a t w g m` set layouts and `muxr --help`

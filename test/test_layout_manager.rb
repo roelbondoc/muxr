@@ -144,6 +144,31 @@ class TestLayoutManager < Minitest::Test
     rects = Muxr::LayoutManager.compute(:stack, 1, @area)
     assert_equal [0, 0, 80, 24], rects[0].to_a
   end
+  def test_auto_picks_stack_on_a_small_screen
+    small = Area.new(0, 0, 154, 51)
+    assert_equal :stack, Muxr::LayoutManager.resolve(:auto, small)
+    assert_equal Muxr::LayoutManager.compute(:stack, 3, small, focused_index: 1).map(&:to_a),
+                 Muxr::LayoutManager.compute(:auto, 3, small, focused_index: 1).map(&:to_a)
+  end
+
+  def test_auto_picks_spiral_on_a_large_screen
+    large = Area.new(0, 0, 240, 60)
+    assert_equal :spiral, Muxr::LayoutManager.resolve(:auto, large)
+    assert_equal Muxr::LayoutManager.compute(:spiral, 3, large).map(&:to_a),
+                 Muxr::LayoutManager.compute(:auto, 3, large, focused_index: 1).map(&:to_a)
+  end
+
+  def test_auto_needs_both_dimensions_to_be_roomy
+    assert_equal :stack,  Muxr::LayoutManager.resolve(:auto, Area.new(0, 0, 240, 29))
+    assert_equal :stack,  Muxr::LayoutManager.resolve(:auto, Area.new(0, 0, 179, 60))
+    assert_equal :spiral, Muxr::LayoutManager.resolve(:auto, Area.new(0, 0, 180, 30))
+  end
+
+  def test_resolve_leaves_explicit_layouts_alone
+    (Muxr::LayoutManager::LAYOUTS - [:auto]).each do |layout|
+      assert_equal layout, Muxr::LayoutManager.resolve(layout, @area)
+    end
+  end
 
   def test_grid_with_four_panes_two_by_two
     rects = Muxr::LayoutManager.compute(:grid, 4, @area)

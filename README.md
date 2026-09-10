@@ -32,7 +32,7 @@ protocol, the tiling maths — is stdlib Ruby with no runtime gems.
 
 |   | |
 |---|---|
-| **Nine automatic layouts** | tall, wide, columns, rows, grid, spiral, centered, stack, monocle — each a pure function of pane count and screen size |
+| **Ten automatic layouts** | tall, wide, columns, rows, grid, spiral, centered, stack, monocle, auto — each a pure function of pane count and screen size |
 | **Two input modes** | *normal* acts on the multiplexer with single keys; *passthrough* forwards everything to the shell behind the classic `Ctrl-a` prefix |
 | **Detach and reattach** | the server keeps every PTY alive; reattaching gives you back the same shells with full history |
 | **Quake-style drawer** | a persistent overlay shell that drops from the top of the screen and never loses its scrollback |
@@ -114,8 +114,9 @@ a pane simply recomputes the tiling on the next frame.
 | `centered` | `e`  | master in a centred column, the rest dealt to both sides |
 | `stack`    | `S`  | accordion — the focused pane expands, others collapse to title slivers |
 | `monocle`  | `m`  | focused pane fullscreen |
+| `auto`     | `F`  | `spiral` when the screen is at least 180×30, `stack` below that |
 
-`Tab` cycles through them in that order. New sessions start in `spiral`.
+`Tab` cycles through them in that order. New sessions start in `auto`.
 
 <table>
   <tr>
@@ -194,6 +195,7 @@ multiplexer, no prefix required.
 | `c` / `x` | new pane / close focused pane (asks `y/n`) |
 | `t` `w` `g` `m` | layout: tall / wide / grid / monocle |
 | `\|` `-` `f` `e` `S` | layout: columns / rows / spiral / centered / stack |
+| `F` | layout: auto — `spiral` on a roomy screen, `stack` below the threshold |
 | `Tab` / `Enter` | cycle layout / promote focused pane to master |
 | `a` / `1`…`9` | toggle last pane / jump to pane by number |
 | `r` | refresh — repaint the pane and nudge its program to redraw |
@@ -242,7 +244,7 @@ cancels.
 ![the command prompt completing layout names](docs/screenshots/command-prompt.png)
 
 ```
-layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle}
+layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle|auto}
                        # any unambiguous prefix works (t, w, r, g, m, …);
                        # ambiguous ones (c, s) flash the candidates.
                        # `layout` with no argument cycles.

@@ -10,7 +10,10 @@ module Muxr
       end
     end
 
-    LAYOUTS = %i[tall wide columns rows grid spiral centered stack monocle].freeze
+    LAYOUTS = %i[tall wide columns rows grid spiral centered stack monocle auto].freeze
+
+    AUTO_SPIRAL_MIN_COLS = 180
+    AUTO_SPIRAL_MIN_ROWS = 30
 
     module_function
 
@@ -18,7 +21,7 @@ module Muxr
       return [] if count <= 0
       master_index = master_index.clamp(0, count - 1)
       focused_index = focused_index.clamp(0, count - 1)
-      case layout
+      case resolve(layout, area)
       when :tall     then tall(count, area, master_index)
       when :wide     then wide(count, area, master_index)
       when :columns  then columns(count, area)
@@ -31,6 +34,15 @@ module Muxr
       else
         raise ArgumentError, "Unknown layout: #{layout.inspect}"
       end
+    end
+
+    def resolve(layout, area)
+      return layout unless layout == :auto
+      spiral_fits?(area) ? :spiral : :stack
+    end
+
+    def spiral_fits?(area)
+      area.w >= AUTO_SPIRAL_MIN_COLS && area.h >= AUTO_SPIRAL_MIN_ROWS
     end
 
     # Master pane on the left taking half the width; remaining panes stack

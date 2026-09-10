@@ -50,6 +50,7 @@ module Muxr
       "f"  => [:set_layout, :spiral],
       "e"  => [:set_layout, :centered],
       "S"  => [:set_layout, :stack],
+      "F"  => [:set_layout, :auto],
       "\t" => :cycle_layout,
       "\r" => :promote_master,
       "\n" => :promote_master,

@@ -22,12 +22,20 @@ class TestRenderer < Minitest::Test
     end
   end
 
-  def build_session(layout:, focused_index:, pane_labels: %w[AAA BBB CCC])
-    session = Muxr::Session.new(name: "spec", width: 40, height: 12)
+  def build_session(layout:, focused_index:, pane_labels: %w[AAA BBB CCC], width: 40, height: 12)
+    session = Muxr::Session.new(name: "spec", width: width, height: height)
     pane_labels.each { |l| session.window.add_pane(FakePane.new(label: l)) }
     session.window.set_layout(layout)
     session.window.focused_index = focused_index
     session
+  end
+
+  def test_status_bar_names_the_layout_auto_resolved_to
+    small = build_session(layout: :auto, focused_index: 0, width: 100, height: 20)
+    assert_includes render(small), "layout:auto:stack"
+
+    roomy = build_session(layout: :auto, focused_index: 0, width: 200, height: 40)
+    assert_includes render(roomy), "layout:auto:spiral"
   end
 
   def render(session)

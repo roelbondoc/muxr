@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>muxr — a tiling terminal multiplexer in pure Ruby</title>
-<meta name="description" content="muxr is a keyboard-driven terminal multiplexer written in pure Ruby: nine automatic tiling layouts, a Quake-style drawer, detachable sessions, live panes shared between sessions, and a control socket built for coding agents.">
+<meta name="description" content="muxr is a keyboard-driven terminal multiplexer written in pure Ruby: ten automatic tiling layouts, a Quake-style drawer, detachable sessions, live panes shared between sessions, and a control socket built for coding agents.">
 <meta property="og:title" content="muxr — a tiling terminal multiplexer in pure Ruby">
-<meta property="og:description" content="Nine automatic tiling layouts, a Quake-style drawer, detachable sessions, panes shared across sessions, and a control socket built for coding agents. Zero runtime dependencies.">
+<meta property="og:description" content="Ten automatic tiling layouts, a Quake-style drawer, detachable sessions, panes shared across sessions, and a control socket built for coding agents. Zero runtime dependencies.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://roelbondoc.github.io/muxr/">
 <meta property="og:image" content="https://roelbondoc.github.io/muxr/screenshots/hero.png">
@@ -325,6 +325,8 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
   overflow: hidden;
 }
 #stage:focus-visible { outline: 2px solid var(--term-accent); outline-offset: 2px; }
+#stage-box { transition: max-width 220ms cubic-bezier(0.3, 0.8, 0.3, 1); }
+@media (prefers-reduced-motion: reduce) { #stage-box { transition: none; } }
 
 .pane {
   position: absolute;
@@ -575,7 +577,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
       </div>
 
       <dl class="hero-facts">
-        <div><dt>layouts</dt><dd>9, automatic</dd></div>
+        <div><dt>layouts</dt><dd>10, automatic</dd></div>
         <div><dt>runtime deps</dt><dd>none</dd></div>
         <div><dt>ruby</dt><dd>≥ 3.4</dd></div>
         <div><dt>emulator</dt><dd>VT100, written here</dd></div>
@@ -589,7 +591,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
 
 <section id="layouts">
   <div class="shell">
-    <p class="eyebrow"><span class="key">t w | - g f e S m</span> nine layouts</p>
+    <p class="eyebrow"><span class="key">t w | - g f e S m F</span> ten layouts</p>
 
     <div class="split" style="align-items:end; margin-bottom:2.2rem;">
       <div>
@@ -605,7 +607,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
     </div>
 
     <div class="play">
-      <div>
+      <div id="stage-box">
         <div id="stage" tabindex="0" role="application" aria-label="Interactive muxr layout playground"></div>
         <div class="statusline">
           <span><span class="chip">[NORMAL]</span> <span id="sl-left"></span></span>
@@ -622,10 +624,19 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           <h3>Panes &amp; focus</h3>
           <div class="keys" id="action-keys"></div>
         </div>
+        <div>
+          <h3>Screen</h3>
+          <div class="keys" id="screen-keys"></div>
+        </div>
         <p class="hint">
           Click a key, or just type it — this page listens for the same
           bindings muxr does. <kbd>h</kbd><kbd>j</kbd><kbd>k</kbd><kbd>l</kbd>
           moves focus spatially, exactly as muxr's neighbour lookup does.
+        </p>
+        <p class="hint">
+          <b>Screen</b> resizes the simulated terminal. <kbd>F</kbd> —
+          <code>auto</code>, the layout new sessions start in — is the one that
+          reads it: <code>spiral</code> from 180×30 up, <code>stack</code> below.
         </p>
       </div>
     </div>
@@ -693,6 +704,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           <tr><td><kbd>c</kbd> <kbd>x</kbd></td><td>new pane / close pane (asks <code>y/n</code>)</td></tr>
           <tr><td><kbd>t</kbd><kbd>w</kbd><kbd>g</kbd><kbd>m</kbd></td><td>tall / wide / grid / monocle</td></tr>
           <tr><td><kbd>|</kbd><kbd>-</kbd><kbd>f</kbd><kbd>e</kbd><kbd>S</kbd></td><td>columns / rows / spiral / centered / stack</td></tr>
+          <tr><td><kbd>F</kbd></td><td>auto — <code>spiral</code> on a roomy screen, <code>stack</code> below it (the default)</td></tr>
           <tr><td><kbd>Tab</kbd> <kbd>Enter</kbd></td><td>cycle layout / promote to master</td></tr>
           <tr><td><kbd>a</kbd> <kbd>1</kbd>…<kbd>9</kbd></td><td>last pane / jump by number</td></tr>
           <tr><td><kbd>s</kbd> <kbd>]</kbd></td><td>scrollback / paste the yank buffer</td></tr>
@@ -734,7 +746,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <figure>
           <div class="term">
             <div class="term-bar"><b>:</b><span class="rule"></span><span>command prompt</span></div>
-            <img src="screenshots/command-prompt.png" alt="muxr's command prompt completing the layout argument with the nine layout names" loading="lazy" width="1200" height="760">
+            <img src="screenshots/command-prompt.png" alt="muxr's command prompt completing the layout argument with the ten layout names" loading="lazy" width="1200" height="760">
           </div>
         </figure>
         <div class="prose">
@@ -1038,7 +1050,7 @@ drawer.read / send_input    session.save
 
 <section id="install" class="closer">
   <div class="shell">
-    <h2>Nine layouts. Zero dependencies.</h2>
+    <h2>Ten layouts. Zero dependencies.</h2>
     <p class="lede" style="margin-inline:auto;">
       Ruby ≥ 3.4 and nothing else. The first <code>muxr</code> in a directory starts a
       server named after it; every one after that attaches.
@@ -1067,7 +1079,7 @@ drawer.read / send_input    session.save
 <nav class="sitebar" aria-label="Sections">
   <div class="shell">
     <span class="mode">[NORMAL]</span>
-    <a href="#layouts"><span class="k">layout:</span>nine</a>
+    <a href="#layouts"><span class="k">layout:</span>ten</a>
     <a href="#keys"><span class="k">keys:</span>two&nbsp;modes</a>
     <a href="#scrollback" class="hide-sm"><span class="k">scrollback:</span>5000</a>
     <a href="#sessions"><span class="k">panes:</span>shared</a>
@@ -1082,7 +1094,8 @@ drawer.read / send_input    session.save
 /* Port of lib/muxr/layout_manager.rb — keep the arithmetic in step with it. */
 const R = (x, y, w, h) => ({ x, y, w, h });
 const idiv = (a, b) => Math.floor(a / b);
-const LAYOUTS = ["tall", "wide", "columns", "rows", "grid", "spiral", "centered", "stack", "monocle"];
+const LAYOUTS = ["tall", "wide", "columns", "rows", "grid", "spiral", "centered", "stack", "monocle", "auto"];
+const AUTO_SPIRAL_MIN_COLS = 180, AUTO_SPIRAL_MIN_ROWS = 30;
 
 function tall(count, a, master) {
   if (count === 1) return [R(a.x, a.y, a.w, a.h)];
@@ -1231,9 +1244,14 @@ function grid(count, a) {
   return out;
 }
 
+function resolve(layout, area) {
+  if (layout !== "auto") return layout;
+  return area.w >= AUTO_SPIRAL_MIN_COLS && area.h >= AUTO_SPIRAL_MIN_ROWS ? "spiral" : "stack";
+}
+
 function compute(layout, count, area, focused, master) {
   if (count <= 0) return [];
-  switch (layout) {
+  switch (resolve(layout, area)) {
     case "tall": return tall(count, area, master);
     case "wide": return wide(count, area, master);
     case "columns": return columns(count, area);
@@ -1289,8 +1307,11 @@ function cmp(a, b) {
   return 0;
 }
 
-const COLS = 132, ROWS = 38;
-const AREA = R(0, 0, COLS, ROWS);
+const SCREENS = [
+  { key: "laptop",  label: "132×38", cols: 132, rows: 38 },
+  { key: "desktop", label: "220×54", cols: 220, rows: 54 }
+];
+const WIDEST = Math.max(...SCREENS.map((s) => s.cols));
 const SAMPLES = [
   ["$ rake test", "474 runs, 0 failures"],
   ["$ git log --oneline", "61df55c Move a pane"],
@@ -1303,24 +1324,35 @@ const SAMPLES = [
   ["$ npm run dev", "ready on :3000"]
 ];
 
-const state = { layout: "tall", count: 5, focused: 0, master: 0, ids: [] };
+const state = {
+  layout: "tall", count: 5, focused: 0, master: 0, ids: [],
+  screen: SCREENS.find((s) => s.key === "desktop")
+};
 const rand = () => Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
 while (state.ids.length < 9) state.ids.push(rand());
 
 const stage = document.getElementById("stage");
+const stageBox = document.getElementById("stage-box");
 const slLeft = document.getElementById("sl-left");
 
+const screenArea = () => R(0, 0, state.screen.cols, state.screen.rows);
+const layoutLabel = () =>
+  state.layout === "auto" ? "auto:" + resolve("auto", screenArea()) : state.layout;
+
 function render() {
-  const rects = compute(state.layout, state.count, AREA, state.focused, state.master);
+  const { cols, rows } = state.screen;
+  const rects = compute(state.layout, state.count, screenArea(), state.focused, state.master);
+  stageBox.style.maxWidth = (cols / WIDEST) * 100 + "%";
+  stage.style.aspectRatio = cols + " / " + rows * 2;
   stage.replaceChildren();
   rects.forEach((r, i) => {
     if (!r) return;
     const el = document.createElement("div");
     el.className = "pane" + (i === state.focused ? " focused" : "");
-    el.style.left = (r.x / COLS) * 100 + "%";
-    el.style.top = (r.y / ROWS) * 100 + "%";
-    el.style.width = (r.w / COLS) * 100 + "%";
-    el.style.height = (r.h / ROWS) * 100 + "%";
+    el.style.left = (r.x / cols) * 100 + "%";
+    el.style.top = (r.y / rows) * 100 + "%";
+    el.style.width = (r.w / cols) * 100 + "%";
+    el.style.height = (r.h / rows) * 100 + "%";
     el.style.zIndex = state.layout === "monocle" && i === state.focused ? 2 : 1;
 
     const title = document.createElement("div");
@@ -1345,12 +1377,15 @@ function render() {
 
   slLeft.textContent =
     "[playground] panes:" + state.count +
-    " layout:" + state.layout +
+    " layout:" + layoutLabel() +
     " focused:#" + (state.focused + 1) +
     " drawer:hidden";
 
   document.querySelectorAll("#layout-keys button").forEach((b) => {
     b.setAttribute("aria-pressed", String(b.dataset.layout === state.layout));
+  });
+  document.querySelectorAll("#screen-keys button").forEach((b) => {
+    b.setAttribute("aria-pressed", String(b.dataset.screen === state.screen.key));
   });
 }
 
@@ -1360,22 +1395,36 @@ const BLURB = {
   columns:  "equal-width, full-height strips. No master, no hierarchy.",
   rows:     "equal-height, full-width strips — the dual of columns.",
   grid:     "a roughly square tiling; every row stretches to fill the width.",
-  spiral:   "a Fibonacci wind-in, each pane half the last. muxr's default.",
+  spiral:   "a Fibonacci wind-in, each pane half the last.",
   centered: "master in a centre column, the rest dealt alternately to both sides.",
   stack:    "an accordion — the focused pane expands, the others collapse to title slivers.",
-  monocle:  "the focused pane, fullscreen. The rest are still there, and hjkl still reaches them."
+  monocle:  "the focused pane, fullscreen. The rest are still there, and hjkl still reaches them.",
+  auto:     "spiral once the screen is 180×30 or bigger, stack below that. muxr's default, and the only layout that reads the screen size instead of just filling it."
 };
 
 const shotImg = document.getElementById("shot-img");
 const shotName = document.getElementById("shot-name");
 const shotCaption = document.getElementById("shot-caption");
 
+function refreshShot() {
+  const name = state.layout;
+  const shown = resolve(name, screenArea());
+  shotImg.src = "screenshots/layout-" + shown + ".png";
+  shotImg.alt = "muxr running five panes in the " + shown + " layout";
+  shotName.textContent = name === "auto" ? "auto → " + shown : name;
+  shotCaption.innerHTML = "<b>" + name + "</b> — " + BLURB[name] +
+    (name === "auto" ? " On a " + state.screen.label + " screen, that is <b>" + shown + "</b>." : "");
+}
+
 function setLayout(name) {
   state.layout = name;
-  shotImg.src = "screenshots/layout-" + name + ".png";
-  shotImg.alt = "muxr running five panes in the " + name + " layout";
-  shotName.textContent = name;
-  shotCaption.innerHTML = "<b>" + name + "</b> — " + BLURB[name];
+  refreshShot();
+  render();
+}
+
+function setScreen(size) {
+  state.screen = size;
+  refreshShot();
   render();
 }
 
@@ -1397,7 +1446,7 @@ function closePane() {
 function promote() { state.master = state.focused; render(); }
 
 function move(dir) {
-  const rects = compute(state.layout, state.count, AREA, state.focused, state.master);
+  const rects = compute(state.layout, state.count, screenArea(), state.focused, state.master);
   const n = neighbor(rects, state.focused, dir);
   if (n !== null) { state.focused = n; }
   else if (state.layout === "monocle") {
@@ -1408,7 +1457,7 @@ function move(dir) {
 
 const LAYOUT_KEYS = {
   t: "tall", w: "wide", "|": "columns", "-": "rows",
-  g: "grid", f: "spiral", e: "centered", S: "stack", m: "monocle"
+  g: "grid", f: "spiral", e: "centered", S: "stack", m: "monocle", F: "auto"
 };
 
 const layoutKeyRow = document.getElementById("layout-keys");
@@ -1422,6 +1471,19 @@ Object.entries(LAYOUT_KEYS).forEach(([key, name]) => {
   b.setAttribute("aria-label", name + " layout");
   b.addEventListener("click", () => { setLayout(name); stage.focus(); });
   layoutKeyRow.append(b);
+});
+
+const screenKeyRow = document.getElementById("screen-keys");
+SCREENS.forEach((size) => {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "keycap";
+  b.textContent = size.label;
+  b.dataset.screen = size.key;
+  b.title = size.cols + " columns by " + size.rows + " rows";
+  b.setAttribute("aria-label", "simulate a " + size.cols + " by " + size.rows + " terminal");
+  b.addEventListener("click", () => { setScreen(size); stage.focus(); });
+  screenKeyRow.append(b);
 });
 
 const ACTIONS = [
@@ -1472,7 +1534,7 @@ document.addEventListener("keydown", (e) => {
 render();
 
 function preloadRemainingLayoutStills() {
-  LAYOUTS.filter((n) => n !== state.layout).forEach((n) => {
+  LAYOUTS.filter((n) => n !== "auto" && n !== state.layout).forEach((n) => {
     const img = new Image();
     img.src = "screenshots/layout-" + n + ".png";
   });
