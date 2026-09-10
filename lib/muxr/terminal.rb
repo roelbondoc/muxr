@@ -12,7 +12,7 @@ module Muxr
     REVERSE   = 4
     DIM       = 8
 
-    SCROLLBACK_DEFAULT = 5000
+    SCROLLBACK_DEFAULT = 10_000
     SCROLLBACK_BOUNDS = 100..500_000
 
     ALT_SCREEN_MODES = [47, 1047, 1049].freeze
@@ -216,9 +216,14 @@ module Muxr
     # program (which left ?2026h open) cannot wedge the pane indefinitely.
     SYNC_TIMEOUT = 0.2
 
+    BLANK_CHAR = " ".freeze
+    EMPTY_ROW = [].freeze
+    CONTINUATION_CHAR = "".freeze
+    ASCII_CHARS = (0...128).map { |cp| cp.chr.freeze }.freeze
+
     Cell = Struct.new(:char, :fg, :bg, :attrs, :hyperlink) do
       def reset!
-        self.char = " "
+        self.char = BLANK_CHAR
         self.fg = nil
         self.bg = nil
         self.attrs = 0
@@ -457,7 +462,7 @@ module Muxr
       @scrollback = lines.last(self.class.scrollback_max).map do |line|
         scratch.feed("\e[0m\e[H\e[2K")
         scratch.feed(line.to_s)
-        Array.new(@cols) { |c| scratch.cell(0, c).dup }
+        trim_row(Array.new(@cols) { |c| scratch.cell(0, c).dup })
       end
       @view_offset = 0
     end
@@ -1054,7 +1059,7 @@ module Muxr
     private
 
     def blank_cell
-      Cell.new(" ", nil, nil, 0, nil)
+      Cell.new(BLANK_CHAR, nil, nil, 0, nil)
     end
 
     # Queue bytes for the outer terminal (bell / notification OSC). Dropped once
@@ -1574,11 +1579,16 @@ module Muxr
     end
 
     def write_cell(cell, ch)
-      cell.char = ch
+      cell.char = intern_char(ch)
       cell.fg = @fg
       cell.bg = @bg
       cell.attrs = @attrs
       cell.hyperlink = @current_hyperlink
+    end
+
+    def intern_char(ch)
+      return CONTINUATION_CHAR if ch.empty?
+      ch.bytesize == 1 ? ASCII_CHARS[ch.getbyte(0)] : ch
     end
 
     # Fold a zero-width mark (combining accent, variation selector, …) onto the
@@ -1629,12 +1639,25 @@ module Muxr
       grid
     end
 
+    def trim_row(row)
+      last = last_significant_column(row)
+      return EMPTY_ROW if last.nil?
+      last += 1 if row[last + 1] && wide_lead?(row[last])
+      return row if last >= row.length - 1
+      row[0, last + 1]
+    end
+
+    def wide_lead?(cell)
+      ch = cell.char
+      !ch.empty? && self.class.char_width(ch.ord) == 2
+    end
+
     def history_scrolls?
       @saved_primary.nil? && @scroll_top.zero? && @scroll_bottom == @rows - 1
     end
 
     def push_scrollback(row)
-      @scrollback << row
+      @scrollback << trim_row(row)
       if @scrollback.size > self.class.scrollback_max
         @scrollback.shift
         # Selection coordinates are timeline-indexed; an eviction shifts the

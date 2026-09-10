@@ -1247,4 +1247,55 @@ class TestTerminal < Minitest::Test
   ensure
     Muxr::Terminal.scrollback_max = original
   end
+
+  def test_history_rows_are_trimmed_to_their_content
+    t = Muxr::Terminal.new(rows: 2, cols: 80)
+    t.feed("hi\r\n\r\n\r\n")
+    sb = t.instance_variable_get(:@scrollback)
+    assert_equal 2, sb[0].length
+    assert_empty sb[1]
+  end
+
+  # A space carrying a background colour is content, not padding, so trimming
+  # must not eat a coloured run that reaches the end of the line.
+  def test_trimming_keeps_a_trailing_coloured_run
+    t = Muxr::Terminal.new(rows: 2, cols: 10)
+    t.feed("\e[41m" + (" " * 10) + "\e[0m\r\n\r\n")
+    sb = t.instance_variable_get(:@scrollback)
+    assert_equal 10, sb[0].length
+    assert_equal 1, sb[0][9].bg
+  end
+
+  def test_a_trimmed_row_reads_as_blank_past_its_content
+    t = Muxr::Terminal.new(rows: 2, cols: 20)
+    t.feed("ab\r\nlive")
+    t.scroll_back(1)
+    assert_equal "ab", (0...20).map { |c| t.visible_cell(0, c).char }.join.rstrip
+    assert_equal " ", t.visible_cell(0, 19).char
+  end
+
+  def test_trimmed_history_still_searches_and_selects
+    t = Muxr::Terminal.new(rows: 2, cols: 40)
+    t.feed("needle here\r\nsecond line\r\nlive")
+    assert_equal 1, t.search("needle")
+
+    t.scroll_back(2)
+    t.start_selection_at_visible(0, 0)
+    t.move_selection_cursor_by(0, 10)
+    assert_equal "needle here", t.extract_selection_text
+  end
+
+  def test_ascii_cells_share_one_interned_string
+    t = Muxr::Terminal.new(rows: 2, cols: 8)
+    t.feed("aa")
+    assert_same t.cell(0, 0).char, t.cell(0, 1).char
+    assert t.cell(0, 0).char.frozen?
+  end
+
+  def test_wide_glyphs_survive_interning_and_trimming
+    t = Muxr::Terminal.new(rows: 2, cols: 10)
+    t.feed("\u4f60\u597d\r\nlive\r\n")
+    sb = t.instance_variable_get(:@scrollback)
+    assert_equal ["\u4f60", "", "\u597d", ""], sb[0].map(&:char)
+  end
 end
