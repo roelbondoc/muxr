@@ -118,4 +118,74 @@ class TestHistoryRow < Minitest::Test
     refute_nil sb.last.instance_variable_get(:@cells)
     assert_equal "line0", sb.first.map(&:char).join
   end
+
+  NASTY = [
+    "plain ascii text",
+    "\e[31mred\e[38;5;208m256\e[38;2;1;2;3mtrue\e[46mbg\e[0m tail",
+    "\e[1m\e[4mbold under\e[0m plain",
+    "wide \u4f60\u597d then ascii",
+    "\u4f60\u597d",
+    "combining e\u0301 and e\u0301\u0302 here",
+    "box \u2500\u2500\u2500\u2502\u2588 drawing",
+    "\e]8;;https://example.com/x\e\\linked\e]8;;\e\\ after",
+    "\e[42mbg run to the end",
+    "trailing spaces     ",
+    "\e[41m\u4f60\u597d\e[0m coloured wide"
+  ].freeze
+
+  def history_row_for(t, payload)
+    t.feed(payload)
+    t.feed("\r\n\r\n")
+    t.instance_variable_get(:@scrollback).first
+  end
+
+  # The no-materialize fast paths exist only for speed, so the contract is that
+  # they agree with the Cell-based implementations exactly.
+  def test_to_ansi_agrees_with_the_materializing_emitter
+    NASTY.each do |payload|
+      t = Muxr::Terminal.new(rows: 2, cols: 40)
+      row = history_row_for(t, payload)
+      cells = row.length.times.map { |c| row[c] }
+      last = t.send(:last_significant_column, cells)
+      expected = +""
+      unless last.nil?
+        _sgr, link = t.send(:emit_row, expected, cells, last, nil, nil)
+        expected << "\e]8;;\e\\" if link
+      end
+      row.release!
+      assert_equal expected, row.to_ansi, "to_ansi differs for #{payload.inspect}"
+    end
+  end
+
+  def test_search_text_agrees_with_the_materializing_walk
+    NASTY.each do |payload|
+      t = Muxr::Terminal.new(rows: 2, cols: 40)
+      row = history_row_for(t, payload)
+      cells = row.length.times.map { |c| row[c] }
+      expected_line, expected_map = t.send(:row_search_text, cells)
+      row.release!
+      line, map = row.search_text(40)
+      assert_equal expected_line, line, "line differs for #{payload.inspect}"
+      assert_equal expected_map, map || (0...40).to_a,
+                   "column map differs for #{payload.inspect}"
+    end
+  end
+
+  def test_search_text_pads_and_truncates_to_the_pane_width
+    t = Muxr::Terminal.new(rows: 2, cols: 40)
+    row = history_row_for(t, "abc")
+    line, map = row.search_text(6)
+    assert_equal "abc   ", line
+    assert_nil map
+    assert_equal "ab", row.search_text(2).first
+  end
+
+  def test_a_packed_row_searches_without_materializing
+    t = Muxr::Terminal.new(rows: 2, cols: 40)
+    row = history_row_for(t, "findme here")
+    row.release!
+    row.search_text(40)
+    row.to_ansi
+    assert_nil row.instance_variable_get(:@cells)
+  end
 end

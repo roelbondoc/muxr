@@ -274,7 +274,7 @@ in the session's origin directory — wherever `muxr` was first launched.
 
 ## Scrollback, search, and copy-mode
 
-Every pane keeps a bounded scrollback ring — 10,000 rows by default, or
+Every pane keeps a bounded scrollback ring — 50,000 rows by default, or
 whatever `MUXR_SCROLLBACK` is set to when the server starts. History rows are
 trimmed to their content and stored packed — a string of characters plus
 run-length attributes, unpacked into cells only when something reads them — so
@@ -282,7 +282,9 @@ the cost tracks what a pane actually printed rather than how wide it is, and a
 pane only pays for the rows it has really scrolled. Budget under 1 MB of
 resident memory per 1000 filled rows per pane. `s` (normal) or `C-a [`
 (passthrough) enters scrollback with vi-style navigation; the pane title gains
-`[scrollback N/M]` and the border turns orange.
+`[scrollback N/M]` and the border turns orange. Search reads the packed bytes
+directly rather than unpacking, so `/` over a full 50,000-row ring lands in
+well under a tenth of a second.
 
 Full-screen programs — pagers, editors, `fzf`, anything that asks for the
 alternate screen — draw on a grid of their own, so paging through `less` does

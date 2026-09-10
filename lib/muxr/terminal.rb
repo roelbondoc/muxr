@@ -13,7 +13,7 @@ module Muxr
     REVERSE   = 4
     DIM       = 8
 
-    SCROLLBACK_DEFAULT = 10_000
+    SCROLLBACK_DEFAULT = 50_000
     SCROLLBACK_BOUNDS = 100..500_000
 
     ALT_SCREEN_MODES = [47, 1047, 1049].freeze
@@ -473,6 +473,7 @@ module Muxr
     end
 
     def row_ansi(row)
+      return row.to_ansi if row.is_a?(HistoryRow)
       last = last_significant_column(row)
       return "" if last.nil?
       out = +""
@@ -551,14 +552,18 @@ module Muxr
     # Shared with the Renderer's diff-emit so a snapshot and an incremental
     # frame describe the same cell identically.
     def self.sgr(cell)
+      sgr_for(cell.fg, cell.bg, cell.attrs)
+    end
+
+    def self.sgr_for(fg, bg, attrs)
+      attrs = attrs.to_i
       parts = ["0"]
-      attrs = cell.attrs.to_i
       parts << "1" if (attrs & BOLD) != 0
       parts << "2" if (attrs & DIM) != 0
       parts << "4" if (attrs & UNDERLINE) != 0
       parts << "7" if (attrs & REVERSE) != 0
-      append_color(parts, cell.fg, true)
-      append_color(parts, cell.bg, false)
+      append_color(parts, fg, true)
+      append_color(parts, bg, false)
       "\e[#{parts.join(';')}m"
     end
 
@@ -1771,6 +1776,20 @@ module Muxr
       end
     end
 
+    def row_search_text(row)
+      return row.search_text(@cols) if row.is_a?(HistoryRow)
+      line = String.new(capacity: @cols)
+      col_at = []
+      @cols.times do |c|
+        ch = row[c]&.char
+        next if ch == ""
+        ch = BLANK_CHAR if ch.nil?
+        ch.each_char { col_at << c }
+        line << ch
+      end
+      [line, col_at]
+    end
+
     def collect_matches(query)
       case_sensitive = query.match?(/[A-Z]/)
       needle = case_sensitive ? query : query.downcase
@@ -1778,25 +1797,13 @@ module Muxr
       timeline_size.times do |tr|
         row = timeline_row(tr)
         next if row.nil?
-        # Build the row text and a parallel codepoint→column map so matches can
-        # be reported in column coordinates even when wide glyphs (one cell, two
-        # columns) and combining marks (multi-codepoint, one cell) break the
-        # 1:1 char-index↔column relationship. For all-ASCII rows col_at[i] == i,
-        # so this is identical to the old behavior on the common path.
-        line = String.new(capacity: @cols)
-        col_at = []
-        @cols.times do |c|
-          ch = row[c]&.char
-          next if ch == "" # wide continuation half — occupies no text slot
-          ch = " " if ch.nil?
-          ch.each_char { col_at << c }
-          line << ch
-        end
+        line, col_at = row_search_text(row)
         haystack = case_sensitive ? line : line.downcase
         start = 0
         while (idx = haystack.index(needle, start))
           last = idx + needle.length - 1
-          matches << [tr, col_at[idx], col_at[last] || col_at.last || idx]
+          matches << [tr, col_at ? col_at[idx] : idx,
+                      col_at ? (col_at[last] || col_at.last || idx) : last]
           # Advance past the start of this match so overlapping needles
           # ("aa" in "aaaa") still emit one match per starting position.
           start = idx + 1
