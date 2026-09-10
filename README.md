@@ -274,9 +274,16 @@ in the session's origin directory — wherever `muxr` was first launched.
 
 ## Scrollback, search, and copy-mode
 
-Every pane keeps a bounded 5000-row scrollback ring. `s` (normal) or `C-a [`
+Every pane keeps a bounded scrollback ring — 5000 rows by default, or whatever
+`MUXR_SCROLLBACK` is set to when the server starts. `s` (normal) or `C-a [`
 (passthrough) enters scrollback with vi-style navigation; the pane title gains
 `[scrollback N/M]` and the border turns orange.
+
+Full-screen programs — pagers, editors, `fzf`, anything that asks for the
+alternate screen — draw on a grid of their own, so paging through `less` does
+not shovel its frames into your history, and quitting uncovers the screen you
+started from. There is nothing to page through while one is up, so scrollback
+declines to open on such a pane.
 
 | Keys | Action |
 |------|--------|

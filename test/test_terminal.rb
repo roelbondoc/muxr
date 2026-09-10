@@ -243,7 +243,7 @@ class TestTerminal < Minitest::Test
   end
 
   def test_scrollback_evicts_oldest_at_cap
-    cap = Muxr::Terminal::SCROLLBACK_MAX
+    cap = Muxr::Terminal.scrollback_max
     t = Muxr::Terminal.new(rows: 2, cols: 3)
     # cap+5 lines worth of scrollback pushes — oldest fall off, newest stays.
     lines = Array.new(cap + 5) { |i| format("%03d", i % 1000) }
@@ -1134,5 +1134,117 @@ class TestTerminal < Minitest::Test
     assert_equal 2, Muxr::Terminal.char_width("\u2588".ord)
   ensure
     Muxr::Terminal.box_wide = false
+  end
+
+  # The reason the alternate screen exists here at all: a pager's frames used
+  # to land in scrollback and evict real history one screenful per page-down.
+  def test_alternate_screen_scrolling_does_not_reach_scrollback
+    t = Muxr::Terminal.new(rows: 4, cols: 8)
+    1.upto(20) { |i| t.feed("hist #{i}\r\n") }
+    before = t.scrollback_size
+
+    t.feed("\e[?1049h")
+    1.upto(50) { |i| t.feed("page #{i}\r\n") }
+
+    assert t.alt_screen?
+    assert_equal before, t.scrollback_size
+  end
+
+  def test_leaving_the_alternate_screen_uncovers_the_primary_screen
+    t = Muxr::Terminal.new(rows: 3, cols: 8)
+    t.feed("a\r\nb\r\nc")
+    t.feed("\e[?1049h\e[Hpager")
+    assert_equal "pager", t.dump_text.lines.first.strip
+
+    t.feed("\e[?1049l")
+    refute t.alt_screen?
+    assert_equal %w[a b c], t.dump_text.lines.map(&:strip)
+  end
+
+  def test_1049_restores_the_cursor_it_saved
+    t = Muxr::Terminal.new(rows: 4, cols: 8)
+    t.feed("\e[3;5H\e[?1049h")
+    t.feed("\e[1;1Hx\e[?1049l")
+    assert_equal [2, 4], [t.cursor_row, t.cursor_col]
+  end
+
+  def test_the_alternate_screen_has_its_own_cursor_save_slot
+    t = Muxr::Terminal.new(rows: 4, cols: 8)
+    t.feed("\e[3;5H\e[?1049h")
+    # A DECSC/DECRC pair inside the pager must not clobber what 1049h saved.
+    t.feed("\e[1;2H\e7\e[4;8H\e8")
+    t.feed("\e[?1049l")
+    assert_equal [2, 4], [t.cursor_row, t.cursor_col]
+  end
+
+  def test_scrollback_view_is_pinned_while_on_the_alternate_screen
+    t = Muxr::Terminal.new(rows: 3, cols: 8)
+    1.upto(20) { |i| t.feed("hist #{i}\r\n") }
+    t.feed("\e[?1049h")
+
+    t.scroll_back(10)
+    assert_equal 0, t.view_offset
+    refute t.scrolled_back?
+  end
+
+  def test_entering_the_alternate_screen_drops_a_scrolled_back_view
+    t = Muxr::Terminal.new(rows: 3, cols: 8)
+    1.upto(20) { |i| t.feed("hist #{i}\r\n") }
+    t.scroll_back(5)
+    assert_equal 5, t.view_offset
+
+    t.feed("\e[?1049h")
+    assert_equal 0, t.view_offset
+  end
+
+  def test_resizing_on_the_alternate_screen_reshapes_the_covered_screen
+    t = Muxr::Terminal.new(rows: 4, cols: 8)
+    t.feed("one\r\ntwo\r\nthree\r\nfour")
+    t.feed("\e[?1049h")
+    t.resize(2, 8)
+    t.feed("\e[?1049l")
+
+    assert_equal 2, t.rows
+    # Shrinking keeps the bottom rows; the ones falling off go to history.
+    assert_equal %w[three four], t.dump_text.lines.map(&:strip)
+    t.scroll_back(2)
+    assert_equal %w[one two], t.dump_text.lines.map(&:strip)
+  end
+
+  # A shrink still pushes the rows it drops off the primary screen into
+  # history — but never the pager's, which were never history to begin with.
+  def test_a_shrink_only_takes_history_from_the_covered_screen
+    t = Muxr::Terminal.new(rows: 4, cols: 8)
+    t.feed("one\r\ntwo\r\nthree\r\nfour")
+    t.feed("\e[?1049h\e[Hp1\r\np2\r\np3\r\np4")
+    t.resize(2, 8)
+    t.feed("\e[?1049l")
+
+    assert_equal 2, t.scrollback_size
+    t.scroll_to_top
+    assert_equal %w[one two], t.dump_text.lines.map(&:strip)
+  end
+
+  def test_reset_drops_the_alternate_screen
+    t = Muxr::Terminal.new(rows: 3, cols: 8)
+    t.feed("\e[?1049hpager\ec")
+    refute t.alt_screen?
+  end
+
+  def test_1048_saves_and_restores_the_cursor_without_switching_screens
+    t = Muxr::Terminal.new(rows: 4, cols: 8)
+    t.feed("\e[2;3H\e[?1048h\e[4;7H\e[?1048l")
+    refute t.alt_screen?
+    assert_equal [1, 2], [t.cursor_row, t.cursor_col]
+  end
+
+  def test_scrollback_max_falls_back_to_the_default_on_junk
+    original = Muxr::Terminal.scrollback_max
+    Muxr::Terminal.scrollback_max = "not-a-number"
+    assert_equal Muxr::Terminal::SCROLLBACK_DEFAULT, Muxr::Terminal.scrollback_max
+    Muxr::Terminal.scrollback_max = 250
+    assert_equal 250, Muxr::Terminal.scrollback_max
+  ensure
+    Muxr::Terminal.scrollback_max = original
   end
 end

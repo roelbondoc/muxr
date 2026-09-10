@@ -611,6 +611,10 @@ module Muxr
     def enter_scrollback
       target = focused_target
       return unless target
+      if target.terminal.alt_screen?
+        flash("no history while a full-screen app is running")
+        return
+      end
       @input.enter_scrollback_mode
       @renderer.reset_frame!
       invalidate
@@ -1223,6 +1227,7 @@ module Muxr
     end
 
     def render
+      leave_stale_scrollback
       @renderer.render(
         @session,
         input_state: @input.state,
@@ -1234,6 +1239,13 @@ module Muxr
         help: @help_visible,
         picker: @pane_picker
       )
+    end
+
+    def leave_stale_scrollback
+      return unless @input.state == :scrollback
+      return unless focused_target&.terminal&.alt_screen?
+      @input.enter_idle_mode
+      @renderer.reset_frame!
     end
 
     def disconnect_client(reason: nil)

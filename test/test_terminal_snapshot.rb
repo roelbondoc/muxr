@@ -155,4 +155,18 @@ class TestTerminalSnapshot < Minitest::Test
     refute replica.scrolled_back?
     assert_includes replica.dump_text, "line11"
   end
+
+  def test_an_alternate_screen_round_trips_on_its_own
+    assert_round_trips(build { |t| t.feed("shell\r\n\e[?1049hpager frame") })
+  end
+
+  def test_the_covered_primary_screen_survives_the_round_trip
+    source = build { |t| t.feed("kept history\r\n\e[?1049hpager frame") }
+    replica = assert_round_trips(source)
+
+    source.feed("\e[?1049l")
+    replica.feed("\e[?1049l")
+    assert_equal "kept history", source.dump_text.lines.first.strip
+    assert_equal source.dump_text, replica.dump_text
+  end
 end

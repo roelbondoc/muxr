@@ -12,7 +12,10 @@ module Muxr
     REVERSE   = 4
     DIM       = 8
 
-    SCROLLBACK_MAX = 5000
+    SCROLLBACK_DEFAULT = 5000
+    SCROLLBACK_BOUNDS = 100..500_000
+
+    ALT_SCREEN_MODES = [47, 1047, 1049].freeze
 
     # Codepoint ranges that occupy two display columns (East Asian Wide /
     # Fullwidth per UAX #11, plus the common emoji blocks). A wide glyph is
@@ -136,6 +139,7 @@ module Muxr
       # wide via emoji presentation even when the terminal's ambiguous setting
       # is narrow (the exact case the class toggle alone would miss).
       attr_reader :width_overrides
+      attr_reader :scrollback_max
     end
     # Both are process-global: the server hosts exactly one session / outer
     # terminal at a time, and both #char_width call sites (the emulator and the
@@ -147,6 +151,12 @@ module Muxr
     def self.width_overrides=(map)
       @width_overrides = map || {}
     end
+
+    def self.scrollback_max=(rows)
+      n = rows.to_i
+      @scrollback_max = n.positive? ? n.clamp(SCROLLBACK_BOUNDS) : SCROLLBACK_DEFAULT
+    end
+    self.scrollback_max = ENV["MUXR_SCROLLBACK"]
 
     # Display width of a codepoint in terminal columns: 0 (combining /
     # zero-width), 2 (East Asian wide / emoji, plus anything the probe measured
@@ -242,6 +252,7 @@ module Muxr
       @autowrap_pending = false
       @scroll_top = 0
       @scroll_bottom = rows - 1
+      @saved_primary = nil
       @parser_state = :ground
       @parser_params = +""
       @parser_osc = +""
@@ -345,6 +356,10 @@ module Muxr
       @cursor_visible
     end
 
+    def alt_screen?
+      !@saved_primary.nil?
+    end
+
     # Bytes the emulator owes the OUTER terminal: bell + desktop-notification
     # OSCs the inner program emitted. The Application drains this after each
     # read and forwards it to the attached client so the user's real terminal
@@ -390,17 +405,10 @@ module Muxr
     # Seeds a mirrored copy of the pane in another muxr server, which then keeps
     # up from the raw PTY byte stream alone.
     def dump_ansi
-      out = +"\e[0m\e[H\e[2J"
-      sgr = nil
-      link = nil
-      @rows.times do |r|
-        last = last_significant_column(@buffer[r])
-        next if last.nil?
-        out << "\e[#{r + 1};1H"
-        sgr, link = emit_row(out, @buffer[r], last, sgr, link)
-      end
-      out << "\e]8;;\e\\" if link
-      out << "\e[0m"
+      out = +""
+      out << primary_repaint if @saved_primary
+      out << "\e[0m\e[H\e[2J"
+      emit_grid(out, @buffer)
       out << dump_modes
       out << "\e[#{@cursor_row + 1};#{@cursor_col + 1}H"
       out << (@cursor_visible ? "\e[?25h" : "\e[?25l")
@@ -446,7 +454,7 @@ module Muxr
     def restore_scrollback!(lines)
       return if lines.nil? || lines.empty?
       scratch = self.class.new(rows: 1, cols: @cols)
-      @scrollback = lines.last(SCROLLBACK_MAX).map do |line|
+      @scrollback = lines.last(self.class.scrollback_max).map do |line|
         scratch.feed("\e[0m\e[H\e[2K")
         scratch.feed(line.to_s)
         Array.new(@cols) { |c| scratch.cell(0, c).dup }
@@ -460,6 +468,27 @@ module Muxr
       out = +""
       _sgr, link = emit_row(out, row, last, nil, nil)
       out << "\e]8;;\e\\" if link
+      out
+    end
+
+    def emit_grid(out, buffer)
+      sgr = nil
+      link = nil
+      buffer.each_with_index do |row, r|
+        last = last_significant_column(row)
+        next if last.nil?
+        out << "\e[#{r + 1};1H"
+        sgr, link = emit_row(out, row, last, sgr, link)
+      end
+      out << "\e]8;;\e\\" if link
+      out << "\e[0m"
+    end
+
+    def primary_repaint
+      out = +"\e[0m\e[H\e[2J"
+      emit_grid(out, @saved_primary[:buffer])
+      row, col = @saved_primary[:cursor]
+      out << "\e[#{row + 1};#{col + 1}H\e[?1049h"
       out
     end
 
@@ -899,20 +928,15 @@ module Muxr
 
     def resize(rows, cols)
       return if rows == @rows && cols == @cols
-      new_buf = Array.new(rows) { Array.new(cols) { blank_cell } }
-      keep_rows = [rows, @rows].min
-      keep_cols = [cols, @cols].min
-      src_start = @rows - keep_rows
-      # Shrinking keeps the bottom `rows` lines. The ones falling off the top
-      # scrolled out of view exactly as if the program had emitted newlines, so
-      # they belong in history rather than being dropped.
-      src_start.times { |i| push_scrollback(@buffer[i]) }
-      keep_rows.times do |i|
-        keep_cols.times do |j|
-          new_buf[i][j].copy_from(@buffer[src_start + i][j])
-        end
+      was = [@rows, @cols]
+      shape = [rows, cols]
+      if (primary = @saved_primary)
+        primary[:buffer] = refit(primary[:buffer], was, shape, history: true)
+        primary[:cursor] = clamp_within(primary[:cursor], shape)
+        primary[:saved_cursor] = clamp_within(primary[:saved_cursor], shape)
+        primary[:scroll] = [0, rows - 1]
       end
-      @buffer = new_buf
+      @buffer = refit(@buffer, was, shape, history: primary.nil?)
       @rows = rows
       @cols = cols
       @scroll_top = 0
@@ -978,7 +1002,7 @@ module Muxr
     # be detected as two truncated URLs on consecutive lines.
     def detect_urls!
       rows = []
-      rows << @scrollback.last if @scrollback.any?
+      rows << @scrollback.last if @saved_primary.nil? && @scrollback.any?
       rows.concat(@buffer)
 
       rows.each do |row|
@@ -1356,6 +1380,7 @@ module Muxr
           end
           @bracketed_paste = enabled if params.include?(2004)
           @cursor_visible = enabled if params.include?(25)
+          apply_screen_modes(params, enabled)
         end
         return
       end
@@ -1448,6 +1473,60 @@ module Muxr
       end
     end
 
+    def apply_screen_modes(params, enabled)
+      if params.include?(1048)
+        enabled ? @saved_cursor = [@cursor_row, @cursor_col] : restore_cursor
+      end
+      return if (params & ALT_SCREEN_MODES).empty?
+      enabled ? enter_alt_screen : leave_alt_screen
+    end
+
+    def enter_alt_screen
+      return if @saved_primary
+      scroll_to_bottom
+      @saved_primary = {
+        buffer: @buffer,
+        cursor: [@cursor_row, @cursor_col],
+        saved_cursor: @saved_cursor,
+        scroll: [@scroll_top, @scroll_bottom],
+        fg: @fg,
+        bg: @bg,
+        attrs: @attrs,
+        hyperlink: @current_hyperlink
+      }
+      @buffer = Array.new(@rows) { Array.new(@cols) { blank_cell } }
+      @scroll_top = 0
+      @scroll_bottom = @rows - 1
+      @saved_cursor = [@cursor_row, @cursor_col]
+      @autowrap_pending = false
+      @dirty = true
+    end
+
+    def leave_alt_screen
+      primary = @saved_primary
+      return unless primary
+      @saved_primary = nil
+      @buffer = primary[:buffer]
+      @cursor_row, @cursor_col = clamp_to_grid(primary[:cursor])
+      @saved_cursor = clamp_to_grid(primary[:saved_cursor])
+      @scroll_top = primary[:scroll][0].clamp(0, @rows - 1)
+      @scroll_bottom = primary[:scroll][1].clamp(@scroll_top, @rows - 1)
+      @fg = primary[:fg]
+      @bg = primary[:bg]
+      @attrs = primary[:attrs]
+      @current_hyperlink = primary[:hyperlink]
+      @autowrap_pending = false
+      @dirty = true
+    end
+
+    def clamp_to_grid(position)
+      clamp_within(position, [@rows, @cols])
+    end
+
+    def clamp_within(position, shape)
+      [position[0].clamp(0, shape[0] - 1), position[1].clamp(0, shape[1] - 1)]
+    end
+
     def restore_cursor
       row, col = @saved_cursor
       @cursor_row = row.clamp(0, @rows - 1)
@@ -1529,14 +1608,34 @@ module Muxr
       # Only the default full-screen region contributes to scrollback. Partial
       # regions (vi/less status lines) scroll inner content that's not really
       # "off the top of the screen" and shouldn't pollute history.
-      push_scrollback(@buffer[0]) if @scroll_top.zero? && @scroll_bottom == @rows - 1
+      push_scrollback(@buffer[0]) if history_scrolls?
       @buffer[@scroll_top, @scroll_bottom - @scroll_top + 1] =
         @buffer[(@scroll_top + 1)..@scroll_bottom] + [Array.new(@cols) { blank_cell }]
     end
 
+    def refit(buffer, old_shape, new_shape, history:)
+      old_rows, old_cols = old_shape
+      rows, cols = new_shape
+      grid = Array.new(rows) { Array.new(cols) { blank_cell } }
+      keep_rows = [rows, old_rows].min
+      keep_cols = [cols, old_cols].min
+      src_start = old_rows - keep_rows
+      src_start.times { |i| push_scrollback(buffer[i]) } if history
+      keep_rows.times do |i|
+        keep_cols.times do |j|
+          grid[i][j].copy_from(buffer[src_start + i][j])
+        end
+      end
+      grid
+    end
+
+    def history_scrolls?
+      @saved_primary.nil? && @scroll_top.zero? && @scroll_bottom == @rows - 1
+    end
+
     def push_scrollback(row)
       @scrollback << row
-      if @scrollback.size > SCROLLBACK_MAX
+      if @scrollback.size > self.class.scrollback_max
         @scrollback.shift
         # Selection coordinates are timeline-indexed; an eviction shifts the
         # whole timeline down by one. Track that or selection points at the
@@ -1558,7 +1657,7 @@ module Muxr
     end
 
     def set_view_offset(v)
-      new_v = v.clamp(0, @scrollback.size)
+      new_v = @saved_primary ? 0 : v.clamp(0, @scrollback.size)
       return if new_v == @view_offset
       @view_offset = new_v
       @dirty = true
@@ -1908,6 +2007,7 @@ module Muxr
     end
 
     def reset_terminal
+      @saved_primary = nil
       @buffer = Array.new(@rows) { Array.new(@cols) { blank_cell } }
       @cursor_row = 0
       @cursor_col = 0
