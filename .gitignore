@@ -3,6 +3,8 @@
 Gemfile.lock
 pkg/
 tmp/
+.claude/worktrees/
+.claude/*.lock
 .idea/
 .vscode/
 coverage/
