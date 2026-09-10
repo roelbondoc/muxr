@@ -37,7 +37,7 @@ protocol, the tiling maths — is stdlib Ruby with no runtime gems.
 | **Detach and reattach** | the server keeps every PTY alive; reattaching gives you back the same shells with full history |
 | **Quake-style drawer** | a persistent overlay shell that drops from the top of the screen and never loses its scrollback |
 | **Real terminal emulation** | truecolor SGR, scroll regions, alternate screen, bracketed paste, wide/CJK/emoji cells, OSC 8 hyperlinks |
-| **Scrollback with vi motions** | 5000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard |
+| **Scrollback with vi motions** | 10,000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard |
 | **Panes across sessions** | borrow a live pane from another muxr session, or hand it over for good by passing its pty file descriptor down a socket |
 | **Built for agents** | a JSON-RPC control socket, an MCP bridge, and private panes that programmatic callers cannot see or touch |
 
@@ -276,10 +276,11 @@ in the session's origin directory — wherever `muxr` was first launched.
 
 Every pane keeps a bounded scrollback ring — 10,000 rows by default, or
 whatever `MUXR_SCROLLBACK` is set to when the server starts. History rows are
-trimmed to their content, so the cost tracks what a pane actually printed
-rather than how wide it is, and a pane only pays for the rows it has really
-scrolled. Budget roughly 30 MB of resident memory per 1000 filled rows per
-pane before raising it much further. `s` (normal) or `C-a [`
+trimmed to their content and stored packed — a string of characters plus
+run-length attributes, unpacked into cells only when something reads them — so
+the cost tracks what a pane actually printed rather than how wide it is, and a
+pane only pays for the rows it has really scrolled. Budget under 1 MB of
+resident memory per 1000 filled rows per pane. `s` (normal) or `C-a [`
 (passthrough) enters scrollback with vi-style navigation; the pane title gains
 `[scrollback N/M]` and the border turns orange.
 

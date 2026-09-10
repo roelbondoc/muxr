@@ -1,4 +1,5 @@
 require_relative "image_store"
+require_relative "history_row"
 
 module Muxr
   # A minimal VT100/ANSI terminal emulator. It maintains a fixed grid of cells
@@ -217,9 +218,13 @@ module Muxr
     SYNC_TIMEOUT = 0.2
 
     BLANK_CHAR = " ".freeze
-    EMPTY_ROW = [].freeze
     CONTINUATION_CHAR = "".freeze
     ASCII_CHARS = (0...128).map { |cp| cp.chr.freeze }.freeze
+
+    def self.intern_char(ch)
+      return CONTINUATION_CHAR if ch.empty?
+      ch.bytesize == 1 ? ASCII_CHARS[ch.getbyte(0)] : ch
+    end
 
     Cell = Struct.new(:char, :fg, :bg, :attrs, :hyperlink) do
       def reset!
@@ -462,7 +467,7 @@ module Muxr
       @scrollback = lines.last(self.class.scrollback_max).map do |line|
         scratch.feed("\e[0m\e[H\e[2K")
         scratch.feed(line.to_s)
-        trim_row(Array.new(@cols) { |c| scratch.cell(0, c).dup })
+        pack_row(Array.new(@cols) { |c| scratch.cell(0, c) })
       end
       @view_offset = 0
     end
@@ -585,8 +590,7 @@ module Muxr
       idx = @scrollback.size - @view_offset + r
       if idx < @scrollback.size
         row = @scrollback[idx]
-        return blank_cell if row.nil? || c >= row.length
-        row[c]
+        (row && row[c]) || blank_cell
       else
         @buffer[idx - @scrollback.size][c]
       end
@@ -1006,8 +1010,9 @@ module Muxr
     # a wrapped URL like https://very.long.example.com/path-that-wraps would
     # be detected as two truncated URLs on consecutive lines.
     def detect_urls!
+      history = @scrollback.last if @saved_primary.nil? && @scrollback.any?
       rows = []
-      rows << @scrollback.last if @saved_primary.nil? && @scrollback.any?
+      rows << history if history
       rows.concat(@buffer)
 
       rows.each do |row|
@@ -1054,6 +1059,8 @@ module Muxr
 
         pos = end_off
       end
+
+      history&.repack!
     end
 
     private
@@ -1579,16 +1586,11 @@ module Muxr
     end
 
     def write_cell(cell, ch)
-      cell.char = intern_char(ch)
+      cell.char = self.class.intern_char(ch)
       cell.fg = @fg
       cell.bg = @bg
       cell.attrs = @attrs
       cell.hyperlink = @current_hyperlink
-    end
-
-    def intern_char(ch)
-      return CONTINUATION_CHAR if ch.empty?
-      ch.bytesize == 1 ? ASCII_CHARS[ch.getbyte(0)] : ch
     end
 
     # Fold a zero-width mark (combining accent, variation selector, …) onto the
@@ -1639,12 +1641,10 @@ module Muxr
       grid
     end
 
-    def trim_row(row)
+    def pack_row(row)
       last = last_significant_column(row)
-      return EMPTY_ROW if last.nil?
-      last += 1 if row[last + 1] && wide_lead?(row[last])
-      return row if last >= row.length - 1
-      row[0, last + 1]
+      last += 1 if last && row[last + 1] && wide_lead?(row[last])
+      HistoryRow.pack(row, last)
     end
 
     def wide_lead?(cell)
@@ -1657,7 +1657,7 @@ module Muxr
     end
 
     def push_scrollback(row)
-      @scrollback << trim_row(row)
+      @scrollback << pack_row(row)
       if @scrollback.size > self.class.scrollback_max
         @scrollback.shift
         # Selection coordinates are timeline-indexed; an eviction shifts the
