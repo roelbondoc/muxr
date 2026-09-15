@@ -76,8 +76,8 @@ class TestMuxrMcp < Minitest::Test
     end
   end
 
-  def with_bridge(socket_path)
-    env = { "MUXR_CONTROL_SOCKET" => socket_path }
+  def with_bridge(socket_path, extra_env = {})
+    env = { "MUXR_CONTROL_SOCKET" => socket_path, "MUXR_SESSION" => nil, "MUXR_PANE" => nil }.merge(extra_env)
     Open3.popen3(env, RbConfig.ruby, BRIDGE_PATH) do |stdin, stdout, stderr, wait|
       io = BridgeIO.new(stdin, stdout, stderr, wait)
       begin
@@ -228,5 +228,84 @@ class TestMuxrMcp < Minitest::Test
       thread&.join(2)
       server&.stop
     end
+  end
+
+  def test_pane_methods_refused_on_own_pane
+    app = build_app
+    own = app.session.window.panes[0]
+    other = app.session.window.panes[1]
+    with_control_server(app) do |path|
+      with_bridge(path, "MUXR_PANE" => own.id) do |bridge|
+        bridge.request("initialize", { "protocolVersion" => "2024-11-05" })
+        bridge.notify("notifications/initialized")
+
+        %w[muxr_pane_read muxr_pane_send_input muxr_pane_run muxr_pane_kill].each do |tool|
+          resp = bridge.request("tools/call", { "name" => tool, "arguments" => { "pane" => own.id, "data" => "x", "command" => "x" } })
+          assert resp["result"]["isError"], "#{tool} should refuse its own pane"
+          assert_match(/this claude\s+session is running in/, resp["result"]["content"][0]["text"])
+        end
+
+        resp = bridge.request("tools/call", { "name" => "muxr_pane_read", "arguments" => { "pane" => other.id } })
+        refute resp["result"]["isError"], "a different pane should still be readable"
+
+        resp = bridge.request("tools/call", { "name" => "muxr_pane_focus", "arguments" => { "pane" => own.id } })
+        refute resp["result"]["isError"], "focusing your own pane is harmless and stays allowed"
+      end
+    end
+  end
+
+  def test_handshake_succeeds_outside_muxr
+    with_bridge(nil) do |bridge|
+      init = bridge.request("initialize", { "protocolVersion" => "2024-11-05" })
+      assert_equal "muxr-mcp", init["result"]["serverInfo"]["name"]
+      bridge.notify("notifications/initialized")
+
+      tools = bridge.request("tools/list")
+      assert_empty tools["result"]["tools"]
+
+      resp = bridge.request("tools/call", { "name" => "muxr_panes_list", "arguments" => {} })
+      assert resp["result"]["isError"]
+      assert_match(/not running inside muxr/, resp["result"]["content"][0]["text"])
+    end
+  end
+
+  def test_tool_call_reconnects_after_server_restart
+    app = build_app
+    Dir.mktmpdir("muxr-mcp-test") do |dir|
+      path = File.join(dir, "spec.ctrl.sock")
+      with_bridge(path) do |bridge|
+        run_control_server(app, path) do
+          bridge.request("initialize", { "protocolVersion" => "2024-11-05" })
+          bridge.notify("notifications/initialized")
+          resp = bridge.request("tools/call", { "name" => "muxr_ping", "arguments" => {} })
+          refute resp["result"]["isError"]
+        end
+
+        run_control_server(app, path) do
+          resp = bridge.request("tools/call", { "name" => "muxr_ping", "arguments" => {} })
+          refute resp["result"]["isError"], "bridge should have reconnected to the restarted server"
+          assert_equal true, JSON.parse(resp["result"]["content"][0]["text"])["pong"]
+        end
+      end
+    end
+  end
+
+  def run_control_server(app, path)
+    server = Muxr::ControlServer.new(app, path)
+    server.start
+    stop = false
+    thread = Thread.new do
+      until stop
+        ready_r, ready_w, = IO.select(server.read_ios, server.write_ios, nil, 0.05)
+        (ready_r || []).each { |io| server.handle_read(io) }
+        (ready_w || []).each { |io| server.handle_write(io) }
+        server.tick
+      end
+    end
+    yield
+  ensure
+    stop = true
+    thread&.join(2)
+    server&.stop
   end
 end

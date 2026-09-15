@@ -7,6 +7,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- The MCP bridge now reaches *any* claude started inside muxr, not just the
+  one in the Claude drawer. `MUXR_SESSION` and `MUXR_CONTROL_SOCKET` are
+  injected into every PTY muxr spawns, so with the bridge registered once at
+  user scope (`claude mcp add muxr muxr-mcp --scope user`) a claude launched
+  from an ordinary pane is already wired to the session around it. Each
+  pane's shell also carries `MUXR_PANE`, its own id: the bridge refuses
+  `pane.read`, `pane.send_input`, `pane.run` and `pane.kill` against that
+  pane, since driving your own pty feeds your output back to you — the pane
+  equivalent of the drawer's `MUXR_DRAWER_SELF` guard. Panes that predate the
+  upgrade need reopening to pick the vars up.
 - Attach a pane from another muxr session: `A` (or `C-a A`, or `:attach`)
   opens a picker listing every pane the other live servers on this machine
   are willing to share, grouped by session. The chosen pane is *shared, not
@@ -71,6 +81,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sane range.
 
 ### Changed
+- `muxr-mcp` no longer exits when it can't find a muxr session. Registering
+  it at user scope loads it into every claude on the machine, most of which
+  are nowhere near a muxr, and exiting surfaced a failed MCP server in all of
+  them. It now completes the handshake, advertises no tools when there is no
+  session to talk to, and says so if called anyway. The socket is opened on
+  first use rather than at startup and reopened if it drops, so a claude
+  running in a pane survives a restart of the session around it.
 - `auto` is the default layout for new windows (was `spiral`). Saved
   sessions are unaffected.
 - Scrollback holds 50,000 rows per pane by default, up from 5,000. Rows are

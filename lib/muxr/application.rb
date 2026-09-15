@@ -1,5 +1,6 @@
 require "socket"
 require "fileutils"
+require "securerandom"
 require "muxr/remote_pane"
 require "muxr/pane_transfer"
 require "muxr/pane_picker"
@@ -1341,7 +1342,8 @@ module Muxr
     end
 
     def make_pane(cwd: nil, id: nil)
-      Pane.new(id: id, rows: 24, cols: 80, cwd: cwd)
+      pane_id = id || SecureRandom.hex(3)
+      Pane.new(id: pane_id, rows: 24, cols: 80, cwd: cwd, env_overrides: pane_env(pane_id))
     end
 
     def ensure_drawer(command: nil)
@@ -1381,15 +1383,19 @@ module Muxr
       invalidate
     end
 
-    # Env vars exposed to every drawer PTY. The MCP bridge reads these to
-    # auto-connect to the right session; MUXR_DRAWER_SELF lets it refuse
-    # drawer.* methods so a claude drawer can't recurse into its own PTY.
-    def drawer_env
-      env = {
+    def session_env
+      {
         "MUXR_SESSION"        => @session_name.to_s,
-        "MUXR_CONTROL_SOCKET" => @control_socket_path.to_s,
-        "MUXR_DRAWER_SELF"    => "1"
+        "MUXR_CONTROL_SOCKET" => @control_socket_path.to_s
       }
+    end
+
+    def pane_env(pane_id)
+      session_env.merge("MUXR_PANE" => pane_id.to_s)
+    end
+
+    def drawer_env
+      env = session_env.merge("MUXR_DRAWER_SELF" => "1")
       focused = focused_pane
       env["MUXR_FOCUSED_PANE"] = focused.id.to_s if focused&.id.is_a?(String)
       env

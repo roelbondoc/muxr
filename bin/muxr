@@ -92,8 +92,13 @@ if install_skill_arg
         claude mcp add muxr muxr-mcp --scope user
 
     Then restart any running Claude Code sessions so they pick up the new
-    config, and launch claude from inside a muxr drawer (Ctrl-a C) — the
-    bridge auto-detects the session via MUXR_SESSION / MUXR_CONTROL_SOCKET.
+    config. Any claude you launch from inside muxr — a tiled pane or the
+    Claude drawer (Ctrl-a C) — auto-detects its session via MUXR_SESSION /
+    MUXR_CONTROL_SOCKET, which muxr injects into every PTY it spawns.
+    Outside muxr the bridge stays quiet and offers no tools.
+
+    Panes that were already running before this install won't have those
+    vars — open a new pane (Ctrl-a c) to pick them up.
   MSG
   exit 0
 end
@@ -118,7 +123,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       C-a a   toggle last pane    C-a 1..9    jump to pane by number
       C-a x   close pane          C-a Tab     cycle layout
       C-a ~   toggle drawer       C-a Enter   promote to master
-      C-a C   Claude drawer       (MCP-aware; needs `muxr --install-skill` + bridge configured)
+      C-a C   Claude drawer       (as is claude in any pane; needs `muxr --install-skill`)
       C-a :   command prompt      C-a ?       toggle help
       C-a d   detach (server stays running)
       C-a q   kill session (with y/n confirmation)

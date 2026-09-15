@@ -483,12 +483,29 @@ tool calls into control-socket requests. It exposes the surface above as
 friends, and finds its target session from `MUXR_CONTROL_SOCKET` or
 `MUXR_SESSION`.
 
+**Every PTY muxr spawns gets those two vars**, so any `claude` you start from
+any pane is wired to the session it is sitting in — no drawer required, and
+nothing to configure per pane. Register the bridge once at user scope
+(`claude mcp add muxr muxr-mcp --scope user`) and it is simply always there.
+A pane's shell also gets `MUXR_PANE`, its own pane id; the bridge refuses
+`muxr_pane_read`, `muxr_pane_send_input`, `muxr_pane_run` and
+`muxr_pane_kill` aimed at that id, since a claude driving its own pty feeds
+its output back to itself. `muxr_pane_focus` and `muxr_pane_promote` are
+harmless on yourself and stay allowed.
+
+Because the bridge is registered for *every* claude session, including ones
+nowhere near a muxr, it starts whether or not a session is reachable: with no
+socket to talk to it completes the MCP handshake, advertises **no** tools, and
+explains itself if called anyway. It connects on first use and reconnects on
+its own, so a pane's claude survives a `C-a q` and restart of the session
+around it.
+
 `C` (normal), `C-a C` (passthrough), or `:claude` opens a drawer whose shell
-is `claude`, with `MUXR_SESSION`, `MUXR_CONTROL_SOCKET`, `MUXR_FOCUSED_PANE`
-and `MUXR_DRAWER_SELF=1` already in its environment. You get a Quake-style
-Claude Code overlay that already knows which session it is in and which pane
-you were looking at. `MUXR_DRAWER_SELF` makes the bridge refuse `drawer.*`
-methods, so the drawer cannot recurse into its own PTY.
+is `claude`, additionally carrying `MUXR_FOCUSED_PANE` and
+`MUXR_DRAWER_SELF=1`. You get a Quake-style Claude Code overlay that already
+knows which pane you were looking at. `MUXR_DRAWER_SELF` makes the bridge
+refuse `drawer.*` methods, so the drawer cannot recurse into its own PTY —
+the drawer's equivalent of `MUXR_PANE`.
 
 How the skill installs depends on where muxr runs from. An **installed gem**
 is **copied**, because RubyGems prunes the old versioned directory on upgrade

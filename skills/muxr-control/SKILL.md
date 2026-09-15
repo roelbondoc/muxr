@@ -274,6 +274,16 @@ an ordinary local pane, even though the shell inside it has been running
 since before it arrived. Don't assume a pane's history started in this
 session.
 
+### You are running in one of these panes
+
+`MUXR_PANE` in your environment is the id of the pane hosting you. The
+bridge refuses `muxr_pane_read`, `muxr_pane_send_input`, `muxr_pane_run`
+and `muxr_pane_kill` on that id — driving your own pty feeds your output
+back to you, and reading it just returns your own UI. Check `MUXR_PANE`
+before picking a target, and don't try to route around the refusal by
+re-running the command in a pane you then read; ask the user to open
+another pane if you need somewhere to work.
+
 ### The drawer might be Claude itself
 
 If the bridge sees the env var `MUXR_DRAWER_SELF=1` it refuses
@@ -281,6 +291,12 @@ If the bridge sees the env var `MUXR_DRAWER_SELF=1` it refuses
 muxr drawer and the call would recurse into your own pty. If you get
 that error, that's why: you can still drive the surrounding tiled panes
 normally, you just can't toggle/read the drawer that's hosting you.
+
+### No tools at all means no session
+
+If `muxr_*` tools aren't listed, this claude isn't inside muxr (or its
+server isn't running). The bridge advertises nothing rather than failing
+to start. Nothing to fix — just don't claim you can drive panes.
 
 ### Don't toggle the drawer just to peek
 
