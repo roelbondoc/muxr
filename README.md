@@ -500,6 +500,16 @@ explains itself if called anyway. It connects on first use and reconnects on
 its own, so a pane's claude survives a `C-a q` and restart of the session
 around it.
 
+Those vars are a snapshot of where the pane was when its shell started, and a
+pane can be **moved to another session** while that shell keeps running — a
+running process's environment can't be rewritten from outside, so the env goes
+stale. `MUXR_PANE` is what makes this recoverable: when the session the env
+names no longer lists that pane as its own, the bridge asks the other sockets
+in the same directory which of them does, and talks to that one instead. It
+re-checks on a ten-second TTL, so a pane moved out from under a running claude
+is followed rather than leaving it driving its old session. A mirrored pane
+carries `origin` and is never mistaken for the real owner.
+
 `C` (normal), `C-a C` (passthrough), or `:claude` opens a drawer whose shell
 is `claude`, additionally carrying `MUXR_FOCUSED_PANE` and
 `MUXR_DRAWER_SELF=1`. You get a Quake-style Claude Code overlay that already

@@ -292,6 +292,15 @@ muxr drawer and the call would recurse into your own pty. If you get
 that error, that's why: you can still drive the surrounding tiled panes
 normally, you just can't toggle/read the drawer that's hosting you.
 
+### The session you reach may not be the one in your env
+
+A pane can be moved between sessions while its shell keeps running, so
+`MUXR_SESSION` can name a session you have since left. The bridge follows
+`MUXR_PANE` to whichever server actually owns you and re-checks every ten
+seconds — so trust `muxr_session_get` over the environment if the two
+disagree, and re-list panes rather than reusing ids you cached from a
+session you are no longer in.
+
 ### No tools at all means no session
 
 If `muxr_*` tools aren't listed, this claude isn't inside muxr (or its

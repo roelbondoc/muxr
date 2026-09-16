@@ -6,6 +6,8 @@ require "socket"
 require "tmpdir"
 require "timeout"
 
+load File.expand_path("../bin/muxr-mcp", __dir__)
+
 # End-to-end test for bin/muxr-mcp. Boots a ControlServer in-process,
 # spawns the bridge as a subprocess pointed at our socket via env, and
 # drives the bridge via MCP JSON-RPC on stdio.
@@ -37,9 +39,9 @@ class TestMuxrMcp < Minitest::Test
     def reset_drawer; end
   end
 
-  def build_app
+  def build_app(name = "mcp-spec")
     app = FakeApp.new
-    app.session = Muxr::Session.new(name: "mcp-spec", width: 80, height: 24)
+    app.session = Muxr::Session.new(name: name, width: 80, height: 24)
     2.times do |i|
       pane = Muxr::Pane.new(process: FakeProcess.new)
       pane.terminal.feed("pane#{i}-content")
@@ -288,6 +290,112 @@ class TestMuxrMcp < Minitest::Test
         end
       end
     end
+  end
+
+  def test_bridge_follows_a_pane_moved_to_another_session
+    source = build_app("alpha")
+    dest = build_app("beta")
+    moved = dest.session.window.panes[0]
+    Dir.mktmpdir("muxr-mcp-test") do |dir|
+      alpha = File.join(dir, "alpha.ctrl.sock")
+      beta = File.join(dir, "beta.ctrl.sock")
+      run_control_server(source, alpha) do
+        run_control_server(dest, beta) do
+          with_bridge(alpha, "MUXR_PANE" => moved.id) do |bridge|
+            bridge.request("initialize", { "protocolVersion" => "2024-11-05" })
+            bridge.notify("notifications/initialized")
+            resp = bridge.request("tools/call", { "name" => "muxr_session_get", "arguments" => {} })
+            name = JSON.parse(resp["result"]["content"][0]["text"])["name"]
+            assert_equal "beta", name, "should follow the pane to the session that now owns it"
+          end
+        end
+      end
+    end
+  end
+
+  def test_bridge_finds_its_pane_when_the_env_session_is_gone
+    dest = build_app("beta")
+    moved = dest.session.window.panes[0]
+    Dir.mktmpdir("muxr-mcp-test") do |dir|
+      dead = File.join(dir, "alpha.ctrl.sock")
+      beta = File.join(dir, "beta.ctrl.sock")
+      run_control_server(dest, beta) do
+        with_bridge(dead, "MUXR_PANE" => moved.id) do |bridge|
+          bridge.request("initialize", { "protocolVersion" => "2024-11-05" })
+          bridge.notify("notifications/initialized")
+
+          tools = bridge.request("tools/list")
+          refute_empty tools["result"]["tools"], "a reachable owner means the tools are usable"
+
+          resp = bridge.request("tools/call", { "name" => "muxr_session_get", "arguments" => {} })
+          name = JSON.parse(resp["result"]["content"][0]["text"])["name"]
+          assert_equal "beta", name
+        end
+      end
+    end
+  end
+
+  def test_bridge_re_resolves_when_its_pane_moves_mid_session
+    source = build_app("alpha")
+    dest = build_app("beta")
+    moving = source.session.window.panes[0]
+    Dir.mktmpdir("muxr-mcp-test") do |dir|
+      alpha = File.join(dir, "alpha.ctrl.sock")
+      beta = File.join(dir, "beta.ctrl.sock")
+      run_control_server(source, alpha) do
+        run_control_server(dest, beta) do
+          with_env("MUXR_CONTROL_SOCKET" => alpha, "MUXR_SESSION" => nil, "MUXR_PANE" => moving.id) do
+            bridge = MuxrMcpBridge.new
+            assert bridge.send(:ensure_owning_connection)
+            assert_equal "alpha", bridge_session_name(bridge)
+
+            source.session.window.remove_pane(moving)
+            dest.session.window.add_pane(moving)
+            bridge.instance_variable_set(:@verified_at, nil)
+
+            assert bridge.send(:ensure_owning_connection)
+            assert_equal "beta", bridge_session_name(bridge), "a move under a live session should re-resolve"
+          end
+        end
+      end
+    end
+  end
+
+  # The borrowing session sorts first in the discovery scan, so a bridge that
+  # ignored `origin` would settle on the mirror rather than the real owner.
+  def test_a_mirror_is_not_evidence_of_ownership
+    owner = build_app("zeta")
+    borrower = build_app("alpha")
+    shared = owner.session.window.panes[0]
+    mirror = Muxr::Pane.new(id: shared.id, process: FakeProcess.new)
+    mirror.origin = "zeta:#{shared.id}"
+    borrower.session.window.add_pane(mirror)
+
+    Dir.mktmpdir("muxr-mcp-test") do |dir|
+      zeta = File.join(dir, "zeta.ctrl.sock")
+      alpha = File.join(dir, "alpha.ctrl.sock")
+      run_control_server(owner, zeta) do
+        run_control_server(borrower, alpha) do
+          with_env("MUXR_CONTROL_SOCKET" => File.join(dir, "gone.ctrl.sock"), "MUXR_SESSION" => nil, "MUXR_PANE" => shared.id) do
+            bridge = MuxrMcpBridge.new
+            assert bridge.send(:ensure_owning_connection)
+            assert_equal "zeta", bridge_session_name(bridge), "discovery should skip the mirroring session"
+          end
+        end
+      end
+    end
+  end
+
+  def bridge_session_name(bridge)
+    bridge.send(:send_muxr_request, "session.get", {})["result"]["name"]
+  end
+
+  def with_env(vars)
+    previous = vars.keys.to_h { |key| [key, ENV[key]] }
+    vars.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
+    yield
+  ensure
+    previous.each { |key, value| value.nil? ? ENV.delete(key) : ENV[key] = value }
   end
 
   def run_control_server(app, path)

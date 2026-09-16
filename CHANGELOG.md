@@ -17,6 +17,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   pane, since driving your own pty feeds your output back to you — the pane
   equivalent of the drawer's `MUXR_DRAWER_SELF` guard. Panes that predate the
   upgrade need reopening to pick the vars up.
+- The bridge follows its pane across a move. Those env vars are a snapshot of
+  where the pane was when its shell started, and moving a pane to another
+  session leaves them naming the old one — a running process's environment
+  cannot be rewritten from outside. When the session the env names no longer
+  lists `MUXR_PANE` among its own panes, the bridge asks the other control
+  sockets in the same directory which of them owns it and connects there
+  instead, re-checking on a ten-second TTL so a pane moved out from under a
+  running claude is followed rather than left driving its old session. A
+  mirrored pane carries `origin` and is never mistaken for the owner.
 - Attach a pane from another muxr session: `A` (or `C-a A`, or `:attach`)
   opens a picker listing every pane the other live servers on this machine
   are willing to share, grouped by session. The chosen pane is *shared, not

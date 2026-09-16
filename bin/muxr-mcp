@@ -9,10 +9,15 @@
 #
 #   1. $MUXR_CONTROL_SOCKET (absolute path) — exact override
 #   2. $MUXR_SESSION (session name)         — resolved to standard path
-#   3. otherwise: error
+#   3. whichever live session lists $MUXR_PANE as a pane it owns, when the
+#      two above name a session that no longer has us (see below)
+#   4. otherwise: no tools, and an explanatory error if called anyway
 #
-# Both env vars are injected automatically when claude is launched from the
-# muxr Claude-drawer (Ctrl-a C), so end users almost never set them by hand.
+# muxr injects all three vars into every PTY it spawns, so end users never set
+# them by hand. They are a snapshot of where the pane was when its shell
+# started, which is why (3) exists: a pane can be moved to another session
+# while its shell keeps running, and a running process's environment cannot
+# be rewritten from outside.
 #
 # Typical claude-code mcp config:
 #
@@ -240,12 +245,17 @@ class MuxrMcpBridge
 
   SELF_FORBIDDEN_PANE_METHODS = ["pane.read", "pane.send_input", "pane.run", "pane.kill"].freeze
 
+  DEFAULT_SOCKETS_DIR = File.join(Dir.home, ".muxr", "sockets")
+  DISCOVERY_TIMEOUT   = 0.5
+  OWNERSHIP_TTL       = 10.0
+
   def initialize
     @socket = nil
     @next_request_id = 0
     @read_buffer = +""
     @in_drawer = ENV["MUXR_DRAWER_SELF"] == "1"
     @own_pane = ENV["MUXR_PANE"].to_s
+    @verified_at = nil
   end
 
   def run
@@ -318,7 +328,7 @@ class MuxrMcpBridge
       return
     end
 
-    unless ensure_connection
+    unless ensure_owning_connection
       respond_tool_error(id, connection_error)
       return
     end
@@ -396,9 +406,73 @@ class MuxrMcpBridge
     path
   end
 
-  def session_reachable?
+  def env_socket_path
     path = control_socket_path
-    !path.nil? && !path.empty? && File.exist?(path)
+    return nil if path.nil? || path.empty? || !File.exist?(path)
+    path
+  end
+
+  def resolve_control_socket
+    env_path = env_socket_path
+    return env_path if @own_pane.empty?
+    return env_path if env_path && socket_owns_own_pane?(env_path)
+    discover_owning_socket(skip: env_path) || env_path
+  end
+
+  def sockets_dir
+    path = control_socket_path
+    return DEFAULT_SOCKETS_DIR if path.nil? || path.empty?
+    File.dirname(path)
+  end
+
+  def discover_owning_socket(skip: nil)
+    dir = sockets_dir
+    return nil unless File.directory?(dir)
+    Dir.glob(File.join(dir, "*.ctrl.sock")).sort.find do |path|
+      next false if path == skip
+      socket_owns_own_pane?(path)
+    end
+  end
+
+  def socket_owns_own_pane?(path)
+    sock = UNIXSocket.new(path)
+    sock.write(JSON.generate("id" => 1, "method" => "panes.list", "params" => {}) + "\n")
+    deadline = monotonic + DISCOVERY_TIMEOUT
+    buffer = +""
+    loop do
+      remaining = deadline - monotonic
+      return false if remaining <= 0
+      return false unless IO.select([sock], nil, nil, remaining)
+      buffer << sock.readpartial(64 * 1024)
+      while (nl = buffer.index("\n"))
+        line = buffer.slice!(0..nl)
+        msg = JSON.parse(line) rescue nil
+        next unless msg && msg["id"] == 1
+        return owns_own_pane?(msg["result"])
+      end
+    end
+  rescue SystemCallError, IOError, EOFError
+    false
+  ensure
+    sock&.close rescue nil
+  end
+
+  def owns_own_pane?(result)
+    panes = result.is_a?(Hash) ? result["panes"] : nil
+    return false unless panes.is_a?(Array)
+    panes.any? { |pane| pane["id"].to_s == @own_pane && !mirror?(pane) }
+  end
+
+  def mirror?(pane)
+    !pane["origin"].nil?
+  end
+
+  def monotonic
+    Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  end
+
+  def session_reachable?
+    !resolve_control_socket.nil?
   end
 
   def connection_error
@@ -406,26 +480,46 @@ class MuxrMcpBridge
     if path.nil? || path.empty?
       "not running inside muxr — no MUXR_CONTROL_SOCKET or MUXR_SESSION in the environment. " \
         "Start a pane with `muxr <session>` and run claude from inside it."
-    else
+    elsif @own_pane.empty?
       "muxr control socket not found at #{path} — is the server running? Start it with `muxr <session>`."
+    else
+      "no live muxr session owns pane #{@own_pane} (#{path} is gone, and no other session claims it) — " \
+        "is the server running? Start it with `muxr <session>`."
     end
   end
 
   def ensure_connection
     return true if @socket && !@socket.closed?
-    return false unless session_reachable?
-    @socket = UNIXSocket.new(control_socket_path)
+    path = resolve_control_socket
+    return false if path.nil?
+    @socket = UNIXSocket.new(path)
     @read_buffer.clear
+    @verified_at = monotonic
     true
   rescue SystemCallError, IOError
     @socket = nil
     false
   end
 
+  def ensure_owning_connection
+    return false unless ensure_connection
+    return true if @own_pane.empty?
+    return true if @verified_at && monotonic - @verified_at < OWNERSHIP_TTL
+
+    if owns_own_pane?(send_muxr_request("panes.list", {})&.fetch("result", nil))
+      @verified_at = monotonic
+      return true
+    end
+
+    drop_connection
+    ensure_connection
+  end
+
   def drop_connection
     @socket&.close rescue nil
     @socket = nil
     @read_buffer.clear
+    @verified_at = nil
   end
 
   def derive_socket_from_session
