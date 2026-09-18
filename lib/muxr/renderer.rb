@@ -55,6 +55,7 @@ module Muxr
       @prev = nil
       @prev_w = 0
       @prev_h = 0
+      @scroll_source = :ring
     end
 
     def enter_alt_screen
@@ -75,13 +76,14 @@ module Muxr
       @prev = nil
     end
 
-    def render(session, input_state: :normal, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil)
+    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil)
       w = session.width
       h = session.height
       return if w < 4 || h < 3
 
       frame = Array.new(h) { Array.new(w) { Cell.new(" ", nil, nil, 0, nil) } }
 
+      @scroll_source = scroll_source
       compose_panes(frame, session, input_state: input_state)
       compose_drawer(frame, session, input_state: input_state) if session.drawer&.visible?
       compose_status_bar(
@@ -246,7 +248,7 @@ module Muxr
       when :passthrough  then "PASS"
       when :prefix       then "^A"
       when :command      then "CMD"
-      when :scrollback   then "SCROLL"
+      when :scrollback   then @scroll_source == :app ? "SCROLL:APP" : "SCROLL"
       when :search       then "SEARCH"
       when :selection    then "SEL"
       when :confirm_quit  then "QUIT?"
@@ -332,7 +334,12 @@ module Muxr
           c.attrs = 0
         end
       elsif input_state == :scrollback
-        overlay = " SCROLLBACK  ↑↓/j/k line  d/u half  f/b page  g/G top/bot  / search  n/N next/prev  v select  q quit "
+        overlay =
+          if @scroll_source == :app
+            " APP SCROLL  ↑↓/j/k line  d/u half  f/b page  v select  Tab muxr history  q quit "
+          else
+            " SCROLLBACK  ↑↓/j/k line  d/u half  f/b page  g/G top/bot  / search  n/N next/prev  v select  Tab app scroll  q quit "
+          end
         overlay = overlay[0, w]
         overlay.each_char.with_index do |ch, x|
           c = frame[y][x]
@@ -436,6 +443,8 @@ module Muxr
       "",
       "SCROLLBACK mode (pane-bound: follows you as you switch panes)",
       "  j/k ↑/↓ d/u f/b g/G  scroll  C-b/C-f page  v→cursor",
+      "  Tab  switch between the app's own scroll and muxr's history",
+      "       (C-a [ starts on the app's scroll when the pane has one)",
       "  / search-fwd  ? search-back  n/N next/prev match",
       "  C-a n/p/a/1-9   switch pane, stay in scrollback (each keeps its pos)",
       "  i   insert here (keeps scroll pos)   q/Esc  exit to live bottom",

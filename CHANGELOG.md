@@ -7,6 +7,23 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Scrollback can now drive the program instead of muxr's ring. A pane whose
+  program has turned on mouse tracking (DECSET 1000/1002/1003 — Claude Code,
+  `lazygit`, `k9s`, `htop`) gets `C-a [` routed to *it*: muxr synthesises
+  wheel reports at the centre of the pane and writes them into the pty, so
+  `j`/`k`, `C-d`/`C-u` and `C-f`/`C-b` scroll the program's own transcript
+  from the keyboard, no mouse involved. SGR encoding when the program asked
+  for 1006, legacy X10 otherwise. A full-screen program that wants no mouse
+  falls back to arrow keys, which is what `less` and `vim` respond to — so
+  `C-a [` no longer dead-ends with "no history while a full-screen app is
+  running" on an alternate-screen pane. `Tab` switches between the app's
+  scroll and muxr's ring at any time, and the mode chip reads `SCROLL:APP`
+  while the app has it. `Terminal` tracks the mouse modes and carries them in
+  `dump_ansi`, so a mirrored or moved pane knows its program speaks mouse.
+  Visual selection is clamped to the visible screen while the app is being
+  scrolled: a self-scrolling program repaints in place, so the ring's tail no
+  longer continues into row 0 and a selection spanning that seam would splice
+  two unrelated regions into the paste buffer.
 - The MCP bridge now reaches *any* claude started inside muxr, not just the
   one in the Claude drawer. `MUXR_SESSION` and `MUXR_CONTROL_SOCKET` are
   injected into every PTY muxr spawns, so with the bridge registered once at

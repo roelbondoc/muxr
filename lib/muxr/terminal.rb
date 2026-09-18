@@ -17,6 +17,9 @@ module Muxr
     SCROLLBACK_BOUNDS = 100..500_000
 
     ALT_SCREEN_MODES = [47, 1047, 1049].freeze
+    MOUSE_TRACKING_MODES = [1000, 1002, 1003].freeze
+    MOUSE_SGR_MODE = 1006
+    APP_CURSOR_KEYS_MODE = 1
 
     # Codepoint ranges that occupy two display columns (East Asian Wide /
     # Fullwidth per UAX #11, plus the common emoji blocks). A wide glyph is
@@ -290,6 +293,10 @@ module Muxr
       # \e[200~…\e[201~ paste markers the outer terminal wraps around a paste
       # or strip them — see Application#send_to_focused.
       @bracketed_paste = false
+      @mouse_tracking = []
+      @mouse_sgr = false
+      @app_cursor_keys = false
+      @selection_screen_only = false
       # Whether the inner program wants its cursor shown (DECTCEM, DEC private
       # mode 25). Claude Code and other Ink UIs hide the cursor (\e[?25l) for
       # the whole render and only show it (\e[?25h) at a text-input prompt —
@@ -370,6 +377,18 @@ module Muxr
       !@saved_primary.nil?
     end
 
+    def mouse_tracking?
+      !@mouse_tracking.empty?
+    end
+
+    def mouse_encoding
+      @mouse_sgr ? :sgr : :x10
+    end
+
+    def app_cursor_keys?
+      @app_cursor_keys
+    end
+
     # Bytes the emulator owes the OUTER terminal: bell + desktop-notification
     # OSCs the inner program emitted. The Application drains this after each
     # read and forwards it to the attached client so the user's real terminal
@@ -437,6 +456,9 @@ module Muxr
         out << "\e[#{@scroll_top + 1};#{@scroll_bottom + 1}r"
       end
       out << "\e[?2004h" if @bracketed_paste
+      out << "\e[?1h" if @app_cursor_keys
+      @mouse_tracking.each { |mode| out << "\e[?#{mode}h" }
+      out << "\e[?#{MOUSE_SGR_MODE}h" if @mouse_sgr
       out
     end
 
@@ -637,10 +659,23 @@ module Muxr
       !@selection_anchor.nil?
     end
 
+    def confine_selection_to_screen!(confined)
+      @selection_screen_only = confined
+      set_view_offset(0) if confined
+    end
+
+    def selection_confined_to_screen?
+      @selection_screen_only
+    end
+
+    def selection_floor
+      @selection_screen_only ? @scrollback.size : 0
+    end
+
     # Place the moving cursor at a viewport position without dropping an
     # anchor — the user is still navigating, not yet selecting.
     def place_selection_cursor(r, c)
-      tr = timeline_row_for_visible(r).clamp(0, timeline_size - 1)
+      tr = timeline_row_for_visible(r).clamp(selection_floor, timeline_size - 1)
       tc = c.clamp(0, @cols - 1)
       @selection_cursor = [tr, tc]
       @selection_anchor = nil
@@ -674,7 +709,7 @@ module Muxr
     def move_selection_cursor_by(dr, dc)
       return unless @selection_cursor
       tr, tc = @selection_cursor
-      ntr = (tr + dr).clamp(0, timeline_size - 1)
+      ntr = (tr + dr).clamp(selection_floor, timeline_size - 1)
       ntc = (tc + dc).clamp(0, @cols - 1)
       return if ntr == tr && ntc == tc
       @selection_cursor = [ntr, ntc]
@@ -684,7 +719,7 @@ module Muxr
 
     def selection_cursor_to(tr, tc)
       return unless @selection_cursor
-      ntr = tr.clamp(0, timeline_size - 1)
+      ntr = tr.clamp(selection_floor, timeline_size - 1)
       ntc = tc.clamp(0, @cols - 1)
       @selection_cursor = [ntr, ntc]
       ensure_selection_cursor_visible
@@ -725,7 +760,7 @@ module Muxr
            when :bottom then @rows - 1
            end
       return if vr.nil?
-      tr = timeline_row_for_visible(vr).clamp(0, timeline_size - 1)
+      tr = timeline_row_for_visible(vr).clamp(selection_floor, timeline_size - 1)
       selection_cursor_to(tr, first_non_blank_col(tr))
     end
 
@@ -1397,6 +1432,8 @@ module Muxr
           end
           @bracketed_paste = enabled if params.include?(2004)
           @cursor_visible = enabled if params.include?(25)
+          @app_cursor_keys = enabled if params.include?(APP_CURSOR_KEYS_MODE)
+          apply_mouse_modes(params, enabled)
           apply_screen_modes(params, enabled)
         end
         return
@@ -1488,6 +1525,13 @@ module Muxr
         # Non-private mode set/reset — nothing we need to honor. (DEC private
         # `?`-prefixed mode sequences are short-circuited above.)
       end
+    end
+
+    def apply_mouse_modes(params, enabled)
+      (params & MOUSE_TRACKING_MODES).each do |mode|
+        enabled ? (@mouse_tracking |= [mode]) : @mouse_tracking.delete(mode)
+      end
+      @mouse_sgr = enabled if params.include?(MOUSE_SGR_MODE)
     end
 
     def apply_screen_modes(params, enabled)

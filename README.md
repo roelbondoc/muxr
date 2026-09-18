@@ -226,7 +226,7 @@ the historical `Ctrl-a` prefix.
 | `C-a r` | refresh / redraw |
 | `C-a ~` / `C-a C` / `C-a P` | drawer / Claude Code drawer / toggle private |
 | `C-a A` | share or move in a pane from another session |
-| `C-a [` / `C-a ]` | scrollback / paste yank buffer |
+| `C-a [` / `C-a ]` | scrollback (or the app's own scroll) / paste yank buffer |
 | `C-a d` / `C-a q` | detach / kill session (asks `y/n`) |
 | `C-a :` / `C-a ?` | command prompt / help |
 | `C-a C-a` | send a literal `Ctrl-a` to the focused pane |
@@ -285,8 +285,7 @@ and the border turns orange.
 Full-screen programs — pagers, editors, `fzf`, anything that asks for the
 alternate screen — draw on a grid of their own, so paging through `less` does
 not shovel its frames into your history, and quitting uncovers the screen you
-started from. There is nothing to page through while one is up, so scrollback
-declines to open on such a pane.
+started from.
 
 | Keys | Action |
 |------|--------|
@@ -294,11 +293,33 @@ declines to open on such a pane.
 | `d` `u`, `C-d` `C-u`, `PgDn` `PgUp` | half page |
 | `f` `b`, `C-f` `C-b`, Space | full page |
 | `g` `G`, `Home` `End` | top / bottom |
+| `Tab` | switch between the app's own scroll and muxr's history |
 | `/`*query*`Enter` | search forward; `?` searches backward |
 | `n` / `N` | next / previous match in the search direction (wraps) |
 | `v` | enter visual selection |
 | `i` | drop into passthrough here, keeping your scroll position |
 | `q` `Esc` `C-c` | back to normal mode at the live bottom |
+
+### Scrolling the program instead of the history
+
+Some programs keep their own history and want to do their own scrolling —
+Claude Code, `lazygit`, `k9s`, `htop`. They say so by turning on mouse
+tracking, and on such a pane the same keys drive *them* rather than muxr's
+ring: muxr synthesises wheel events at the centre of the pane and writes them
+straight into the pty, so scrolling reaches the program's transcript without
+you touching the mouse. The mode chip reads `SCROLL:APP`. A full-screen
+program that wants no mouse gets arrow keys instead, which is what makes
+`less` and `vim` respond.
+
+`Tab` switches between the two at any time — the app's own scroll, or muxr's
+ring for output older than the program will page back to. `g`/`G` and search
+belong to the ring, since only the program knows where its history starts.
+
+Visual selection works in both, with one restriction. A program that scrolls
+itself repaints in place, so nothing it scrolls past reaches muxr's ring, and
+the ring's tail no longer continues into the top of the screen. Selection is
+therefore clamped to the visible screen while you are scrolling the app; press
+`Tab` first if you want to select out of muxr's history.
 
 Search is smart-case (case-insensitive unless the query contains an uppercase
 letter), scans the scrollback ring and the live buffer together, and centres

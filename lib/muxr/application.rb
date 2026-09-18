@@ -255,9 +255,13 @@ module Muxr
     # you hop onto a live pane, so we never auto-leave.
     def sync_input_mode_to_focus
       target = focused_target
-      return unless target&.terminal&.scrolled_back?
-      @input.enter_scrollback_mode
-      @renderer.reset_frame!
+      return unless target
+      if target.terminal.scrolled_back?
+        @input.enter_scrollback_mode(source: :ring)
+        @renderer.reset_frame!
+      elsif @input.state == :scrollback
+        @input.enter_scrollback_mode(source: default_scroll_source(target))
+      end
     end
 
     # Move focus to the pane spatially adjacent in `direction` (:left/:right/
@@ -612,17 +616,47 @@ module Muxr
     def enter_scrollback
       target = focused_target
       return unless target
-      if target.terminal.alt_screen?
-        flash("no history while a full-screen app is running")
-        return
+      @input.enter_scrollback_mode(source: default_scroll_source(target))
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def app_scroll_available?(target)
+      term = target&.terminal
+      return false unless term
+      term.mouse_tracking? || term.alt_screen?
+    end
+
+    def default_scroll_source(target)
+      app_scroll_available?(target) ? :app : :ring
+    end
+
+    def toggle_scroll_source
+      target = focused_target
+      return unless target
+      if @input.scroll_source == :app
+        if target.terminal.alt_screen?
+          flash("no history while a full-screen app is running")
+          return
+        end
+        @input.enter_scrollback_mode(source: :ring)
+        flash("scrolling muxr history")
+      else
+        unless app_scroll_available?(target)
+          flash("this pane has no scroll of its own")
+          return
+        end
+        target.terminal.scroll_to_bottom
+        @input.enter_scrollback_mode(source: :app)
+        flash("scrolling the app")
       end
-      @input.enter_scrollback_mode
       @renderer.reset_frame!
       invalidate
     end
 
     def exit_scrollback
       target = focused_target
+      target&.terminal&.confine_selection_to_screen!(false)
       target&.terminal&.clear_selection
       target&.terminal&.clear_search
       target&.terminal&.scroll_to_bottom
@@ -634,6 +668,10 @@ module Muxr
     # the user into a buffered prompt; commit_search / cancel_search exit
     # back to scrollback.
     def enter_search(direction: :forward)
+      if @input.scroll_source == :app
+        flash("search reads muxr history — Tab to switch")
+        return
+      end
       @input.enter_search_mode(direction: direction)
       invalidate
     end
@@ -672,6 +710,10 @@ module Muxr
     def step_search(direction)
       target = focused_target
       return unless target
+      if @input.scroll_source == :app
+        flash("search reads muxr history — Tab to switch")
+        return
+      end
       term = target.terminal
       if term.search_matches.empty?
         flash("no search active")
@@ -681,9 +723,12 @@ module Muxr
       invalidate
     end
 
+    WHEEL_BURST_MAX = 200
+
     def scroll_focused(action)
       target = focused_target
       return unless target
+      return scroll_app(target, action) if @input.scroll_source == :app
       term = target.terminal
       rows = term.rows
       case action
@@ -699,6 +744,48 @@ module Muxr
       invalidate
     end
 
+    def scroll_app(target, action)
+      term = target.terminal
+      rows = term.rows
+      direction, count =
+        case action
+        when :line_back    then [:up, 1]
+        when :line_forward then [:down, 1]
+        when :half_back    then [:up, [rows / 2, 1].max]
+        when :half_forward then [:down, [rows / 2, 1].max]
+        when :full_back    then [:up, [rows - 1, 1].max]
+        when :full_forward then [:down, [rows - 1, 1].max]
+        end
+      unless direction
+        flash("only the app knows where its history starts")
+        return
+      end
+      target.write(app_scroll_bytes(term, direction, count))
+      invalidate
+    end
+
+    def app_scroll_bytes(term, direction, count)
+      count = count.clamp(1, WHEEL_BURST_MAX)
+      if term.mouse_tracking?
+        MouseReport.wheel(
+          direction,
+          row: [term.rows / 2 + 1, 1].max,
+          col: [term.cols / 2 + 1, 1].max,
+          encoding: term.mouse_encoding
+        ) * count
+      else
+        arrow_key(term, direction) * count
+      end
+    end
+
+    def arrow_key(term, direction)
+      if term.app_cursor_keys?
+        direction == :up ? "\eOA".b : "\eOB".b
+      else
+        direction == :up ? "\e[A".b : "\e[B".b
+      end
+    end
+
     def enter_selection
       target = focused_target
       return unless target
@@ -707,6 +794,7 @@ module Muxr
       # anchor. Start at the live cursor's visible position so the user lands
       # where their attention already is, instead of the top-left corner.
       term = target.terminal
+      term.confine_selection_to_screen!(@input.scroll_source == :app)
       term.place_selection_cursor(term.cursor_row, term.cursor_col)
       @input.enter_selection_mode
       @renderer.reset_frame!
@@ -1232,6 +1320,7 @@ module Muxr
       @renderer.render(
         @session,
         input_state: @input.state,
+        scroll_source: @input.scroll_source,
         command_buffer: @input.command_buffer,
         command_completions: @input.command_completions,
         search_buffer: @input.search_buffer,
@@ -1244,7 +1333,17 @@ module Muxr
 
     def leave_stale_scrollback
       return unless @input.state == :scrollback
-      return unless focused_target&.terminal&.alt_screen?
+      target = focused_target
+      term = target&.terminal
+      return unless term
+      if @input.scroll_source == :app
+        return if app_scroll_available?(target)
+        @input.enter_scrollback_mode(source: :ring)
+        flash("app exited — scrolling muxr history")
+        @renderer.reset_frame!
+        return
+      end
+      return unless term.alt_screen?
       @input.enter_idle_mode
       @renderer.reset_frame!
     end

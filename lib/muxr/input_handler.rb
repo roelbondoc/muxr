@@ -127,6 +127,7 @@ module Muxr
     }.freeze
 
     SCROLLBACK_EXITS = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
+    SCROLL_SOURCE_TOGGLE = "\t"
 
     SELECTION_BINDINGS = {
       "h"    => :left,
@@ -186,12 +187,13 @@ module Muxr
 
     DIGIT_RE = /\A[1-9]\z/.freeze
 
-    attr_reader :state, :command_buffer, :command_completions, :search_buffer, :search_direction, :base_mode
+    attr_reader :state, :command_buffer, :command_completions, :search_buffer, :search_direction, :base_mode, :scroll_source
 
     def initialize(app)
       @app = app
       @state = :normal
       @base_mode = :normal
+      @scroll_source = :ring
       @command_buffer = +""
       # Ambiguous Tab-completion candidates for the current command buffer,
       # shown as a hint in the prompt. nil when there's nothing to disambiguate.
@@ -278,8 +280,9 @@ module Muxr
       @state = :confirm_close
     end
 
-    def enter_scrollback_mode
+    def enter_scrollback_mode(source: nil)
       @state = :scrollback
+      @scroll_source = source if source
     end
 
     def enter_search_mode(direction: :forward)
@@ -424,6 +427,10 @@ module Muxr
         # it stays put. Scrollback is effectively pane-bound now.
         @prefix_return = :scrollback
         @state = :prefix
+        return
+      end
+      if ch == SCROLL_SOURCE_TOGGLE
+        @app.toggle_scroll_source
         return
       end
       if ch == "i"
