@@ -396,18 +396,22 @@ module Muxr
           c.bg = [:c256, 156]
           c.attrs = 0
         end
-      elsif message
-        msg = " #{message} "
-        start = [w - msg.length, 0].max
-        msg.each_char.with_index do |ch, i|
-          x = start + i
-          next unless x < w
-          c = frame[y][x]
-          c.char = ch
-          c.fg = [:c256, 15]
-          c.bg = [:c256, 28]
-          c.attrs = Terminal::BOLD
-        end
+      end
+
+      draw_status_message(frame, y, w, message) if message
+    end
+
+    def draw_status_message(frame, y, w, message)
+      msg = " #{message} "
+      start = [w - msg.length, 0].max
+      msg.each_char.with_index do |ch, i|
+        x = start + i
+        next unless x < w
+        c = frame[y][x]
+        c.char = ch
+        c.fg = [:c256, 15]
+        c.bg = [:c256, 28]
+        c.attrs = Terminal::BOLD
       end
     end
 

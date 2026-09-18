@@ -38,11 +38,25 @@ class TestRenderer < Minitest::Test
     assert_includes render(roomy), "layout:auto:spiral"
   end
 
-  def render(session)
+  def render(session, **opts)
     out = StringIO.new
     renderer = Muxr::Renderer.new(out: out)
-    renderer.render(session)
+    renderer.render(session, **opts)
     out.string
+  end
+
+  def test_a_flash_is_visible_over_every_full_row_overlay
+    session = build_session(layout: :tall, focused_index: 0, width: 120, height: 20)
+    [:normal, :scrollback, :selection, :search, :command].each do |state|
+      painted = render(session, input_state: state, message: "no scroll of its own")
+      assert_includes painted, "no scroll of its own", "flash swallowed in #{state} mode"
+    end
+  end
+
+  def test_scrollback_overlay_names_the_scroller_in_play
+    session = build_session(layout: :tall, focused_index: 0, width: 160, height: 20)
+    assert_includes render(session, input_state: :scrollback, scroll_source: :app), "APP SCROLL"
+    assert_includes render(session, input_state: :scrollback, scroll_source: :ring), "SCROLLBACK"
   end
 
   # A borrowed pane's grid is sized by the session that owns it, so it can be
