@@ -313,7 +313,7 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
   gap: 1.6rem;
   align-items: start;
 }
-@media (max-width: 900px) { .play { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .play { grid-template-columns: minmax(0, 1fr); } }
 
 #stage {
   position: relative;
@@ -369,6 +369,7 @@ figcaption b { color: var(--ink-soft); font-weight: 500; }
   white-space: nowrap;
 }
 .statusline .chip { color: var(--term-accent); }
+.statusline > span:first-child { overflow: hidden; text-overflow: ellipsis; }
 #stage { border-radius: var(--radius) var(--radius) 0 0; }
 
 .keypad { display: grid; gap: 1.1rem; }
@@ -565,7 +566,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <p class="hero-sub">
           A keyboard-driven terminal multiplexer written in pure Ruby. GNU Screen's
           keybindings, xmonad's automatic tiling, and a Quake-style drop-down drawer —
-          in about eight thousand lines of stdlib, with no runtime gems at all.
+          in about nine thousand lines of stdlib, with no runtime gems at all.
         </p>
         <div class="cta-row">
           <div class="install">
@@ -581,8 +582,9 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <div><dt>runtime deps</dt><dd>none</dd></div>
         <div><dt>ruby</dt><dd>≥ 3.4</dd></div>
         <div><dt>emulator</dt><dd>VT100, written here</dd></div>
-        <div><dt>scrollback</dt><dd>5 000 rows / pane</dd></div>
-        <div><dt>tests</dt><dd>470+</dd></div>
+        <div><dt>scrollback</dt><dd>50 000 rows / pane</dd></div>
+        <div><dt>config</dt><dd>one JSON file, optional</dd></div>
+        <div><dt>tests</dt><dd>600+</dd></div>
         <div><dt>licence</dt><dd>MIT</dd></div>
       </dl>
     </div>
@@ -634,6 +636,12 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           moves focus spatially, exactly as muxr's neighbour lookup does.
         </p>
         <p class="hint">
+          <kbd>&lt;</kbd> <kbd>&gt;</kbd> size the master area and <kbd>,</kbd>
+          <kbd>.</kbd> change how many panes share it, in <code>tall</code>,
+          <code>wide</code> and <code>centered</code>. <kbd>z</kbd> zooms the focused
+          pane and puts the layout back on the second press.
+        </p>
+        <p class="hint">
           <b>Screen</b> resizes the simulated terminal. <kbd>F</kbd> —
           <code>auto</code>, the layout new sessions start in — is the one that
           reads it: <code>spiral</code> from 180×30 up, <code>stack</code> below.
@@ -661,8 +669,11 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         Each pane's title carries a positional slot (<code>#1</code>) and a stable six-hex
         id (<code>a3f9b2</code>) minted once and kept for life — through layout changes,
         detach and reattach, a move to another session, and a cold restart from disk.
-        <code>★</code> marks the layout master; <code>· npm&nbsp;test</code> appears when
-        something other than the shell holds the foreground.
+        Give a pane a name with <code>:rename api</code> and the title says
+        <code>#1 api</code> instead. <code>★</code> marks the layout master;
+        <code>· npm&nbsp;test</code> appears when something other than the shell holds
+        the foreground; <code>#2!</code>, <code>#2~</code> and <code>#2•</code> mean the
+        pane <a href="#attention">wants you</a>.
       </p>
     </div>
 
@@ -706,6 +717,8 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           <tr><td><kbd>|</kbd><kbd>-</kbd><kbd>f</kbd><kbd>e</kbd><kbd>S</kbd></td><td>columns / rows / spiral / centered / stack</td></tr>
           <tr><td><kbd>F</kbd></td><td>auto — <code>spiral</code> on a roomy screen, <code>stack</code> below it (the default)</td></tr>
           <tr><td><kbd>Tab</kbd> <kbd>Enter</kbd></td><td>cycle layout / promote to master</td></tr>
+          <tr><td><kbd>&lt;</kbd> <kbd>&gt;</kbd> <kbd>,</kbd> <kbd>.</kbd></td><td>master size / master count</td></tr>
+          <tr><td><kbd>z</kbd></td><td>zoom the focused pane / put the layout back</td></tr>
           <tr><td><kbd>a</kbd> <kbd>1</kbd>…<kbd>9</kbd></td><td>last pane / jump by number</td></tr>
           <tr><td><kbd>s</kbd> <kbd>]</kbd></td><td>scrollback / paste the yank buffer</td></tr>
           <tr><td><kbd>~</kbd> <kbd>C</kbd> <kbd>P</kbd></td><td>drawer / Claude drawer / private flag</td></tr>
@@ -724,6 +737,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           <tr><td><kbd>C-a</kbd> <kbd>1</kbd>…<kbd>9</kbd></td><td>jump by number</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>Tab</kbd></td><td>cycle layout</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>Enter</kbd></td><td>promote to master</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>&lt;</kbd> <kbd>&gt;</kbd> <kbd>,</kbd> <kbd>.</kbd> <kbd>z</kbd></td><td>master size / count / zoom</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>scrollback / paste</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>~</kbd> <kbd>C</kbd> <kbd>P</kbd></td><td>drawer / Claude drawer / private</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>A</kbd> <kbd>r</kbd></td><td>borrow a pane / redraw</td></tr>
@@ -756,6 +770,13 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
             prefix works — <code>:layout t</code> is enough; ambiguous ones flash the
             candidates rather than guessing.
           </p>
+          <p>
+            It is also where the verbs without a key live: <code>:rename</code>,
+            <code>:silence 30</code>, <code>:sync</code>, <code>:ratio 60</code>,
+            <code>:masters 2</code>, <code>:capture</code> and <code>:reload</code> —
+            any of which you can put on a key of your own in the
+            <a href="#config">config file</a>.
+          </p>
         </div>
       </div>
     </div>
@@ -769,7 +790,8 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
       <h2 style="font-size:var(--step-3)">Search it, sweep it, yank it.</h2>
       <div class="prose">
         <p>
-          Every pane keeps a 5 000-row scrollback ring. <code>s</code> enters copy-mode
+          Every pane keeps a 50 000-row scrollback ring, and a row costs what it printed
+          rather than the width of the pane. <code>s</code> enters copy-mode
           with vi navigation; <code>/</code> searches with smart-case across the ring
           <em>and</em> the live grid, centring the match and highlighting every hit.
         </p>
@@ -780,6 +802,11 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           buffer <em>and</em> the system clipboard. Scrollback is
           <strong>pane-bound, not modal</strong>: switch panes while you're in it and
           each one remembers where you were reading.
+        </p>
+        <p>
+          When a screenful at a time isn't enough, <code>:capture</code> writes the
+          whole history out as plain text — no escape codes, wide glyphs intact — to
+          <code>~/.muxr/captures/</code> or wherever you name.
         </p>
       </div>
     </div>
@@ -799,6 +826,64 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         </div>
         <figcaption>A movable cursor with vim motions; <b>Ctrl-v</b> switches to a rectangular block.</figcaption>
       </figure>
+    </div>
+  </div>
+</section>
+
+<section id="attention">
+  <div class="shell">
+    <p class="eyebrow"><span class="key">! ~ •</span> attention</p>
+    <div class="split" style="align-items:start; margin-bottom:2.4rem;">
+      <h2 style="font-size:var(--step-3)">It tells you which pane wants you.</h2>
+      <p class="prose">
+        Five agents, a build and a log tail, and a bell rings. muxr has always passed
+        bells and desktop notifications through from every pane. Now it also remembers
+        <strong>which</strong> pane it was, marks it in its title and in the status bar,
+        and forgets as soon as you look at it.
+      </p>
+    </div>
+
+    <div class="split" style="align-items:start;">
+      <div class="stack-2">
+<pre class="snippet">┌─ #1 api ★ · claude ───────┬─ <span class="w">#2!</span> build ──────────┐
+│                           │ <span class="c">rang the bell</span>        │
+│                           ├─ <span class="w">#3~</span> deploy ─────────┤
+│                           │ <span class="c">quiet for 30s</span>        │
+│                           ├─ <span class="w">#4•</span> logs ───────────┤
+│                           │ <span class="c">new output</span>           │
+└───────────────────────────┴──────────────────────┘
+ [NORMAL] [work] panes:4 layout:tall <span class="k">alerts:2!,3~,4•</span></pre>
+        <ul class="ticks">
+          <li><span><code>!</code> the pane rang the bell or sent an OSC 9 / 777 notification.</span></li>
+          <li><span><code>•</code> the pane printed while you were looking elsewhere. Prompt redraws caused by a re-tile are ignored.</span></li>
+          <li><span><code>~</code> the pane went quiet for longer than <code>:silence 30</code> allows — for the job that tells you it is done by stopping.</span></li>
+        </ul>
+      </div>
+
+      <div class="stack-2">
+        <dl class="spec" style="margin:0">
+          <div class="spec-row">
+            <dt>:silence 30</dt>
+            <dd>Arms a monitor on the focused pane. Once it has printed nothing for that
+              long, muxr flashes <code>pane #3 silent for 30s</code>, rings your terminal's
+              bell, and marks it <code>~</code>. It fires once per quiet spell, takes
+              <code>30s</code> or <code>2m</code>, and is saved with the session.</dd>
+          </div>
+          <div class="spec-row">
+            <dt>:sync</dt>
+            <dd>Broadcasts what you type, and what you paste, to <strong>every pane in the
+              window</strong> — the same command on six hosts in one keystroke. A red
+              <code>[SYNC]</code> chip and red borders stay up for as long as it is on, the
+              drawer is never included, and it is never saved with the session.</dd>
+          </div>
+          <div class="spec-row">
+            <dt>:rename api</dt>
+            <dd>Names the focused pane, in its title and over MCP: an agent can be told to
+              <em>run the tests in api</em>, and a name two panes share is refused rather
+              than guessed.</dd>
+          </div>
+        </dl>
+      </div>
     </div>
   </div>
 </section>
@@ -873,10 +958,10 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           </p>
         </div>
         <ul class="ticks">
-          <li>The PTY runs at the smallest viewport looking at it, so it fits both layouts at once.</li>
-          <li>Owner stops → the socket closes and the borrower drops the pane on its next tick.</li>
-          <li>Borrower stops → only the mirror goes away; the pane carries on at home.</li>
-          <li>Private panes are never offered, and borrowed panes are left out of <code>:save</code>.</li>
+          <li><span>The PTY runs at the smallest viewport looking at it, so it fits both layouts at once.</span></li>
+          <li><span>Owner stops → the socket closes and the borrower drops the pane on its next tick.</span></li>
+          <li><span>Borrower stops → only the mirror goes away; the pane carries on at home.</span></li>
+          <li><span>Private panes are never offered, and borrowed panes are left out of <code>:save</code>.</span></li>
         </ul>
       </div>
 
@@ -972,6 +1057,42 @@ drawer.read / send_input    session.save
           </div>
         </figure>
       </div>
+    </div>
+  </div>
+</section>
+
+<section id="config">
+  <div class="shell">
+    <p class="eyebrow">~/.muxr/config.json</p>
+    <div class="split" style="align-items:start; margin-bottom:2.4rem;">
+      <h2 style="font-size:var(--step-3)">Your fingers, not ours.</h2>
+      <p class="prose">
+        One optional JSON file — parsed, never evaluated — sets the default layout, the
+        scrollback depth, the master shape and the point where <code>auto</code> flips to
+        <code>spiral</code>. It moves the prefix to <code>Ctrl-b</code> if tmux is in
+        your hands, and puts any action or any <code>:</code> command on any key.
+        <code>:reload</code> picks up an edit without restarting the session.
+      </p>
+    </div>
+
+    <div class="split" style="align-items:start;">
+<pre class="snippet">{
+  <span class="k">"layout"</span>: "tall",
+  <span class="k">"scrollback"</span>: 20000,
+  <span class="k">"master_ratio"</span>: 0.6,
+  <span class="k">"auto_spiral_min"</span>: { "cols": 200, "rows": 40 },
+  <span class="k">"prefix"</span>: "C-b",
+  <span class="k">"keys"</span>: {
+    "normal": { "Z": "toggle_zoom", "Y": <span class="w">":sync"</span>, "q": null },
+    "prefix": { "Space": "cycle_layout", "S": <span class="w">":capture"</span> }
+  }
+}</pre>
+      <ul class="ticks">
+        <li><span>A key is one character, <code>C-x</code>, <code>Tab</code>, <code>Enter</code>, <code>Space</code> or <code>Esc</code>.</span></li>
+        <li><span>It maps to a built-in action (<code>set_layout:grid</code>, <code>focus_direction:left</code>), to a <code>:</code> command, or to <code>null</code> to unbind it.</span></li>
+        <li><span>A mistake is never fatal: the bad setting is skipped, the first problem is flashed when you attach, and all of them go to the session log.</span></li>
+        <li><span>A restored session keeps its own layout, and <code>MUXR_SCROLLBACK</code> still wins over <code>scrollback</code>.</span></li>
+      </ul>
     </div>
   </div>
 </section>
@@ -1081,9 +1202,11 @@ drawer.read / send_input    session.save
     <span class="mode">[NORMAL]</span>
     <a href="#layouts"><span class="k">layout:</span>ten</a>
     <a href="#keys"><span class="k">keys:</span>two&nbsp;modes</a>
-    <a href="#scrollback" class="hide-sm"><span class="k">scrollback:</span>5000</a>
+    <a href="#scrollback" class="hide-sm"><span class="k">scrollback:</span>50000</a>
+    <a href="#attention"><span class="k">alerts:</span>2!,3•</a>
     <a href="#sessions"><span class="k">panes:</span>shared</a>
     <a href="#agents"><span class="k">ctrl:</span>mcp</a>
+    <a href="#config" class="hide-sm"><span class="k">config:</span>json</a>
     <a href="#internals" class="hide-sm"><span class="k">deps:</span>0</a>
     <span class="spacer"></span>
     <a class="gh" href="https://github.com/roelbondoc/muxr">github ↗</a>
@@ -1097,39 +1220,46 @@ const idiv = (a, b) => Math.floor(a / b);
 const LAYOUTS = ["tall", "wide", "columns", "rows", "grid", "spiral", "centered", "stack", "monocle", "auto"];
 const AUTO_SPIRAL_MIN_COLS = 180, AUTO_SPIRAL_MIN_ROWS = 30;
 
-function tall(count, a, master) {
-  if (count === 1) return [R(a.x, a.y, a.w, a.h)];
-  const masterW = Math.max(idiv(a.w, 2), 1);
-  const stackW = Math.max(a.w - masterW, 1);
-  const others = [...Array(count).keys()].filter((i) => i !== master);
-  const baseH = idiv(a.h, others.length);
-  const rem = a.h - baseH * others.length;
-  const rects = new Array(count);
-  rects[master] = R(a.x, a.y, masterW, a.h);
-  let y = a.y;
-  others.forEach((idx, i) => {
-    const h = baseH + (i < rem ? 1 : 0);
-    rects[idx] = R(a.x + masterW, y, stackW, h);
-    y += h;
+const RATIO_MIN = 0.1, RATIO_MAX = 0.9;
+const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);
+
+function splitMasters(count, master, nmaster) {
+  const ordered = [master, ...[...Array(count).keys()].filter((i) => i !== master)];
+  const n = clamp(nmaster, 1, count);
+  return [ordered.slice(0, n), ordered.slice(n)];
+}
+
+const masterExtent = (total, ratio) => clamp(Math.floor(total * ratio), 1, Math.max(total - 1, 1));
+
+function spreadRow(rects, indices, x, y, totalW, h) {
+  if (!indices.length) return;
+  const baseW = idiv(totalW, indices.length);
+  const rem = totalW - baseW * indices.length;
+  let cx = x;
+  indices.forEach((idx, i) => {
+    const w = baseW + (i < rem ? 1 : 0);
+    rects[idx] = R(cx, y, w, h);
+    cx += w;
   });
+}
+
+function tall(count, a, master, ratio, nmaster) {
+  const [masters, others] = splitMasters(count, master, nmaster);
+  const rects = new Array(count);
+  if (!others.length) { stackColumn(rects, masters, a.x, a.y, a.w, a.h); return rects; }
+  const masterW = masterExtent(a.w, ratio);
+  stackColumn(rects, masters, a.x, a.y, masterW, a.h);
+  stackColumn(rects, others, a.x + masterW, a.y, Math.max(a.w - masterW, 1), a.h);
   return rects;
 }
 
-function wide(count, a, master) {
-  if (count === 1) return [R(a.x, a.y, a.w, a.h)];
-  const masterH = Math.max(idiv(a.h, 2), 1);
-  const stackH = Math.max(a.h - masterH, 1);
-  const others = [...Array(count).keys()].filter((i) => i !== master);
-  const baseW = idiv(a.w, others.length);
-  const rem = a.w - baseW * others.length;
+function wide(count, a, master, ratio, nmaster) {
+  const [masters, others] = splitMasters(count, master, nmaster);
   const rects = new Array(count);
-  rects[master] = R(a.x, a.y, a.w, masterH);
-  let x = a.x;
-  others.forEach((idx, i) => {
-    const w = baseW + (i < rem ? 1 : 0);
-    rects[idx] = R(x, a.y + masterH, w, stackH);
-    x += w;
-  });
+  if (!others.length) { spreadRow(rects, masters, a.x, a.y, a.w, a.h); return rects; }
+  const masterH = masterExtent(a.h, ratio);
+  spreadRow(rects, masters, a.x, a.y, a.w, masterH);
+  spreadRow(rects, others, a.x, a.y + masterH, a.w, Math.max(a.h - masterH, 1));
   return rects;
 }
 
@@ -1185,21 +1315,20 @@ function stackColumn(rects, indices, x, y, w, totalH) {
   });
 }
 
-function centered(count, a, master) {
-  if (count === 1) return [R(a.x, a.y, a.w, a.h)];
-  const others = [...Array(count).keys()].filter((i) => i !== master);
+function centered(count, a, master, ratio, nmaster) {
+  const [masters, others] = splitMasters(count, master, nmaster);
   const rects = new Array(count);
+  if (!others.length) { stackColumn(rects, masters, a.x, a.y, a.w, a.h); return rects; }
+  const masterW = masterExtent(a.w, ratio);
   if (others.length === 1) {
-    const masterW = Math.max(idiv(a.w, 2), 1);
-    rects[master] = R(a.x, a.y, masterW, a.h);
+    stackColumn(rects, masters, a.x, a.y, masterW, a.h);
     rects[others[0]] = R(a.x + masterW, a.y, Math.max(a.w - masterW, 1), a.h);
     return rects;
   }
-  const masterW = Math.max(idiv(a.w, 2), 1);
   const sideW = a.w - masterW;
   const leftW = Math.max(idiv(sideW, 2), 1);
   const rightW = Math.max(sideW - leftW, 1);
-  rects[master] = R(a.x + leftW, a.y, masterW, a.h);
+  stackColumn(rects, masters, a.x + leftW, a.y, masterW, a.h);
   stackColumn(rects, others.filter((_, i) => i % 2 === 0), a.x, a.y, leftW, a.h);
   stackColumn(rects, others.filter((_, i) => i % 2 === 1), a.x + leftW + masterW, a.y, rightW, a.h);
   return rects;
@@ -1249,16 +1378,17 @@ function resolve(layout, area) {
   return area.w >= AUTO_SPIRAL_MIN_COLS && area.h >= AUTO_SPIRAL_MIN_ROWS ? "spiral" : "stack";
 }
 
-function compute(layout, count, area, focused, master) {
+function compute(layout, count, area, focused, master, ratio = 0.5, nmaster = 1) {
   if (count <= 0) return [];
+  ratio = clamp(ratio, RATIO_MIN, RATIO_MAX);
   switch (resolve(layout, area)) {
-    case "tall": return tall(count, area, master);
-    case "wide": return wide(count, area, master);
+    case "tall": return tall(count, area, master, ratio, nmaster);
+    case "wide": return wide(count, area, master, ratio, nmaster);
     case "columns": return columns(count, area);
     case "rows": return rows(count, area);
     case "grid": return grid(count, area);
     case "spiral": return spiral(count, area);
-    case "centered": return centered(count, area, master);
+    case "centered": return centered(count, area, master, ratio, nmaster);
     case "stack": return stackLayout(count, area, focused);
     default: return Array.from({ length: count }, () => R(area.x, area.y, area.w, area.h));
   }
@@ -1313,7 +1443,7 @@ const SCREENS = [
 ];
 const WIDEST = Math.max(...SCREENS.map((s) => s.cols));
 const SAMPLES = [
-  ["$ rake test", "474 runs, 0 failures"],
+  ["$ rake test", "613 runs, 0 failures"],
   ["$ git log --oneline", "61df55c Move a pane"],
   ["$ vim lib/muxr/pane.rb", "-- INSERT --"],
   ["$ tail -f log/dev.log", "GET /health 200"],
@@ -1326,6 +1456,7 @@ const SAMPLES = [
 
 const state = {
   layout: "tall", count: 5, focused: 0, master: 0, ids: [],
+  ratio: 0.5, nmaster: 1, zoomReturn: null,
   screen: SCREENS.find((s) => s.key === "desktop")
 };
 const rand = () => Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, "0");
@@ -1336,12 +1467,16 @@ const stageBox = document.getElementById("stage-box");
 const slLeft = document.getElementById("sl-left");
 
 const screenArea = () => R(0, 0, state.screen.cols, state.screen.rows);
-const layoutLabel = () =>
-  state.layout === "auto" ? "auto:" + resolve("auto", screenArea()) : state.layout;
+const layoutLabel = () => {
+  if (state.zoomReturn) return "zoom:" + state.zoomReturn;
+  return state.layout === "auto" ? "auto:" + resolve("auto", screenArea()) : state.layout;
+};
+const paneRects = () =>
+  compute(state.layout, state.count, screenArea(), state.focused, state.master, state.ratio, state.nmaster);
 
 function render() {
   const { cols, rows } = state.screen;
-  const rects = compute(state.layout, state.count, screenArea(), state.focused, state.master);
+  const rects = paneRects();
   stageBox.style.maxWidth = (cols / WIDEST) * 100 + "%";
   stage.style.aspectRatio = cols + " / " + rows * 2;
   stage.replaceChildren();
@@ -1378,11 +1513,12 @@ function render() {
   slLeft.textContent =
     "[playground] panes:" + state.count +
     " layout:" + layoutLabel() +
+    " master:" + Math.round(state.ratio * 100) + "%/" + state.nmaster +
     " focused:#" + (state.focused + 1) +
     " drawer:hidden";
 
   document.querySelectorAll("#layout-keys button").forEach((b) => {
-    b.setAttribute("aria-pressed", String(b.dataset.layout === state.layout));
+    b.setAttribute("aria-pressed", String(b.dataset.layout === (state.zoomReturn ? "monocle" : state.layout)));
   });
   document.querySelectorAll("#screen-keys button").forEach((b) => {
     b.setAttribute("aria-pressed", String(b.dataset.screen === state.screen.key));
@@ -1418,6 +1554,7 @@ function refreshShot() {
 
 function setLayout(name) {
   state.layout = name;
+  state.zoomReturn = null;
   refreshShot();
   render();
 }
@@ -1445,8 +1582,30 @@ function closePane() {
 
 function promote() { state.master = state.focused; render(); }
 
+function resizeMaster(delta) {
+  state.ratio = Math.round(clamp(state.ratio + delta, RATIO_MIN, RATIO_MAX) * 100) / 100;
+  render();
+}
+
+function changeMasters(delta) {
+  state.nmaster = clamp(state.nmaster + delta, 1, state.count);
+  render();
+}
+
+function toggleZoom() {
+  if (state.zoomReturn) {
+    state.layout = state.zoomReturn;
+    state.zoomReturn = null;
+  } else if (state.layout !== "monocle") {
+    state.zoomReturn = state.layout;
+    state.layout = "monocle";
+  }
+  refreshShot();
+  render();
+}
+
 function move(dir) {
-  const rects = compute(state.layout, state.count, screenArea(), state.focused, state.master);
+  const rects = paneRects();
   const n = neighbor(rects, state.focused, dir);
   if (n !== null) { state.focused = n; }
   else if (state.layout === "monocle") {
@@ -1494,7 +1653,12 @@ const ACTIONS = [
   ["j", "down", () => move("down")],
   ["k", "up", () => move("up")],
   ["l", "right", () => move("right")],
-  ["⇥", "cycle", () => setLayout(LAYOUTS[(LAYOUTS.indexOf(state.layout) + 1) % LAYOUTS.length])]
+  ["⇥", "cycle", () => setLayout(LAYOUTS[(LAYOUTS.indexOf(state.layout) + 1) % LAYOUTS.length])],
+  ["<", "shrink master", () => resizeMaster(-0.05)],
+  [">", "grow master", () => resizeMaster(0.05)],
+  [",", "one fewer master", () => changeMasters(-1)],
+  [".", "one more master", () => changeMasters(1)],
+  ["z", "zoom", toggleZoom]
 ];
 const actionRow = document.getElementById("action-keys");
 ACTIONS.forEach(([label, title, fn]) => {
@@ -1517,6 +1681,9 @@ document.addEventListener("keydown", (e) => {
   if (LAYOUT_KEYS[k]) { setLayout(LAYOUT_KEYS[k]); e.preventDefault(); return; }
   if (k === "c") { addPane(); e.preventDefault(); return; }
   if (k === "x") { closePane(); e.preventDefault(); return; }
+  const shape = { "<": () => resizeMaster(-0.05), ">": () => resizeMaster(0.05),
+                  ",": () => changeMasters(-1), ".": () => changeMasters(1), z: toggleZoom };
+  if (shape[k]) { shape[k](); e.preventDefault(); return; }
   if (k === "Enter" && e.target === stage) { promote(); e.preventDefault(); return; }
   if (k === "Tab" && e.target === stage) {
     setLayout(LAYOUTS[(LAYOUTS.indexOf(state.layout) + 1) % LAYOUTS.length]);

@@ -17,6 +17,7 @@
   <a href="#install">Install</a> ·
   <a href="#layouts">Layouts</a> ·
   <a href="#keybindings">Keybindings</a> ·
+  <a href="#configuration">Configuration</a> ·
   <a href="#claude-code-integration">Claude Code</a> ·
   <a href="CHANGELOG.md">Changelog</a>
 </p>
@@ -32,14 +33,17 @@ protocol, the tiling maths — is stdlib Ruby with no runtime gems.
 
 |   | |
 |---|---|
-| **Ten automatic layouts** | tall, wide, columns, rows, grid, spiral, centered, stack, monocle, auto — each a pure function of pane count and screen size |
+| **Ten automatic layouts** | tall, wide, columns, rows, grid, spiral, centered, stack, monocle, auto — each a pure function of pane count and screen size, with an xmonad-style resizable master area and a one-key zoom |
 | **Two input modes** | *normal* acts on the multiplexer with single keys; *passthrough* forwards everything to the shell behind the classic `Ctrl-a` prefix |
 | **Detach and reattach** | the server keeps every PTY alive; reattaching gives you back the same shells with full history |
 | **Quake-style drawer** | a persistent overlay shell that drops from the top of the screen and never loses its scrollback |
 | **Real terminal emulation** | truecolor SGR, scroll regions, alternate screen, bracketed paste, wide/CJK/emoji cells, OSC 8 hyperlinks |
-| **Scrollback with vi motions** | 50,000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard |
+| **Scrollback with vi motions** | 50,000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard, `:capture` a whole history to a file |
+| **Knows which pane wants you** | a pane that rang the bell, printed while you looked away, or went quiet for longer than you asked is marked in its title and the status bar |
+| **Type into every pane at once** | `:sync` broadcasts keystrokes and pastes across the window, with a red status chip so you never forget it is on |
 | **Panes across sessions** | borrow a live pane from another muxr session, or hand it over for good by passing its pty file descriptor down a socket |
-| **Built for agents** | a JSON-RPC control socket, an MCP bridge, and private panes that programmatic callers cannot see or touch |
+| **Built for agents** | a JSON-RPC control socket, an MCP bridge, panes you can name and refer to by name, and private panes that programmatic callers cannot see or touch |
+| **Configurable without patching** | `~/.muxr/config.json` sets the default layout, scrollback depth, master shape, the prefix key, and remaps any key onto an action or a `:` command |
 
 ## Install
 
@@ -86,6 +90,9 @@ t            tall layout — master left, the rest stacked right
 l  j  k      move focus around spatially
 J            drag the focused pane down past its neighbour
 Enter        promote the focused pane to master
+> >          give the master a bigger share of the screen
+z            zoom the focused pane; z again to put the layout back
+:rename api  name the pane so its title says what is in it
 i            drop into passthrough and actually use the shell
 C-a Esc      back to normal mode
 ~            drop the drawer over everything
@@ -116,7 +123,27 @@ a pane simply recomputes the tiling on the next frame.
 | `monocle`  | `m`  | focused pane fullscreen |
 | `auto`     | `F`  | `spiral` when the screen is at least 180×30, `stack` below that |
 
-`Tab` cycles through them in that order. New sessions start in `auto`.
+`Tab` cycles through them in that order. New sessions start in `auto`, or in
+whatever `layout` your [config](#configuration) names.
+
+### Shaping the master area
+
+`tall`, `wide` and `centered` have a master area, and like xmonad you can size
+it and fill it. `<` / `>` shrink or grow the master's share of the screen in
+5% steps, between 10% and 90%. `,` / `.` take a pane out of the master area or
+add one to it, so two panes can stand side by side as masters while the rest
+stack beside them. Both work in normal mode and after `C-a`. `:ratio 60` and
+`:masters 2` set them directly. The shape is flashed on every change and saved
+with the session, and at the defaults (50%, one master) every layout is
+exactly what it always was.
+
+### Zoom
+
+`z` (or `C-a z`, or `:zoom`) takes the focused pane full screen, and pressing
+it again restores the layout you were in. It is monocle with a way back: the
+status bar reads `layout:zoom:tall` while zoomed, so you can see what `z` will
+return to. Picking a layout yourself forgets the zoom, and a session saved
+while zoomed saves the layout underneath.
 
 <table>
   <tr>
@@ -154,21 +181,25 @@ a pane simply recomputes the tiling on the next frame.
 ## Reading the screen
 
 ```
-┌─ #1 a3f9b2 ★ · npm test ──── [NORMAL] ─┬─ #2 c2e810 ──────────────┐
-│ master pane (running npm test)         │ stacked pane             │
+┌─ #1 api ★ · npm test ─────── [NORMAL] ─┬─ #2! c2e810 ─────────────┐
+│ master pane (running npm test)         │ stacked pane that rang   │
 │                                        ├──────────────────────────┤
-│                                        │ #3 9b1d04 [P]            │
-│                                        │ private pane             │
+│                                        │ #3• 9b1d04 [P]           │
+│                                        │ private pane, new output │
 └────────────────────────────────────────┴──────────────────────────┘
- [NORMAL] [work] panes:3 layout:tall focused:#1 drawer:hidden  muxr ^a ?
+ [NORMAL] [work] panes:3 layout:tall focused:#1 alerts:2!,3• drawer:hidden
 ```
 
 Each pane's title carries its slot (`#1`, `#2`, …) and a stable six-hex id
-(`a3f9b2`). The slot is positional and shifts as panes are created, closed, or
+(`a3f9b2`), or the name you gave it with `:rename`. The slot is positional and shifts as panes are created, closed, or
 promoted; the id is minted once and survives layout changes, detach/reattach,
 a move to another session, and a cold restart from the session JSON. `★` marks
 the layout master, `[P]` marks a [private pane](#private-panes), and
 `@api:b338b0` marks a pane [borrowed from another session](#sharing-and-moving-panes).
+A mark straight after the slot means the pane
+[wants your attention](#bells-activity-and-silence): `!` it rang the bell,
+`~` it went quiet, `•` it printed while you were looking elsewhere.
+`[silence 30s]` means a silence monitor is armed on it.
 
 When something other than the shell is in the foreground, the title shows it
 (`· npm test`). A background thread polls each pane's foreground process group
@@ -178,7 +209,8 @@ The `[MODE]` chip in the top-right corner and the focused pane's border colour
 both track the current mode: **cyan** normal, **green** passthrough, **orange**
 scrollback and its `/` search, **magenta** selection, **yellow** the command
 prompt, **red** a `y/n` confirmation, **blue** while help is open. Unfocused
-panes always use the grey border.
+panes use the grey border, except while [`:sync`](#typing-into-every-pane-at-once)
+is on, when they turn red because they receive your keystrokes too.
 
 ## Keybindings
 
@@ -197,6 +229,9 @@ multiplexer, no prefix required.
 | `\|` `-` `f` `e` `S` | layout: columns / rows / spiral / centered / stack |
 | `F` | layout: auto — `spiral` on a roomy screen, `stack` below the threshold |
 | `Tab` / `Enter` | cycle layout / promote focused pane to master |
+| `<` / `>` | shrink / grow the master area |
+| `,` / `.` | one fewer / one more master pane |
+| `z` | zoom the focused pane / restore the layout |
 | `a` / `1`…`9` | toggle last pane / jump to pane by number |
 | `r` | refresh — repaint the pane and nudge its program to redraw |
 | `s` | enter scrollback / copy-mode |
@@ -223,6 +258,8 @@ the historical `Ctrl-a` prefix.
 | `C-a n` / `C-a p` / `C-a a` | focus next / previous / last pane |
 | `C-a 1`…`9` | jump to pane by number |
 | `C-a Tab` / `C-a Enter` | cycle layout / promote to master |
+| `C-a <` `C-a >` / `C-a ,` `C-a .` | master size / master count |
+| `C-a z` | zoom the focused pane / restore the layout |
 | `C-a r` | refresh / redraw |
 | `C-a ~` / `C-a C` / `C-a P` | drawer / Claude Code drawer / toggle private |
 | `C-a A` | share or move in a pane from another session |
@@ -230,6 +267,9 @@ the historical `Ctrl-a` prefix.
 | `C-a d` / `C-a q` | detach / kill session (asks `y/n`) |
 | `C-a :` / `C-a ?` | command prompt / help |
 | `C-a C-a` | send a literal `Ctrl-a` to the focused pane |
+
+The prefix is `Ctrl-a` unless your [config](#configuration) says otherwise,
+and every binding in both tables can be remapped there.
 
 Layouts are chosen by name from the command prompt in passthrough
 (`C-a :layout grid`), or by cycling with `C-a Tab`; the single-key layout
@@ -255,8 +295,57 @@ attach                 # open the pane picker (same as A)
 save                   # write ~/.muxr/sessions/<name>.json
 restore                # print the path to the saved session
 sessions | ls          # list saved sessions and live servers
+rename [name]          # label the focused pane; bare clears it
+silence {30|30s|2m|off}  # alert when the focused pane goes quiet
+sync [on|off]          # type into every pane at once; bare toggles
+ratio <percent>        # the master's share of the screen (10–90)
+masters <n>            # how many panes share the master area
+zoom                   # same as z
+capture [path]         # save the pane's history as plain text
+reload                 # re-read ~/.muxr/config.json
 new | close | next | prev | master | detach | quit | help
 ```
+
+## Bells, activity, and silence
+
+The bell and OSC 9 / OSC 777 desktop notifications are forwarded to your real
+terminal from *any* pane, so a background pane can still get your attention.
+muxr also remembers **which** pane it was, so "something finished" becomes
+something you can act on:
+
+| Mark | Meaning |
+|------|---------|
+| `#2!` | the pane rang the bell or sent a desktop notification |
+| `#2~` | the pane went quiet for longer than its silence monitor allows |
+| `#2•` | the pane printed something while you were looking elsewhere |
+
+The marks also collect in the status bar as `alerts:2!,3•`, and all of them
+clear the moment you focus the pane. The pane you are looking at is never
+marked, unless no client is attached, in which case nobody is looking at it
+either. Output in the 1.5 seconds after a pane is created or resized does not
+count: every layout change makes every shell redraw its prompt, and those
+redraws would otherwise mark every pane on screen.
+
+`:silence 30` arms a **silence monitor** on the focused pane, for the build,
+deploy or agent that tells you it is done by going quiet. Once the pane has
+printed nothing for that long, muxr flashes `pane #2 silent for 30s`, rings
+your terminal's bell, and marks the pane `~`. It fires once per quiet spell
+and re-arms on the next output. It takes `30`, `30s` or `2m`, `:silence off`
+disarms it, and a bare `:silence` reports the setting. An armed pane shows
+`[silence 30s]` in its title, and the threshold is saved with the session.
+
+## Typing into every pane at once
+
+`:sync` broadcasts what you type in passthrough mode to every pane in the
+window, which makes running the same command on several hosts or checkouts one
+keystroke instead of several. `C-a ]` pastes are broadcast too. While it is on,
+the status bar carries a red `[SYNC]` chip and every unfocused pane gets a red
+border. `:sync off` (or a bare `:sync`, which toggles) ends it.
+
+Borrowed panes are included, and your keystrokes reach their real shells. The
+drawer is left out in both directions: when the drawer is focused, what you
+type stays in the drawer. Sync is deliberately never saved with the session.
+There is no default key for it, but you can [bind one](#configuration).
 
 ## The drawer
 
@@ -359,6 +448,17 @@ Switching between `v` and `C-v` preserves the anchor. Yanking fills muxr's
 internal buffer *and* pipes the text to `pbcopy` in the background (a silent
 no-op where `pbcopy` does not exist). `]` / `C-a ]` writes the buffer back
 into the focused pane.
+
+### Capturing a whole history
+
+`:capture` writes the focused pane's full scrollback and screen to a
+plain-text file, for the build log or transcript that is too long to yank a
+screen at a time. Escape codes are dropped, trailing spaces are trimmed, and
+wide glyphs come out whole. With no argument it writes
+`~/.muxr/captures/<session>-<pane>-<timestamp>.txt`; `:capture notes/run.txt`
+writes where you say, resolving a relative path against the directory the
+session was started in. While a full-screen program is up, the capture holds
+the shell underneath rather than the program's frame.
 
 ## Sharing and moving panes
 
@@ -481,6 +581,10 @@ pane.move / move_commit / move_abort       layout.set / layout.cycle
 drawer.toggle / show / hide / reset / read / send_input     session.save
 ```
 
+Anywhere a method takes a `pane`, it accepts the pane's id, its slot number,
+or the name a human gave it with `:rename`. An id always wins over a name that
+looks like one, and a name two panes share is refused rather than guessed.
+
 It accepts many concurrent clients and is independent of TTY attach —
 programmatic callers never count as "attached", so an agent and a human can
 drive the same session at once.
@@ -516,8 +620,8 @@ nothing to configure per pane. Register the bridge once at user scope
 (`claude mcp add muxr muxr-mcp --scope user`) and it is simply always there.
 A pane's shell also gets `MUXR_PANE`, its own pane id; the bridge refuses
 `muxr_pane_read`, `muxr_pane_send_input`, `muxr_pane_run` and
-`muxr_pane_kill` aimed at that id, since a claude driving its own pty feeds
-its output back to itself. `muxr_pane_focus` and `muxr_pane_promote` are
+`muxr_pane_kill` aimed at that pane, by id or by name, since a claude driving
+its own pty feeds its output back to itself. `muxr_pane_focus` and `muxr_pane_promote` are
 harmless on yourself and stay allowed.
 
 Because the bridge is registered for *every* claude session, including ones
@@ -582,9 +686,11 @@ there is no kill-without-confirm binding, by design.
   "layout": "tall",
   "focused_index": 0,
   "master_index": 0,
+  "master_ratio": 0.6,
+  "master_count": 1,
   "panes": [
-    {"id": "a3f9b2", "cwd": "/home/me/code", "private": false},
-    {"id": "c2e810", "cwd": "/tmp", "private": true}
+    {"id": "a3f9b2", "cwd": "/home/me/code", "private": false, "name": "api"},
+    {"id": "c2e810", "cwd": "/tmp", "private": true, "silence": 30}
   ],
   "drawer": {"visible": true, "cwd": "/home/me/code"}
 }
@@ -593,17 +699,70 @@ there is no kill-without-confirm binding, by design.
 That file is a **cold-storage fallback**, not the source of truth. It only
 matters once the server is gone (after `q`, or a reboot): relaunching
 `muxr <name>` rebuilds the layout and spawns fresh shells in the saved working
-directories, keeping the same pane ids and private flags. Shell history inside
+directories, keeping the same pane ids, names, private flags, silence
+monitors, and master shape. Shell history inside
 those panes is your shell's job, not muxr's.
 
 ```
 ~/.muxr/
+ ├─ config.json                 your settings (optional; see Configuration)
  ├─ sessions/<name>.json        structural snapshot written by `:save`
  ├─ sockets/<name>.sock         TTY client listener (auto-managed)
  ├─ sockets/<name>.ctrl.sock    control / MCP listener (auto-managed)
  ├─ images/                     images decoded out of the kitty protocol
+ ├─ captures/                   default destination for `:capture`
  └─ logs/<name>.log             server stdout and stderr
 ```
+
+## Configuration
+
+muxr reads `~/.muxr/config.json` when the server starts, or whatever file
+`MUXR_CONFIG` names. Every setting is optional, and `:reload` re-reads the file
+in a running session.
+
+```json
+{
+  "layout": "tall",
+  "scrollback": 20000,
+  "master_ratio": 0.6,
+  "master_count": 1,
+  "auto_spiral_min": {"cols": 200, "rows": 40},
+  "prefix": "C-b",
+  "keys": {
+    "normal": {"Z": "toggle_zoom", "Y": ":sync", "q": null},
+    "prefix": {"Space": "cycle_layout", "S": ":capture"}
+  }
+}
+```
+
+| Setting | Effect |
+|---------|--------|
+| `layout` | the layout new sessions start in (a restored session keeps its own) |
+| `scrollback` | rows of history per pane; `MUXR_SCROLLBACK` still wins when set |
+| `master_ratio`, `master_count` | the starting master shape, 0.1–0.9 and 1+ |
+| `auto_spiral_min` | the screen size at which `auto` switches from `stack` to `spiral` |
+| `prefix` | the passthrough prefix, any control key: `"C-b"` for tmux habits |
+| `keys.normal`, `keys.prefix` | remap keys in normal mode and after the prefix |
+
+A key is one character, `C-x`, `Tab`, `Enter`, `Space` or `Esc`. It maps to
+`null` to unbind it, to a `:` command to run that command (`":sync"`,
+`":silence 30"`, `":capture"`), or to one of the actions the built-in keys use:
+
+```
+new_pane request_close promote_master cycle_layout toggle_zoom
+shrink_master grow_master remove_master add_master
+set_layout:{tall,wide,columns,rows,grid,spiral,centered,stack,monocle,auto}
+focus_direction:{left,down,up,right}   move_direction:{left,down,up,right}
+focus_next focus_prev focus_last refresh_focused enter_scrollback
+toggle_drawer toggle_claude_drawer toggle_private_focused open_pane_picker
+paste_from_buffer show_help detach quit_immediate
+```
+
+`i`, `:` and `1`…`9` in normal mode, and `Esc`, `:`, the digits and the prefix
+itself after the prefix, are reserved. Anything muxr cannot make sense of (an
+unknown setting, a bad value, a key it cannot parse) is skipped rather than
+fatal: the first problem is flashed when you attach, and all of them go to
+`~/.muxr/logs/<name>.log`.
 
 ## Architecture
 
@@ -646,7 +805,7 @@ ruby -Ilib -Itest test/test_layout_manager.rb      # one file
 ruby -Ilib -Itest test/test_terminal.rb -n test_csi_cursor_position
 ```
 
-The suite is 500+ tests covering the layout algorithms (including spatial
+The suite is 600+ tests covering the layout algorithms (including spatial
 neighbour lookup), the input-handler state machine, the drawer, window pane
 ordering, session JSON round-trips, the client/server framing protocol, the
 control server and MCP bridge, pane mirroring and fd handoff, the width probe,
