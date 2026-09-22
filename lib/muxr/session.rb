@@ -45,7 +45,7 @@ module Muxr
         "focused_index"  => @window.focused_index,
         "master_index"   => @window.master_index,
         "focus_drawer"   => @focus_drawer,
-        "panes"          => own_panes.map { |p| { "id" => safe_id(p), "cwd" => safe_cwd(p), "private" => safe_private(p) } },
+        "panes"          => own_panes.map { |p| serialize_pane(p) },
         "drawer"         => serialize_drawer
       }
     end
@@ -77,6 +77,13 @@ module Muxr
     # quietly fork the thing the user was sharing.
     def own_panes
       @window.panes.reject { |p| p.respond_to?(:mirror?) && p.mirror? }
+    end
+
+    def serialize_pane(pane)
+      entry = { "id" => safe_id(pane), "cwd" => safe_cwd(pane), "private" => safe_private(pane) }
+      silence = pane.respond_to?(:silence_after) ? pane.silence_after : nil
+      entry["silence"] = silence if silence
+      entry
     end
 
     def safe_cwd(pane)

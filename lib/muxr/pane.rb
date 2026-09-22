@@ -46,6 +46,8 @@ module Muxr
       @mirror_size = nil
       @activity = false
       @bell = false
+      @silent = false
+      @silence_after = nil
       hush!
     end
 
@@ -118,8 +120,35 @@ module Muxr
       @bell
     end
 
-    def note_output(now = Pane.now)
-      @activity = true if now >= @quiet_until
+    def silent?
+      @silent
+    end
+
+    attr_reader :silence_after
+
+    def note_output(now = Pane.now, attended: false)
+      return if now < @quiet_until
+      @last_output_at = now
+      @silent = false
+      @silence_reported = false
+      @activity = true unless attended
+    end
+
+    def watch_silence(seconds, now = Pane.now)
+      @silence_after = seconds
+      @last_output_at = now
+      @silent = false
+      @silence_reported = false
+    end
+
+    def silence_due?(now = Pane.now)
+      return false unless @silence_after
+      !@silence_reported && now - @last_output_at >= @silence_after
+    end
+
+    def note_silence!
+      @silent = true
+      @silence_reported = true
     end
 
     def note_bell
@@ -129,6 +158,7 @@ module Muxr
     def clear_attention!
       @activity = false
       @bell = false
+      @silent = false
     end
 
     def hush!(now = Pane.now)

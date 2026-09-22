@@ -875,6 +875,30 @@ module Muxr
       invalidate
     end
 
+    SILENCE_ARG = /\A(\d+)(s|m)?\z/
+
+    def monitor_silence(arg)
+      pane = focused_pane
+      return unless pane
+      if arg.nil?
+        flash(pane.silence_after ? "silence: #{format_seconds(pane.silence_after)}" : "silence: off")
+      elsif arg == "off"
+        pane.watch_silence(nil)
+        flash("silence monitor off")
+      elsif (m = SILENCE_ARG.match(arg)) && m[1].to_i.positive?
+        seconds = m[1].to_i * (m[2] == "m" ? 60 : 1)
+        pane.watch_silence(seconds)
+        flash("alert when pane ##{@session.window.focused_index + 1} is silent for #{format_seconds(seconds)}")
+      else
+        flash("silence: expected seconds (30, 30s, 2m) or off")
+      end
+      invalidate
+    end
+
+    def format_seconds(seconds)
+      seconds % 60 == 0 && seconds >= 60 ? "#{seconds / 60}m" : "#{seconds}s"
+    end
+
     def paste_from_buffer
       return if @paste_buffer.nil? || @paste_buffer.empty?
       target = focused_target
@@ -1104,6 +1128,7 @@ module Muxr
 
         prune_dead_panes
         prune_dead_drawer
+        report_silent_panes
         expire_message
 
         if @session.window.panes.empty?
@@ -1222,7 +1247,7 @@ module Muxr
         end
       if data
         invalidate
-        pane.note_output unless attended?(pane)
+        pane.note_output(attended: attended?(pane))
         # Notify the control surface so any pending pane.run waiters reset
         # their idle window and any pane.subscribe clients get a new frame.
         # read_from_pty already fed the bytes into the Terminal; the control
@@ -1243,6 +1268,16 @@ module Muxr
       return unless bytes
       pane.note_bell unless attended?(pane)
       deliver_output(bytes) if @current_client
+    end
+
+    def report_silent_panes
+      now = Pane.now
+      @session.window.panes.each_with_index do |pane, i|
+        next unless pane.silence_due?(now)
+        pane.note_silence!
+        flash("pane ##{i + 1} silent for #{format_seconds(pane.silence_after)}")
+        deliver_output("\a".b) if @current_client
+      end
     end
 
     def attended?(pane)
@@ -1531,6 +1566,10 @@ module Muxr
         pane = make_pane(cwd: cwd, id: id)
         pane.mark_private! if entry["private"]
         @session.window.add_pane(pane)
+      end
+      panes_data.each_with_index do |entry, i|
+        pane = @session.window.panes[i]
+        pane.watch_silence(entry["silence"]) if pane && entry["silence"].is_a?(Integer) && entry["silence"].positive?
       end
 
       if data["drawer"]

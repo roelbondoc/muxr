@@ -19,6 +19,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   over the overlay — transient and specific beats a static key hint.
 
 ### Added
+- `:silence <secs>` alerts you when the focused pane stops printing. Once
+  the pane has been quiet for that long, muxr flashes `pane #2 silent for
+  30s`, rings the outer terminal's bell, and marks the pane `~` in its title
+  and in `alerts:`. It fires once per quiet spell and re-arms on the next
+  output. It takes `30`, `30s` or `2m`. `:silence off` disarms it, and a bare
+  `:silence` reports the current setting. An armed pane shows
+  `[silence 30s]` in its title, and the threshold is saved with the session.
 - Panes that want your attention are marked. A pane that rings the bell or
   sends an OSC 9 / OSC 777 notification while you are looking elsewhere gets
   a `!` after its number in the title (`#2!`), and one that prints anything

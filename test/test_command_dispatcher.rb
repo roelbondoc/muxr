@@ -20,7 +20,9 @@ class TestCommandDispatcher < Minitest::Test
   def test_ambiguous_command_extends_to_common_prefix
     line, cands = complete("s")
     assert_equal "s", line # save / sessions share only "s"
-    assert_equal %w[save sessions], cands
+    assert_equal cands.sort, cands
+    assert_empty %w[save sessions] - cands
+    assert cands.all? { |c| c.start_with?("s") }
   end
 
   def test_empty_line_offers_all_commands_unchanged

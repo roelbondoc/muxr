@@ -152,6 +152,7 @@ module Muxr
         # "who am I about to type at" is answerable without leaving the layout.
         title += " @#{pane.origin}" if pane.respond_to?(:origin) && pane.origin
         title += " ★" if i == win.master_index
+        title += " [silence #{pane.silence_after}s]" if pane.respond_to?(:silence_after) && pane.silence_after
         # Foreground command (e.g. "npm test", "vim"). Set by the poller
         # thread; nil when the shell itself is foreground. Truncate so a
         # long invocation doesn't push the title past what draw_box will
@@ -180,6 +181,8 @@ module Muxr
     def attention_marker(pane)
       if pane.respond_to?(:bell?) && pane.bell?
         "!"
+      elsif pane.respond_to?(:silent?) && pane.silent?
+        "~"
       elsif pane.respond_to?(:activity?) && pane.activity?
         "•"
       else
@@ -478,7 +481,8 @@ module Muxr
       "COMMAND prompt (: to open;  Tab completes,  Esc/C-c cancels)",
       "Commands: layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle|auto},",
       "          drawer {toggle|show|hide|reset},",
-      "          claude, save, restore, sessions, attach, quit, new, close, next, prev",
+      "          claude, save, restore, sessions, attach, quit, new, close, next, prev,",
+      "          silence {<secs>|<n>m|off} (alert when the pane goes quiet)",
       "",
       "press any key to dismiss"
     ].freeze

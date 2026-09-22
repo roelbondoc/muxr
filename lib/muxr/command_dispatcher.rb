@@ -10,7 +10,7 @@ module Muxr
     # offering both halves would clutter the ambiguity list.
     COMPLETIONS = %w[
       layout drawer claude private save restore sessions attach
-      new close next prev master detach help quit
+      new close next prev master detach help quit silence
     ].freeze
 
     # Argument candidates for the commands that take a fixed vocabulary.
@@ -49,6 +49,7 @@ module Muxr
       case words[0]
       when "layout" then Window::LAYOUTS.map(&:to_s)
       when "drawer" then DRAWER_ARGS
+      when "silence" then %w[off]
       else []
       end
     end
@@ -91,6 +92,7 @@ module Muxr
       when "master"  then @app.promote_master
       when "help"    then @app.show_help
       when "detach"  then @app.detach
+      when "silence" then @app.monitor_silence(args[0])
       else
         @app.flash("unknown command: #{cmd}")
       end
