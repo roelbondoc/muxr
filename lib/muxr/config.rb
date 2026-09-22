@@ -137,6 +137,8 @@ module Muxr
           @errors << "keys.#{mode}: #{name.inspect} is reserved"
         elsif action.nil?
           into[key] = nil
+        elsif action.is_a?(String) && action.start_with?(":") && action.length > 1
+          into[key] = [:run_command, action[1..]]
         elsif self.class.actions.key?(action)
           into[key] = self.class.actions[action]
         else

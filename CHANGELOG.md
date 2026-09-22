@@ -35,7 +35,8 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   skipped and reported: the first one is flashed when you attach, and all of
   them go to the session log. A saved session's layout still wins over the
   configured default, and `MUXR_SCROLLBACK` still wins over `scrollback`.
-  `:reload` re-reads the file without restarting the server.
+  `:reload` re-reads the file without restarting the server. A key can also
+  run any prompt command: `{"normal": {"Y": ":sync"}}`.
 - `:rename <name>` gives the focused pane a label, shown in its title in
   place of the hex id (`#1 api`). A bare `:rename` clears it. Names are saved
   with the session, travel with a pane when it is moved to another session,

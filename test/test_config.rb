@@ -66,6 +66,20 @@ class TestConfig < Minitest::Test
     end
   end
 
+  def test_a_key_can_run_any_command
+    with_config("keys" => { "normal" => { "Y" => ":sync" }, "prefix" => { "S" => ":capture ~/log.txt" } }) do |config|
+      assert_empty config.errors
+      assert_equal [:run_command, "sync"], config.normal_keys["Y"]
+      app = RecordingApp.new
+      input = Muxr::InputHandler.new(app)
+      input.configure(config)
+      input.feed("Y")
+      input.enter_passthrough_mode
+      input.feed("\x01S")
+      assert_equal [[:run_command, "sync"], [:run_command, "capture ~/log.txt"]], app.calls
+    end
+  end
+
   def test_reserved_keys_and_unknown_actions_are_refused
     with_config("keys" => { "normal" => { "i" => "detach", "3" => "detach", "x" => "self_destruct", "ab" => "detach" } }) do |config|
       assert_empty config.normal_keys
