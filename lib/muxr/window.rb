@@ -7,7 +7,7 @@ module Muxr
 
     RATIO_STEP = 0.05
 
-    attr_accessor :name, :layout, :master_index
+    attr_accessor :name, :layout, :master_index, :synchronized
     attr_reader :panes, :focused_index, :master_ratio, :master_count
 
     def initialize(name: "main")
@@ -19,6 +19,7 @@ module Muxr
       @layout = :auto
       @master_ratio = LayoutManager::DEFAULT_RATIO
       @master_count = 1
+      @synchronized = false
     end
 
     def master_ratio=(value)

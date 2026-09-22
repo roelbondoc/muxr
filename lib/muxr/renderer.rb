@@ -10,6 +10,8 @@ module Muxr
     BORDER_DRAWER_IDLE  = [:c256, 5].freeze   # dark magenta
     STATUS_BG           = [:c256, 236].freeze
     STATUS_FG           = [:c256, 252].freeze
+    BORDER_SYNCED       = [:c256, 160].freeze
+    SYNC_CHIP           = [:c256, 196].freeze
 
     # Vim-style mode palette. Used in two places: the focused pane border
     # (so the user can see at a glance what mode they're in) and the
@@ -166,7 +168,7 @@ module Muxr
           title += " [scrollback #{pane.terminal.view_offset}/#{pane.terminal.scrollback_size}]"
         end
         draw_box(frame, rect,
-                 border: focused ? mode_color(input_state) : BORDER_UNFOCUSED,
+                 border: focused ? mode_color(input_state) : unfocused_border(win),
                  bold_border: focused,
                  title: title,
                  title_focused: focused)
@@ -177,6 +179,14 @@ module Muxr
         draw_mode_chip(frame, rect, input_state, title) if focused
         copy_terminal(frame, pane, rect)
       end
+    end
+
+    def unfocused_border(win)
+      synchronized?(win) ? BORDER_SYNCED : BORDER_UNFOCUSED
+    end
+
+    def synchronized?(win)
+      win.respond_to?(:synchronized) && win.synchronized
     end
 
     def attention_marker(pane)
@@ -292,6 +302,7 @@ module Muxr
 
       left = " [#{mode_label(input_state)}]"
       left << " [#{session.name}]"
+      left << " [SYNC]" if synchronized?(win)
       left << " panes:#{win.panes.length}"
       left << " layout:#{layout_label(win, session)}"
       focused_label =
@@ -334,6 +345,7 @@ module Muxr
         c.fg = chip_color
         c.attrs |= Terminal::BOLD
       end
+      paint_sync_chip(frame, y, bar) if synchronized?(win)
 
       if input_state == :command
         prompt = ":#{command_buffer}"
@@ -424,6 +436,17 @@ module Muxr
       draw_status_message(frame, y, w, message) if message
     end
 
+    def paint_sync_chip(frame, y, bar)
+      start = bar.index("[SYNC]")
+      return unless start
+      (start...start + "[SYNC]".length).each do |x|
+        c = frame[y][x]
+        c.fg = [:c256, 15]
+        c.bg = SYNC_CHIP
+        c.attrs = Terminal::BOLD
+      end
+    end
+
     def draw_status_message(frame, y, w, message)
       msg = " #{message} "
       start = [w - msg.length, 0].max
@@ -489,7 +512,8 @@ module Muxr
       "          drawer {toggle|show|hide|reset},",
       "          claude, save, restore, sessions, attach, quit, new, close, next, prev,",
       "          silence {<secs>|<n>m|off} (alert when the pane goes quiet),",
-      "          ratio <percent>, masters <n>",
+      "          ratio <percent>, masters <n>, zoom,",
+      "          sync {on|off} (type into every pane at once)",
       "",
       "press any key to dismiss"
     ].freeze

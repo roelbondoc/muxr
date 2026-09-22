@@ -19,6 +19,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   over the overlay — transient and specific beats a static key hint.
 
 ### Added
+- `:sync` sends what you type to every pane in the window at once. It works
+  in passthrough mode, and `C-a ]` pastes go to every pane too. Use it to run
+  the same command on several hosts or checkouts. `:sync on` / `:sync off`
+  set it explicitly, and a bare `:sync` toggles it. While it is on, the
+  status bar shows a red `[SYNC]` and every unfocused pane gets a red border,
+  so you cannot forget it is on. Borrowed panes are included, and your
+  keystrokes reach their real shells. The drawer is left out in both
+  directions: typing in the drawer stays in the drawer. Sync is deliberately
+  not saved with the session.
 - `z` (or `C-a z`, or `:zoom`) zooms the focused pane to full screen, and
   pressing it again restores the layout you were in. The status bar reads
   `layout:zoom:tall` while zoomed, so you can see what `z` will return to.

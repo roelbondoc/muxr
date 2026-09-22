@@ -146,7 +146,30 @@ module Muxr
       target = focused_target
       return unless target
       data = strip_bracketed_paste_markers(data, target)
-      target.write(data) unless data.empty?
+      input_targets.each { |pane| pane.write(data) } unless data.empty?
+    end
+
+    def input_targets
+      target = focused_target
+      return [] unless target
+      return [target] unless broadcasting?
+      @session.window.panes.select { |pane| pane.alive? && !handing_off?(pane) }
+    end
+
+    def broadcasting?
+      @session.window.synchronized && !(@session.focus_drawer && @session.drawer&.visible?)
+    end
+
+    def set_sync(arg)
+      win = @session.window
+      case arg
+      when nil then win.synchronized = !win.synchronized
+      when "on" then win.synchronized = true
+      when "off" then win.synchronized = false
+      else return flash("sync: expected on or off")
+      end
+      flash(win.synchronized ? "sync on: typing reaches all #{win.panes.length} panes" : "sync off")
+      invalidate
     end
 
     # The client turns bracketed-paste mode on for the *outer* terminal so big
@@ -953,8 +976,7 @@ module Muxr
 
     def paste_from_buffer
       return if @paste_buffer.nil? || @paste_buffer.empty?
-      target = focused_target
-      target&.write(@paste_buffer)
+      input_targets.each { |pane| pane.write(@paste_buffer) }
     end
 
     def flash(msg)
