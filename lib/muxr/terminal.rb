@@ -429,6 +429,13 @@ module Muxr
       lines.join("\n")
     end
 
+    def dump_history_text
+      screen = @saved_primary ? @saved_primary[:buffer] : @buffer
+      lines = (@scrollback + screen).map { |row| row_search_text(row)[0].rstrip }
+      lines.pop while lines.last&.empty?
+      lines.empty? ? "" : lines.join("\n") << "\n"
+    end
+
     # Serialize the live grid as a self-contained ANSI repaint: feeding these
     # bytes to a blank emulator of the same size reproduces this screen exactly.
     # Seeds a mirrored copy of the pane in another muxr server, which then keeps

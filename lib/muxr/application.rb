@@ -28,6 +28,7 @@ module Muxr
     # showing through.
     MIN_FRAME_INTERVAL = 1.0 / 60
     SOCKETS_DIR    = File.join(Dir.home, ".muxr", "sockets").freeze
+    CAPTURES_DIR   = File.join(Dir.home, ".muxr", "captures").freeze
     DEFAULT_WIDTH  = 80
     DEFAULT_HEIGHT = 24
 
@@ -159,6 +160,27 @@ module Muxr
 
     def broadcasting?
       @session.window.synchronized && !(@session.focus_drawer && @session.drawer&.visible?)
+    end
+
+    def capture_focused(path = nil)
+      target = focused_target
+      return unless target
+      destination = capture_path(target, path)
+      text = target.terminal.dump_history_text
+      FileUtils.mkdir_p(File.dirname(destination))
+      File.write(destination, text)
+      flash("captured #{text.count("\n")} lines to #{shorten_home(destination)}")
+      destination
+    rescue SystemCallError => e
+      flash("capture failed: #{e.message}")
+      nil
+    end
+
+    def capture_path(target, path)
+      return File.expand_path(path, @origin_cwd) if path && !path.empty?
+      label = target.respond_to?(:label) ? target.label : target.id.to_s
+      stamp = Time.now.strftime("%Y%m%d-%H%M%S")
+      File.join(CAPTURES_DIR, "#{@session_name}-#{label}-#{stamp}.txt".gsub(/[^A-Za-z0-9._-]/, "-"))
     end
 
     def rename_focused(name)

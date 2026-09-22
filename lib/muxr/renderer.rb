@@ -519,7 +519,8 @@ module Muxr
       "          ratio <percent>, masters <n>, zoom,",
       "          sync {on|off} (type into every pane at once),",
       "          rename [name] (label the focused pane; bare clears it),",
-      "          reload (re-read ~/.muxr/config.json)",
+      "          reload (re-read ~/.muxr/config.json),",
+      "          capture [path] (save the pane's history as text)",
       "",
       "press any key to dismiss"
     ].freeze

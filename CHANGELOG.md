@@ -19,6 +19,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   over the overlay — transient and specific beats a static key hint.
 
 ### Added
+- `:capture [path]` saves the focused pane's full scrollback and screen to a
+  plain-text file: no escape codes, trailing spaces trimmed, wide glyphs
+  intact. With no path it writes to
+  `~/.muxr/captures/<session>-<pane>-<timestamp>.txt`. A relative path is
+  resolved against the directory the session was started in. While a
+  full-screen program is up, the capture holds the shell underneath rather
+  than the program's frame.
 - A config file at `~/.muxr/config.json` (or wherever `MUXR_CONFIG`
   points) sets `layout`, `scrollback`, `master_ratio`, `master_count`,
   `auto_spiral_min` (`{"cols": 180, "rows": 30}`), `prefix` (`"C-b"` to use
