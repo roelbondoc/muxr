@@ -303,13 +303,19 @@ started from.
 ### Scrolling the program instead of the history
 
 Some programs keep their own history and want to do their own scrolling —
-Claude Code, `lazygit`, `k9s`, `htop`. They say so by turning on mouse
-tracking, and on such a pane the same keys drive *them* rather than muxr's
-ring: muxr synthesises wheel events at the centre of the pane and writes them
-straight into the pty, so scrolling reaches the program's transcript without
-you touching the mouse. The mode chip reads `SCROLL:APP`. A full-screen
-program that wants no mouse gets arrow keys instead, which is what makes
-`less` and `vim` respond.
+`lazygit`, `k9s`, `htop`. They say so by turning on mouse tracking, and on
+such a pane the same keys drive *them* rather than muxr's ring: muxr
+synthesises wheel events at the centre of the pane and writes them straight
+into the pty, so scrolling reaches the program's own view without you
+touching the mouse. The mode chip reads `SCROLL:APP`. A full-screen program
+that wants no mouse gets arrow keys instead, which is what makes `less` and
+`vim` respond — and is what this mostly buys you in practice.
+
+Claude Code is deliberately not in that list. It renders inline on the
+primary screen and enables no mouse tracking, so it has no scroll of its own
+to hand off to: its transcript lives in the host terminal's scrollback, which
+inside muxr *is* muxr's ring. `C-a [` on such a pane keeps the ring, which is
+the right answer rather than a fallback.
 
 `Tab` switches between the two at any time — the app's own scroll, or muxr's
 ring for output older than the program will page back to. `g`/`G` and search

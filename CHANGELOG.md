@@ -6,10 +6,22 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- A flash is visible again in the modes that actually raise one. The status
+  bar's message branch was the last `elsif` in a chain starting with the
+  command prompt and running through scrollback, search and selection, so any
+  mode with a full-row overlay painted the row and the message never drew.
+  "not found: <query>" from a failed search and "yanked N bytes" from a
+  selection both land back in scrollback, where neither had ever been seen;
+  the scroll-source work added four more that only fire there, which is why
+  `Tab` on a pane with no scroll of its own read as a dead key rather than a
+  refusal with a reason. The message now draws after the chain, right-aligned
+  over the overlay — transient and specific beats a static key hint.
+
 ### Added
 - Scrollback can now drive the program instead of muxr's ring. A pane whose
-  program has turned on mouse tracking (DECSET 1000/1002/1003 — Claude Code,
-  `lazygit`, `k9s`, `htop`) gets `C-a [` routed to *it*: muxr synthesises
+  program has turned on mouse tracking (DECSET 1000/1002/1003 — `lazygit`,
+  `k9s`, `htop`) gets `C-a [` routed to *it*: muxr synthesises
   wheel reports at the centre of the pane and writes them into the pty, so
   `j`/`k`, `C-d`/`C-u` and `C-f`/`C-b` scroll the program's own transcript
   from the keyboard, no mouse involved. SGR encoding when the program asked
