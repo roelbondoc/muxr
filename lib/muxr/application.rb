@@ -415,6 +415,49 @@ module Muxr
       invalidate
     end
 
+    def grow_master
+      resize_master(Window::RATIO_STEP)
+    end
+
+    def shrink_master
+      resize_master(-Window::RATIO_STEP)
+    end
+
+    def resize_master(delta)
+      @session.window.adjust_master_ratio(delta)
+      flash_master_shape
+    end
+
+    def add_master
+      @session.window.adjust_master_count(1)
+      flash_master_shape
+    end
+
+    def remove_master
+      @session.window.adjust_master_count(-1)
+      flash_master_shape
+    end
+
+    def set_master_ratio(arg)
+      value = Float(arg.to_s.delete_suffix("%"), exception: false)
+      return flash("ratio: expected a percentage like 60") unless value&.positive?
+      @session.window.master_ratio = value > 1 ? value / 100.0 : value
+      flash_master_shape
+    end
+
+    def set_master_count(arg)
+      value = Integer(arg.to_s, exception: false)
+      return flash("masters: expected a number like 2") unless value&.positive?
+      @session.window.master_count = value
+      flash_master_shape
+    end
+
+    def flash_master_shape
+      win = @session.window
+      flash("master #{(win.master_ratio * 100).round}% · masters #{win.master_count}")
+      invalidate
+    end
+
     # Toggle the privacy flag on the focused pane. Private panes are
     # redacted from the MCP control surface (panes.list strips cwd; read /
     # send_input / run / subscribe / kill all refuse). Only the human can
@@ -595,7 +638,7 @@ module Muxr
         @session.window.panes.length + 1,
         LayoutManager::Rect.new(0, 0, @session.width, @session.height - 1),
         focused_index: @session.window.panes.length,
-        master_index: @session.window.master_index
+        **@session.window.layout_options
       )
       rect = rects.last
       return [DEFAULT_HEIGHT, DEFAULT_WIDTH] unless rect
@@ -1008,7 +1051,7 @@ module Muxr
         win.panes.length,
         area,
         focused_index: win.focused_index,
-        master_index: win.master_index
+        **win.layout_options
       )
     end
 
@@ -1591,6 +1634,8 @@ module Muxr
 
       @session.window.focused_index = (data["focused_index"] || 0).clamp(0, @session.window.panes.length - 1)
       @session.window.master_index  = (data["master_index"]  || 0).clamp(0, @session.window.panes.length - 1)
+      @session.window.master_ratio = data["master_ratio"] if data["master_ratio"].is_a?(Numeric)
+      @session.window.master_count = data["master_count"] if data["master_count"].is_a?(Integer)
       flash("session restored")
     end
 

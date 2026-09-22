@@ -19,6 +19,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   over the overlay — transient and specific beats a static key hint.
 
 ### Added
+- The master area can be resized and can hold more than one pane, the way
+  it can in xmonad. `<` / `>` shrink or grow the master's share of the
+  screen in 5% steps, between 10% and 90%. `,` / `.` take a pane out of the
+  master area or add one to it, so two panes can share the master column.
+  Both keys work in normal mode and after `C-a`, and both apply to `tall`,
+  `wide` and `centered`. `:ratio 60` and `:masters 2` set them directly. The
+  current shape is flashed on every change and saved with the session.
 - `:silence <secs>` alerts you when the focused pane stops printing. Once
   the pane has been quiet for that long, muxr flashes `pane #2 silent for
   30s`, rings the outer terminal's bell, and marks the pane `~` in its title

@@ -5,8 +5,10 @@ module Muxr
   class Window
     LAYOUTS = LayoutManager::LAYOUTS
 
+    RATIO_STEP = 0.05
+
     attr_accessor :name, :layout, :master_index
-    attr_reader :panes, :focused_index
+    attr_reader :panes, :focused_index, :master_ratio, :master_count
 
     def initialize(name: "main")
       @name = name
@@ -15,6 +17,28 @@ module Muxr
       @last_focused_pane = nil
       @master_index = 0
       @layout = :auto
+      @master_ratio = LayoutManager::DEFAULT_RATIO
+      @master_count = 1
+    end
+
+    def master_ratio=(value)
+      @master_ratio = value.to_f.clamp(LayoutManager::RATIO_BOUNDS).round(2)
+    end
+
+    def master_count=(value)
+      @master_count = [value.to_i, 1].max
+    end
+
+    def adjust_master_ratio(delta)
+      self.master_ratio = @master_ratio + delta
+    end
+
+    def adjust_master_count(delta)
+      self.master_count = (@master_count + delta).clamp(1, [@panes.length, 1].max)
+    end
+
+    def layout_options
+      { master_index: @master_index, ratio: @master_ratio, nmaster: @master_count }
     end
 
     # Setter records the outgoing focused pane (by reference) so focus_last can

@@ -10,7 +10,7 @@ module Muxr
     # offering both halves would clutter the ambiguity list.
     COMPLETIONS = %w[
       layout drawer claude private save restore sessions attach
-      new close next prev master detach help quit silence
+      new close next prev master detach help quit silence ratio masters
     ].freeze
 
     # Argument candidates for the commands that take a fixed vocabulary.
@@ -93,6 +93,8 @@ module Muxr
       when "help"    then @app.show_help
       when "detach"  then @app.detach
       when "silence" then @app.monitor_silence(args[0])
+      when "ratio"   then @app.set_master_ratio(args[0])
+      when "masters" then @app.set_master_count(args[0])
       else
         @app.flash("unknown command: #{cmd}")
       end

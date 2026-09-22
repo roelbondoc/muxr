@@ -121,7 +121,7 @@ module Muxr
         win.panes.length,
         area,
         focused_index: win.focused_index,
-        master_index: win.master_index
+        **win.layout_options
       )
 
       monocle = layout == :monocle
@@ -449,6 +449,8 @@ module Muxr
       "  | - f e S       layout: columns / rows / spiral / centered / stack",
       "  F               layout: auto (spiral on a roomy screen, else stack)",
       "  Tab / Enter     cycle layout / promote to master",
+      "  < / >           shrink / grow the master area (tall, wide, centered)",
+      "  , / .           one fewer / one more master pane",
       "  a / 1..9        last pane / jump by number",
       "  r               refresh / redraw (fixes a corrupted pane)",
       "  s               enter scrollback",
@@ -461,6 +463,7 @@ module Muxr
       "  C-a Esc         return to normal mode",
       "  C-a c / x       new / close pane (close asks y/n)",
       "  C-a Tab Enter   cycle layout / promote master",
+      "  C-a < > , .     master size / master count",
       "  C-a n / p / a   next / prev / last pane",
       "  C-a r           refresh / redraw (fixes a corrupted pane)",
       "  C-a [ ]         scrollback / paste buffer",
@@ -482,7 +485,8 @@ module Muxr
       "Commands: layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle|auto},",
       "          drawer {toggle|show|hide|reset},",
       "          claude, save, restore, sessions, attach, quit, new, close, next, prev,",
-      "          silence {<secs>|<n>m|off} (alert when the pane goes quiet)",
+      "          silence {<secs>|<n>m|off} (alert when the pane goes quiet),",
+      "          ratio <percent>, masters <n>",
       "",
       "press any key to dismiss"
     ].freeze

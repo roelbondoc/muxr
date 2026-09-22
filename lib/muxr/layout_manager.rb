@@ -15,20 +15,24 @@ module Muxr
     AUTO_SPIRAL_MIN_COLS = 180
     AUTO_SPIRAL_MIN_ROWS = 30
 
+    DEFAULT_RATIO = 0.5
+    RATIO_BOUNDS = (0.1..0.9)
+
     module_function
 
-    def compute(layout, count, area, focused_index: 0, master_index: 0)
+    def compute(layout, count, area, focused_index: 0, master_index: 0, ratio: DEFAULT_RATIO, nmaster: 1)
       return [] if count <= 0
       master_index = master_index.clamp(0, count - 1)
       focused_index = focused_index.clamp(0, count - 1)
+      ratio = ratio.to_f.clamp(RATIO_BOUNDS)
       case resolve(layout, area)
-      when :tall     then tall(count, area, master_index)
-      when :wide     then wide(count, area, master_index)
+      when :tall     then tall(count, area, master_index, ratio, nmaster)
+      when :wide     then wide(count, area, master_index, ratio, nmaster)
       when :columns  then columns(count, area)
       when :rows     then rows(count, area)
       when :grid     then grid(count, area)
       when :spiral   then spiral(count, area)
-      when :centered then centered(count, area, master_index)
+      when :centered then centered(count, area, master_index, ratio, nmaster)
       when :stack    then stack(count, area, focused_index)
       when :monocle  then monocle(count, area, focused_index)
       else
@@ -45,54 +49,43 @@ module Muxr
       area.w >= AUTO_SPIRAL_MIN_COLS && area.h >= AUTO_SPIRAL_MIN_ROWS
     end
 
-    # Master pane on the left taking half the width; remaining panes stack
-    # vertically on the right, dividing the remaining height evenly.
-    def tall(count, area, master_index = 0)
+    def split_masters(count, master_index, nmaster)
+      ordered = [master_index] + ((0...count).to_a - [master_index])
+      n = nmaster.to_i.clamp(1, count)
+      [ordered.first(n), ordered.drop(n)]
+    end
+
+    def master_extent(total, ratio)
+      (total * ratio).floor.clamp(1, [total - 1, 1].max)
+    end
+
+    def tall(count, area, master_index = 0, ratio = DEFAULT_RATIO, nmaster = 1)
       master_index = master_index.clamp(0, count - 1)
-      return [Rect.new(area.x, area.y, area.w, area.h)] if count == 1
-
-      master_w = [area.w / 2, 1].max
-      stack_w  = [area.w - master_w, 1].max
-      others   = (0...count).to_a - [master_index]
-      slave_count = others.length
-      base_h = area.h / slave_count
-      remainder = area.h - base_h * slave_count
-
+      masters, others = split_masters(count, master_index, nmaster)
       rects = Array.new(count)
-      rects[master_index] = Rect.new(area.x, area.y, master_w, area.h)
-
-      y = area.y
-      others.each_with_index do |idx, i|
-        h = base_h + (i < remainder ? 1 : 0)
-        rects[idx] = Rect.new(area.x + master_w, y, stack_w, h)
-        y += h
+      if others.empty?
+        stack_column(rects, masters, area.x, area.y, area.w, area.h)
+        return rects
       end
+
+      master_w = master_extent(area.w, ratio)
+      stack_column(rects, masters, area.x, area.y, master_w, area.h)
+      stack_column(rects, others, area.x + master_w, area.y, [area.w - master_w, 1].max, area.h)
       rects
     end
 
-    # The transpose of `tall`: master pane spans the full width across the top
-    # half; remaining panes sit side-by-side in the bottom half, dividing the
-    # remaining width evenly.
-    def wide(count, area, master_index = 0)
+    def wide(count, area, master_index = 0, ratio = DEFAULT_RATIO, nmaster = 1)
       master_index = master_index.clamp(0, count - 1)
-      return [Rect.new(area.x, area.y, area.w, area.h)] if count == 1
-
-      master_h = [area.h / 2, 1].max
-      stack_h  = [area.h - master_h, 1].max
-      others   = (0...count).to_a - [master_index]
-      slave_count = others.length
-      base_w = area.w / slave_count
-      remainder = area.w - base_w * slave_count
-
+      masters, others = split_masters(count, master_index, nmaster)
       rects = Array.new(count)
-      rects[master_index] = Rect.new(area.x, area.y, area.w, master_h)
-
-      x = area.x
-      others.each_with_index do |idx, i|
-        w = base_w + (i < remainder ? 1 : 0)
-        rects[idx] = Rect.new(x, area.y + master_h, w, stack_h)
-        x += w
+      if others.empty?
+        spread_row(rects, masters, area.x, area.y, area.w, area.h)
+        return rects
       end
+
+      master_h = master_extent(area.h, ratio)
+      spread_row(rects, masters, area.x, area.y, area.w, master_h)
+      spread_row(rects, others, area.x, area.y + master_h, area.w, [area.h - master_h, 1].max)
       rects
     end
 
@@ -148,30 +141,27 @@ module Muxr
       rects
     end
 
-    # Three-column master: master occupies the centre column full-height; the
-    # remaining panes are dealt alternately to a left and a right column and
-    # stacked within each. With a single slave there is no symmetry to keep, so
-    # it falls back to a simple master/slave vertical split (like `tall`).
-    def centered(count, area, master_index = 0)
+    def centered(count, area, master_index = 0, ratio = DEFAULT_RATIO, nmaster = 1)
       master_index = master_index.clamp(0, count - 1)
-      return [Rect.new(area.x, area.y, area.w, area.h)] if count == 1
+      masters, others = split_masters(count, master_index, nmaster)
+      rects = Array.new(count)
+      if others.empty?
+        stack_column(rects, masters, area.x, area.y, area.w, area.h)
+        return rects
+      end
 
-      others = (0...count).to_a - [master_index]
-      rects  = Array.new(count)
-
+      master_w = master_extent(area.w, ratio)
       if others.length == 1
-        master_w = [area.w / 2, 1].max
-        rects[master_index] = Rect.new(area.x, area.y, master_w, area.h)
+        stack_column(rects, masters, area.x, area.y, master_w, area.h)
         rects[others[0]] = Rect.new(area.x + master_w, area.y, [area.w - master_w, 1].max, area.h)
         return rects
       end
 
-      master_w = [area.w / 2, 1].max
       side_w   = area.w - master_w
       left_w   = [side_w / 2, 1].max
       right_w  = [side_w - left_w, 1].max
 
-      rects[master_index] = Rect.new(area.x + left_w, area.y, master_w, area.h)
+      stack_column(rects, masters, area.x + left_w, area.y, master_w, area.h)
       left  = others.select.with_index { |_, i| i.even? }
       right = others.select.with_index { |_, i| i.odd? }
       stack_column(rects, left,  area.x, area.y, left_w, area.h)
@@ -214,6 +204,18 @@ module Muxr
         h = base_h + (i < rem ? 1 : 0)
         rects[idx] = Rect.new(x, cy, w, h)
         cy += h
+      end
+    end
+
+    def spread_row(rects, indices, x, y, total_w, h)
+      return if indices.empty?
+      base_w = total_w / indices.length
+      rem    = total_w - base_w * indices.length
+      cx = x
+      indices.each_with_index do |idx, i|
+        w = base_w + (i < rem ? 1 : 0)
+        rects[idx] = Rect.new(cx, y, w, h)
+        cx += w
       end
     end
 

@@ -44,6 +44,8 @@ module Muxr
         "layout"         => @window.layout.to_s,
         "focused_index"  => @window.focused_index,
         "master_index"   => @window.master_index,
+        "master_ratio"   => @window.master_ratio,
+        "master_count"   => @window.master_count,
         "focus_drawer"   => @focus_drawer,
         "panes"          => own_panes.map { |p| serialize_pane(p) },
         "drawer"         => serialize_drawer
