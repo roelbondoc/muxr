@@ -15,6 +15,18 @@ module Muxr
     AUTO_SPIRAL_MIN_COLS = 180
     AUTO_SPIRAL_MIN_ROWS = 30
 
+    class << self
+      attr_writer :auto_spiral_min_cols, :auto_spiral_min_rows
+
+      def auto_spiral_min_cols
+        @auto_spiral_min_cols || AUTO_SPIRAL_MIN_COLS
+      end
+
+      def auto_spiral_min_rows
+        @auto_spiral_min_rows || AUTO_SPIRAL_MIN_ROWS
+      end
+    end
+
     DEFAULT_RATIO = 0.5
     RATIO_BOUNDS = (0.1..0.9)
 
@@ -46,7 +58,7 @@ module Muxr
     end
 
     def spiral_fits?(area)
-      area.w >= AUTO_SPIRAL_MIN_COLS && area.h >= AUTO_SPIRAL_MIN_ROWS
+      area.w >= LayoutManager.auto_spiral_min_cols && area.h >= LayoutManager.auto_spiral_min_rows
     end
 
     def split_masters(count, master_index, nmaster)

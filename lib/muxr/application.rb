@@ -5,6 +5,7 @@ require "muxr/remote_pane"
 require "muxr/pane_transfer"
 require "muxr/pane_picker"
 require "muxr/session_directory"
+require "muxr/config"
 
 module Muxr
   # The Application is the muxr server. It owns the Session, panes, Renderer,
@@ -998,6 +999,43 @@ module Muxr
       @needs_render = true
     end
 
+    def reload_config
+      config = Config.load
+      apply_config(config)
+      if config.errors.empty?
+        flash("reloaded #{shorten_home(config.path)}")
+      else
+        report_config_problems
+      end
+    end
+
+    def apply_config(config)
+      @config = config
+      config.errors.each { |e| warn("muxr: #{config.path}: #{e}") }
+      @input.configure(config)
+      Terminal.scrollback_max = config.scrollback if config.scrollback && !ENV["MUXR_SCROLLBACK"]
+      LayoutManager.auto_spiral_min_cols = config.auto_spiral_min_cols
+      LayoutManager.auto_spiral_min_rows = config.auto_spiral_min_rows
+      invalidate
+    end
+
+    def apply_window_defaults
+      win = @session.window
+      win.set_layout(@config.layout) if @config.layout
+      win.master_ratio = @config.master_ratio if @config.master_ratio
+      win.master_count = @config.master_count if @config.master_count
+    end
+
+    def report_config_problems
+      return if @config.nil? || @config.errors.empty?
+      count = @config.errors.length
+      flash("config: #{@config.errors.first}#{count > 1 ? " (+#{count - 1} more in the log)" : ""}")
+    end
+
+    def shorten_home(path)
+      path.to_s.start_with?(Dir.home) ? path.to_s.sub(Dir.home, "~") : path.to_s
+    end
+
     def save_session
       path = @session.save
       flash("saved: #{path}")
@@ -1118,6 +1156,8 @@ module Muxr
       @session  = Session.new(name: @session_name, width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT)
       @renderer = Renderer.new(out: FramedOutput.new(self))
       @input    = InputHandler.new(self)
+      apply_config(Config.load)
+      apply_window_defaults
 
       saved = Session.load(@session_name)
       first_id = saved && saved.dig("panes", 0, "id")
@@ -1273,6 +1313,7 @@ module Muxr
 
       @current_client = sock
       @renderer.reset_frame!
+      report_config_problems
       invalidate
     end
 

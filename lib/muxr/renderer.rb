@@ -518,7 +518,8 @@ module Muxr
       "          silence {<secs>|<n>m|off} (alert when the pane goes quiet),",
       "          ratio <percent>, masters <n>, zoom,",
       "          sync {on|off} (type into every pane at once),",
-      "          rename [name] (label the focused pane; bare clears it)",
+      "          rename [name] (label the focused pane; bare clears it),",
+      "          reload (re-read ~/.muxr/config.json)",
       "",
       "press any key to dismiss"
     ].freeze

@@ -197,7 +197,7 @@ module Muxr
 
     DIGIT_RE = /\A[1-9]\z/.freeze
 
-    attr_reader :state, :command_buffer, :command_completions, :search_buffer, :search_direction, :base_mode, :scroll_source
+    attr_reader :state, :command_buffer, :command_completions, :search_buffer, :search_direction, :base_mode, :scroll_source, :prefix
 
     def initialize(app)
       @app = app
@@ -215,6 +215,13 @@ module Muxr
       # scrollback on the newly-focused pane instead of dropping to the base
       # mode. nil means "use @base_mode" (the normal passthrough behavior).
       @prefix_return = nil
+      configure(nil)
+    end
+
+    def configure(config)
+      @prefix = config ? config.prefix : PREFIX
+      @normal_bindings = NORMAL_BINDINGS.merge(config ? config.normal_keys : {})
+      @prefix_bindings = PREFIX_BINDINGS.merge(config ? config.prefix_keys : {})
     end
 
     def feed(data)
@@ -224,7 +231,7 @@ module Muxr
           # Fast path: batch everything up to the next Ctrl-a as one chunk so
           # a large paste doesn't turn into one PTY write per byte. PREFIX is
           # single-byte ASCII (\x01) and never appears mid-UTF-8.
-          idx = remaining.index(PREFIX)
+          idx = remaining.index(@prefix)
           if idx.nil?
             @app.send_to_focused(remaining)
             return
@@ -359,7 +366,7 @@ module Muxr
         return
       end
 
-      action = NORMAL_BINDINGS[ch]
+      action = @normal_bindings[ch]
       case action
       when Symbol
         @app.public_send(action)
@@ -377,7 +384,7 @@ module Muxr
       # Consume it immediately so it never leaks into the next prefix.
       ret = @prefix_return || @base_mode
       @prefix_return = nil
-      action = PREFIX_BINDINGS[ch]
+      action = @prefix_bindings[ch]
       case
       when ch == "\e"
         # Ctrl-a Esc → return to normal mode. Flip state directly so tests
@@ -389,8 +396,8 @@ module Muxr
         @state = :command
         @command_buffer = +""
         @command_completions = nil
-      when ch == PREFIX
-        @app.send_to_focused(PREFIX)
+      when ch == @prefix
+        @app.send_to_focused(@prefix)
         @state = @base_mode
       when DIGIT_RE.match?(ch)
         @app.focus_pane_number(ch.to_i)
@@ -398,7 +405,7 @@ module Muxr
         # was left scrolled). Only fall back to `ret` if it didn't.
         @state = ret if @state == :prefix
       when action
-        @app.public_send(action)
+        @app.public_send(*Array(action))
         # The action may have set a new state (confirm_quit, confirm_close,
         # scrollback via auto-enter, help). Only fall back to `ret` if we're
         # still in :prefix.
@@ -428,7 +435,7 @@ module Muxr
     end
 
     def handle_scrollback_input(ch)
-      if ch == PREFIX
+      if ch == @prefix
         # Ctrl-a is the escape hatch even from scrollback: drop into the
         # prefix state so the user can switch panes (Ctrl-a n/p/a/1-9) or
         # run any other prefix binding without first leaving scrollback.
@@ -537,7 +544,7 @@ module Muxr
     end
 
     def handle_selection_input(ch)
-      if ch == PREFIX
+      if ch == @prefix
         # Same escape hatch as scrollback: Ctrl-a enters the prefix state so
         # pane switching (and any other prefix binding) works mid-selection.
         # We return to :scrollback (not :selection) on the new pane — you
