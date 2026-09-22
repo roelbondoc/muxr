@@ -41,7 +41,7 @@ module Muxr
         "name"           => @name,
         "width"          => @width,
         "height"         => @height,
-        "layout"         => @window.layout.to_s,
+        "layout"         => @window.resting_layout.to_s,
         "focused_index"  => @window.focused_index,
         "master_index"   => @window.master_index,
         "master_ratio"   => @window.master_ratio,

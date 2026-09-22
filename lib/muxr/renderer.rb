@@ -108,6 +108,7 @@ module Muxr
     end
 
     def layout_label(win, session)
+      return "zoom:#{win.zoom_return}" if win.respond_to?(:zoomed?) && win.zoomed?
       return win.layout.to_s unless win.layout == :auto
       "auto:#{LayoutManager.resolve(:auto, content_area(session))}"
     end
@@ -451,6 +452,7 @@ module Muxr
       "  Tab / Enter     cycle layout / promote to master",
       "  < / >           shrink / grow the master area (tall, wide, centered)",
       "  , / .           one fewer / one more master pane",
+      "  z               zoom the focused pane / restore the layout",
       "  a / 1..9        last pane / jump by number",
       "  r               refresh / redraw (fixes a corrupted pane)",
       "  s               enter scrollback",
@@ -464,6 +466,7 @@ module Muxr
       "  C-a c / x       new / close pane (close asks y/n)",
       "  C-a Tab Enter   cycle layout / promote master",
       "  C-a < > , .     master size / master count",
+      "  C-a z           zoom the focused pane / restore the layout",
       "  C-a n / p / a   next / prev / last pane",
       "  C-a r           refresh / redraw (fixes a corrupted pane)",
       "  C-a [ ]         scrollback / paste buffer",

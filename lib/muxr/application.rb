@@ -387,6 +387,15 @@ module Muxr
       invalidate
     end
 
+    def toggle_zoom
+      win = @session.window
+      return flash("already in monocle") if win.layout == :monocle && !win.zoomed?
+      win.toggle_zoom
+      flash(win.zoomed? ? "zoomed (z to restore #{win.zoom_return})" : "layout: #{win.layout}")
+      @renderer.reset_frame!
+      invalidate
+    end
+
     def cycle_layout
       @session.window.cycle_layout
       flash("layout: #{@session.window.layout}")

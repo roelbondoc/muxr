@@ -124,6 +124,7 @@ module Muxr
     end
 
     def cycle_layout
+      @zoom_return = nil
       i = LAYOUTS.index(@layout) || 0
       @layout = LAYOUTS[(i + 1) % LAYOUTS.length]
     end
@@ -131,7 +132,28 @@ module Muxr
     def set_layout(layout)
       layout = layout.to_sym
       raise ArgumentError, "Unknown layout: #{layout}" unless LAYOUTS.include?(layout)
+      @zoom_return = nil
       @layout = layout
+    end
+
+    def zoomed?
+      !@zoom_return.nil?
+    end
+
+    attr_reader :zoom_return
+
+    def toggle_zoom
+      if zoomed?
+        @layout = @zoom_return
+        @zoom_return = nil
+      elsif @layout != :monocle
+        @zoom_return = @layout
+        @layout = :monocle
+      end
+    end
+
+    def resting_layout
+      @zoom_return || @layout
     end
 
     def clamp_indices!

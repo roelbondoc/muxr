@@ -19,6 +19,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   over the overlay — transient and specific beats a static key hint.
 
 ### Added
+- `z` (or `C-a z`, or `:zoom`) zooms the focused pane to full screen, and
+  pressing it again restores the layout you were in. The status bar reads
+  `layout:zoom:tall` while zoomed, so you can see what `z` will return to.
+  Picking any layout explicitly forgets the zoom. A session saved while
+  zoomed saves the layout underneath.
 - The master area can be resized and can hold more than one pane, the way
   it can in xmonad. `<` / `>` shrink or grow the master's share of the
   screen in 5% steps, between 10% and 90%. `,` / `.` take a pane out of the

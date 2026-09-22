@@ -218,7 +218,7 @@ class TestInputHandler < Minitest::Test
     # (x/H/J/K/L are bound now; pick keys that aren't.)
     app = FakeApp.new
     h = Muxr::InputHandler.new(app)
-    h.feed("yz!")
+    h.feed("yZ!")
     assert_equal [], app.calls
     assert_equal :normal, h.state
   end
