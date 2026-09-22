@@ -250,6 +250,13 @@ class TestMuxrMcp < Minitest::Test
         resp = bridge.request("tools/call", { "name" => "muxr_pane_read", "arguments" => { "pane" => other.id } })
         refute resp["result"]["isError"], "a different pane should still be readable"
 
+        own.name = "agent"
+        other.name = "server"
+        resp = bridge.request("tools/call", { "name" => "muxr_pane_read", "arguments" => { "pane" => "agent" } })
+        assert resp["result"]["isError"], "naming your own pane must not get around the refusal"
+        resp = bridge.request("tools/call", { "name" => "muxr_pane_read", "arguments" => { "pane" => "server" } })
+        refute resp["result"]["isError"], "another pane can be read by name"
+
         resp = bridge.request("tools/call", { "name" => "muxr_pane_focus", "arguments" => { "pane" => own.id } })
         refute resp["result"]["isError"], "focusing your own pane is harmless and stays allowed"
       end

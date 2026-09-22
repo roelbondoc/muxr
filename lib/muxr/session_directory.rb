@@ -12,7 +12,7 @@ module Muxr
   module SessionDirectory
     QUERY_TIMEOUT = 0.5
 
-    Entry = Struct.new(:session, :socket_path, :pane_id, :slot, :cwd, :rows, :cols, :focused, keyword_init: true) do
+    Entry = Struct.new(:session, :socket_path, :pane_id, :slot, :cwd, :rows, :cols, :focused, :name, keyword_init: true) do
       def label
         "#{session}:#{pane_id}"
       end
@@ -54,7 +54,8 @@ module Muxr
             cwd: pane["cwd"],
             rows: pane["rows"],
             cols: pane["cols"],
-            focused: !!pane["focused"]
+            focused: !!pane["focused"],
+            name: pane["name"]
           )
         end
       end

@@ -160,6 +160,14 @@ module Muxr
       @session.window.synchronized && !(@session.focus_drawer && @session.drawer&.visible?)
     end
 
+    def rename_focused(name)
+      pane = focused_pane
+      return unless pane
+      pane.name = name
+      flash(pane.name ? "pane ##{@session.window.focused_index + 1} is now #{pane.name}" : "pane ##{@session.window.focused_index + 1} name cleared")
+      invalidate
+    end
+
     def set_sync(arg)
       win = @session.window
       case arg
@@ -649,6 +657,7 @@ module Muxr
       pane = Pane.new(rows: remote.rows, cols: remote.cols, process: remote)
       remote.bind(pane.terminal)
       pane.origin = remote.origin
+      pane.name = entry.name if entry.respond_to?(:name)
       @session.window.add_pane(pane)
       @session.focus_drawer = false
       @session.window.focused_index = @session.window.panes.length - 1
@@ -1643,6 +1652,7 @@ module Muxr
       end
       panes_data.each_with_index do |entry, i|
         pane = @session.window.panes[i]
+        pane.name = entry["name"] if pane && entry["name"]
         pane.watch_silence(entry["silence"]) if pane && entry["silence"].is_a?(Integer) && entry["silence"].positive?
       end
 

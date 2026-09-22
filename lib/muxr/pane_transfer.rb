@@ -57,6 +57,7 @@ module Muxr
       )
       pane = Pane.new(id: state["pane"].to_s, rows: rows, cols: cols, cwd: state["cwd"], process: process)
       pane.terminal.restore_transfer!(state)
+      pane.name = state["name"] if state["name"]
       pane
     end
 

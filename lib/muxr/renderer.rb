@@ -149,7 +149,7 @@ module Muxr
         # Stable id sits after the slot number so monocle reads "#1/3 a3f9b2".
         # respond_to? guard keeps renderer tests (which use simple struct fakes)
         # from blowing up when a pane stand-in doesn't implement #id.
-        title += " #{pane.id}" if pane.respond_to?(:id) && pane.id.is_a?(String)
+        title += " #{pane_label(pane)}" if pane.respond_to?(:id) && pane.id.is_a?(String)
         title += " [P]" if pane.respond_to?(:private?) && pane.private?
         # A borrowed pane names the session that actually owns its shell, so
         # "who am I about to type at" is answerable without leaving the layout.
@@ -179,6 +179,10 @@ module Muxr
         draw_mode_chip(frame, rect, input_state, title) if focused
         copy_terminal(frame, pane, rect)
       end
+    end
+
+    def pane_label(pane)
+      pane.respond_to?(:name) && pane.name ? pane.name : pane.id
     end
 
     def unfocused_border(win)
@@ -513,7 +517,8 @@ module Muxr
       "          claude, save, restore, sessions, attach, quit, new, close, next, prev,",
       "          silence {<secs>|<n>m|off} (alert when the pane goes quiet),",
       "          ratio <percent>, masters <n>, zoom,",
-      "          sync {on|off} (type into every pane at once)",
+      "          sync {on|off} (type into every pane at once),",
+      "          rename [name] (label the focused pane; bare clears it)",
       "",
       "press any key to dismiss"
     ].freeze
@@ -597,7 +602,7 @@ module Muxr
         selected = i == picker.index
         if row.selectable?
           entry = row.entry
-          text = "  ##{entry.slot} #{entry.pane_id}"
+          text = "  ##{entry.slot} #{entry.name || entry.pane_id}"
           text += "  #{shorten_path(entry.cwd)}" if entry.cwd
           [text, PICKER_FG, selected]
         else

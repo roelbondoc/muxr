@@ -19,6 +19,15 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   over the overlay — transient and specific beats a static key hint.
 
 ### Added
+- `:rename <name>` gives the focused pane a label, shown in its title in
+  place of the hex id (`#1 api`). A bare `:rename` clears it. Names are saved
+  with the session, travel with a pane when it is moved to another session,
+  appear in the attach picker, and are listed by `muxr_panes_list` (except
+  for private panes). Any MCP tool that takes `pane` now also accepts a name.
+  An id always wins over a name that happens to look like one, and a name
+  shared by two panes is refused. The bridge's refusal to let a claude read
+  or type into its own pane also applies when that pane is referred to by
+  name.
 - `:sync` sends what you type to every pane in the window at once. It works
   in passthrough mode, and `C-a ]` pastes go to every pane too. Use it to run
   the same command on several hosts or checkouts. `:sync on` / `:sync off`

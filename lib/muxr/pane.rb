@@ -107,6 +107,18 @@ module Muxr
     # frames and is the main source of in-pane flicker. Bounded by a byte cap
     # so a runaway producer can't starve other panes on a single tick.
     ATTENTION_GRACE = 1.5
+    NAME_MAX = 24
+
+    attr_reader :name
+
+    def name=(value)
+      text = value.to_s.gsub(/[[:cntrl:]]/, "").strip[0, NAME_MAX]
+      @name = text.empty? ? nil : text
+    end
+
+    def label
+      @name || @id.to_s
+    end
 
     def self.now
       Process.clock_gettime(Process::CLOCK_MONOTONIC)

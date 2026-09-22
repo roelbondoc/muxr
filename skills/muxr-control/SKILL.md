@@ -45,6 +45,13 @@ the user says "the second pane", look it up in `muxr_panes_list` and pass
 the id you find at slot 2 — don't pass `2` directly even though it works,
 because by the time the call lands the slots may have changed.
 
+A pane the human has named with `:rename` shows the name in place of the id
+(`#1 api`), and `muxr_panes_list` reports it as `name`. When the user refers
+to a pane by that name ("run the tests in `api`"), you may pass the name as
+`pane`. A name that is ambiguous, or that has since been changed, is refused
+rather than guessed, so the id is still the safer choice for any call you
+make after a list.
+
 ## Recipes
 
 ### Run a command and get its output

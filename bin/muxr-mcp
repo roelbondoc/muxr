@@ -68,7 +68,7 @@ class MuxrMcpBridge
   # ids from muxr_panes_list.
   PANE_REF = {
     "type" => "string",
-    "description" => "Stable 6-hex pane id from muxr_panes_list (e.g. \"a3f9b2\"). Ids survive splits, kills, and promote_to_master — always prefer them over the positional slot numbers shown in the status bar."
+    "description" => "Stable 6-hex pane id from muxr_panes_list (e.g. \"a3f9b2\"), or the name the human gave the pane with :rename (e.g. \"api\"). Ids survive splits, kills, and promote_to_master — always prefer them over the positional slot numbers shown in the status bar."
   }.freeze
 
   TOOL_SCHEMAS = [
@@ -322,14 +322,14 @@ class MuxrMcpBridge
       return
     end
 
-    if targets_own_pane?(muxr_method, args)
-      respond_tool_error(id, "#{muxr_method} is unavailable on pane #{@own_pane} — that is the pane this claude " \
-                             "session is running in. Use muxr_panes_list to pick a different pane.")
+    unless ensure_owning_connection
+      respond_tool_error(id, connection_error)
       return
     end
 
-    unless ensure_owning_connection
-      respond_tool_error(id, connection_error)
+    if targets_own_pane?(muxr_method, args)
+      respond_tool_error(id, "#{muxr_method} is unavailable on pane #{@own_pane} — that is the pane this claude " \
+                             "session is running in. Use muxr_panes_list to pick a different pane.")
       return
     end
 
@@ -397,7 +397,14 @@ class MuxrMcpBridge
   def targets_own_pane?(muxr_method, args)
     return false if @own_pane.empty?
     return false unless SELF_FORBIDDEN_PANE_METHODS.include?(muxr_method)
-    args["pane"].to_s == @own_pane
+    ref = args["pane"].to_s
+    ref == @own_pane || names_own_pane?(ref)
+  end
+
+  def names_own_pane?(ref)
+    panes = send_muxr_request("panes.list", {})&.dig("result", "panes") || []
+    return false if panes.any? { |pane| pane["id"].to_s == ref }
+    panes.any? { |pane| pane["id"].to_s == @own_pane && pane["name"] == ref }
   end
 
   def control_socket_path

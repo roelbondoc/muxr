@@ -249,6 +249,7 @@ module Muxr
         "pane"    => pane.id.to_s,
         "pid"     => pane.pid,
         "cwd"     => safe_pane_cwd(pane),
+        "name"    => (pane.name if pane.respond_to?(:name)),
         "session" => @app.session.name
       )
       respond_result(io, id: request_id, result: { "ready" => true })
@@ -616,6 +617,7 @@ module Muxr
           # there. Reads and input work as usual and reach the real shell, but
           # pane.kill only drops the mirror.
           entry["origin"] = pane.origin if pane.respond_to?(:origin) && pane.origin
+          entry["name"] = pane.name if pane.respond_to?(:name) && pane.name
         end
         entry
       end
@@ -925,8 +927,11 @@ module Muxr
       else
         id = id_or_slot.to_s
         pane = win.panes.find { |p| p.id.to_s == id }
-        raise Error.new("pane: no pane with id #{id.inspect}") unless pane
-        pane
+        return pane if pane
+        named = win.panes.select { |p| p.respond_to?(:name) && p.name == id }
+        raise Error.new("pane: #{named.length} panes are named #{id.inspect}; use an id") if named.length > 1
+        raise Error.new("pane: no pane with id or name #{id.inspect}") if named.empty?
+        named.first
       end
     end
 

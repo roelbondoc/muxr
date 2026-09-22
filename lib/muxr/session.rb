@@ -85,6 +85,7 @@ module Muxr
       entry = { "id" => safe_id(pane), "cwd" => safe_cwd(pane), "private" => safe_private(pane) }
       silence = pane.respond_to?(:silence_after) ? pane.silence_after : nil
       entry["silence"] = silence if silence
+      entry["name"] = pane.name if pane.respond_to?(:name) && pane.name
       entry
     end
 
