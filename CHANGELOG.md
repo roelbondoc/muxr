@@ -38,8 +38,9 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `:reload` re-reads the file without restarting the server. A key can also
   run any prompt command: `{"normal": {"Y": ":sync"}}`. A configured prefix
   shows up everywhere muxr names the prefix: the help overlay, the `muxr ^b ?`
-  hint in the status bar, the `[^B]` chip while the prefix is pending, and the
-  passthrough flash.
+  hint in the status bar, the `[^B]` chip while the prefix is pending, the
+  passthrough flash, and `muxr --help` (which also says which config file the
+  prefix came from).
 - `:rename <name>` gives the focused pane a label, shown in its title in
   place of the hex id (`#1 api`). A bare `:rename` clears it. Names are saved
   with the session, travel with a pane when it is moved to another session,

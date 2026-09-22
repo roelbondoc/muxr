@@ -7,6 +7,10 @@ require "fileutils"
 require "rbconfig"
 require "socket"
 
+def configured_prefix_letter
+  Muxr::Renderer.prefix_letter(Muxr::Config.load.prefix)
+end
+
 if ARGV.include?("-v") || ARGV.include?("--version")
   puts "muxr #{Muxr::VERSION}"
   exit 0
@@ -76,6 +80,7 @@ if install_skill_arg
     end
   )
   puts
+  letter = configured_prefix_letter
   puts <<~MSG
     Next, register the muxr MCP bridge with Claude Code at USER scope
     (so every claude session sees it, not just ones started from your
@@ -93,17 +98,19 @@ if install_skill_arg
 
     Then restart any running Claude Code sessions so they pick up the new
     config. Any claude you launch from inside muxr — a tiled pane or the
-    Claude drawer (Ctrl-a C) — auto-detects its session via MUXR_SESSION /
+    Claude drawer (Ctrl-#{letter} C) — auto-detects its session via MUXR_SESSION /
     MUXR_CONTROL_SOCKET, which muxr injects into every PTY it spawns.
     Outside muxr the bridge stays quiet and offers no tools.
 
     Panes that were already running before this install won't have those
-    vars — open a new pane (Ctrl-a c) to pick them up.
+    vars — open a new pane (Ctrl-#{letter} c) to pick them up.
   MSG
   exit 0
 end
 
 if ARGV.include?("-h") || ARGV.include?("--help")
+  letter = configured_prefix_letter
+  source = letter == "a" ? "" : ", from #{Muxr::Config.path_from_env.sub(Dir.home, "~")}"
   puts <<~USAGE
     muxr #{Muxr::VERSION} — a tiling terminal multiplexer
 
@@ -118,16 +125,16 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       muxr --version       print version and exit
       muxr --help          this help
 
-    Keybindings (Ctrl-a prefix):
-      C-a c   new pane            C-a n / p   next / prev pane
-      C-a a   toggle last pane    C-a 1..9    jump to pane by number
-      C-a x   close pane          C-a Tab     cycle layout
-      C-a ~   toggle drawer       C-a Enter   promote to master
-      C-a C   Claude drawer       (as is claude in any pane; needs `muxr --install-skill`)
-      C-a :   command prompt      C-a ?       toggle help
-      C-a d   detach (server stays running)
-      C-a q   kill session (with y/n confirmation)
-      C-a C-a send literal C-a
+    Keybindings (Ctrl-#{letter} prefix#{source}):
+      C-#{letter} c   new pane            C-#{letter} n / p   next / prev pane
+      C-#{letter} a   toggle last pane    C-#{letter} 1..9    jump to pane by number
+      C-#{letter} x   close pane          C-#{letter} Tab     cycle layout
+      C-#{letter} ~   toggle drawer       C-#{letter} Enter   promote to master
+      C-#{letter} C   Claude drawer       (as is claude in any pane; needs `muxr --install-skill`)
+      C-#{letter} :   command prompt      C-#{letter} ?       toggle help
+      C-#{letter} d   detach (server stays running)
+      C-#{letter} q   kill session (with y/n confirmation)
+      C-#{letter} C-#{letter} send literal C-#{letter}
   USAGE
   exit 0
 end
