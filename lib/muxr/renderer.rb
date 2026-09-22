@@ -78,7 +78,12 @@ module Muxr
       @prev = nil
     end
 
-    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil)
+    def self.prefix_letter(prefix)
+      (prefix.ord + 0x60).chr
+    end
+
+    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, prefix: "\x01")
+      @prefix_letter = self.class.prefix_letter(prefix)
       w = session.width
       h = session.height
       return if w < 4 || h < 3
@@ -281,7 +286,7 @@ module Muxr
       case input_state
       when :normal       then "NORMAL"
       when :passthrough  then "PASS"
-      when :prefix       then "^A"
+      when :prefix       then "^#{@prefix_letter.upcase}"
       when :command      then "CMD"
       when :scrollback   then @scroll_source == :app ? "SCROLL:APP" : "SCROLL"
       when :search       then "SEARCH"
@@ -322,7 +327,7 @@ module Muxr
       left << " alerts:#{alerts}" unless alerts.empty?
       left << " drawer:#{drawer_state} "
 
-      right = " muxr ^a ? "
+      right = " muxr ^#{@prefix_letter} ? "
 
       bar = (left + " " * w)[0, w - right.length] + right
       bar = bar[0, w]
@@ -525,10 +530,16 @@ module Muxr
       "press any key to dismiss"
     ].freeze
 
+    def help_lines
+      return HELP_LINES if @prefix_letter == "a"
+      HELP_LINES.map { |line| line.gsub("C-a", "C-#{@prefix_letter}").gsub("Ctrl-a", "Ctrl-#{@prefix_letter}") }
+    end
+
     def compose_help(frame, session)
       w = session.width
       h = session.height
-      max_len = HELP_LINES.map(&:length).max
+      lines = help_lines
+      max_len = lines.map(&:length).max
       box_w = [max_len + 4, w - 4].min
       box_h = [HELP_LINES.length + 2, h - 4].min
       x = (w - box_w) / 2
@@ -546,7 +557,7 @@ module Muxr
       end
       draw_box(frame, rect, border: [:c256, 51], bold_border: true, title: "Help", title_focused: true)
 
-      HELP_LINES.first(box_h - 2).each_with_index do |line, i|
+      lines.first(box_h - 2).each_with_index do |line, i|
         line[0, box_w - 4].chars.each_with_index do |ch, j|
           c = frame[rect.y + 1 + i][rect.x + 2 + j]
           c.char = ch

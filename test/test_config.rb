@@ -1,5 +1,6 @@
 require "test_helper"
 require "json"
+require "stringio"
 require "muxr"
 
 class TestConfig < Minitest::Test
@@ -152,5 +153,44 @@ class TestConfig < Minitest::Test
       end
       assert_equal "\x02", input.prefix
     end
+  end
+
+  class HelpPane
+    attr_accessor :rect
+    attr_reader :terminal
+
+    def initialize
+      @terminal = Muxr::Terminal.new(rows: 5, cols: 20)
+    end
+
+    def resize(rows, cols)
+      @terminal.resize(rows, cols)
+    end
+  end
+
+  def painted(prefix:, help: false, input_state: :normal)
+    session = Muxr::Session.new(name: "spec", width: 120, height: 70)
+    session.window.add_pane(HelpPane.new)
+    out = StringIO.new
+    Muxr::Renderer.new(out: out).render(session, help: help, input_state: input_state, prefix: prefix)
+    screen = Muxr::Terminal.new(rows: 70, cols: 120)
+    screen.feed(out.string)
+    screen.dump_text
+  end
+
+  def test_help_status_bar_and_chip_name_the_configured_prefix
+    text = painted(prefix: "\x02", help: true)
+    assert_includes text, "prefix is Ctrl-b"
+    assert_includes text, "C-b Esc"
+    assert_includes text, "C-b C-b         send literal Ctrl-b"
+    refute_includes text, "C-a"
+    assert_includes text, "muxr ^b ?"
+    assert_includes painted(prefix: "\x02", input_state: :prefix), "[^B]"
+  end
+
+  def test_the_default_prefix_still_reads_ctrl_a
+    text = painted(prefix: "\x01", help: true)
+    assert_includes text, "prefix is Ctrl-a"
+    assert_includes text, "muxr ^a ?"
   end
 end

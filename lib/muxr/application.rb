@@ -394,7 +394,7 @@ module Muxr
     # Ctrl-a-prefixed multiplexer mode.
     def enter_passthrough_mode
       @input.enter_passthrough_mode
-      flash("passthrough mode (^a esc to return)")
+      flash("passthrough mode (^#{Renderer.prefix_letter(@input.prefix)} esc to return)")
       invalidate
     end
 
@@ -1521,7 +1521,8 @@ module Muxr
         search_direction: @input.search_direction,
         message: @message,
         help: @help_visible,
-        picker: @pane_picker
+        picker: @pane_picker,
+        prefix: @input.prefix
       )
     end
 
