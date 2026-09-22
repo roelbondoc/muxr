@@ -1222,6 +1222,7 @@ module Muxr
         end
       if data
         invalidate
+        pane.note_output unless attended?(pane)
         # Notify the control surface so any pending pane.run waiters reset
         # their idle window and any pane.subscribe clients get a new frame.
         # read_from_pty already fed the bytes into the Terminal; the control
@@ -1239,7 +1240,18 @@ module Muxr
     # is still drained so it can't accumulate while detached.
     def forward_notifications(pane)
       bytes = pane.terminal.take_pending_notifications!
-      deliver_output(bytes) if bytes && @current_client
+      return unless bytes
+      pane.note_bell unless attended?(pane)
+      deliver_output(bytes) if @current_client
+    end
+
+    def attended?(pane)
+      !@current_client.nil? && pane.equal?(focused_target)
+    end
+
+    def clear_focused_attention
+      target = focused_target
+      target.clear_attention! if target.respond_to?(:clear_attention!)
     end
 
     # Copy any OSC 52 clipboard write the pane's emulator collected to the
@@ -1317,6 +1329,7 @@ module Muxr
 
     def render
       leave_stale_scrollback
+      clear_focused_attention
       @renderer.render(
         @session,
         input_state: @input.state,

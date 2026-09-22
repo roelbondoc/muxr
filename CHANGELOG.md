@@ -19,6 +19,16 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   over the overlay — transient and specific beats a static key hint.
 
 ### Added
+- Panes that want your attention are marked. A pane that rings the bell or
+  sends an OSC 9 / OSC 777 notification while you are looking elsewhere gets
+  a `!` after its number in the title (`#2!`), and one that prints anything
+  gets a `•` (`#3•`). The status bar collects them as `alerts:2!,3•`. Both
+  clear the moment the pane is focused. The pane you are looking at is never
+  marked, unless no client is attached, in which case nobody is looking at
+  it either. Output within 1.5 s of a pane being resized or created is not
+  counted: every layout change sends SIGWINCH to every shell, and each one
+  answers by redrawing its prompt, which would otherwise light up every pane
+  on screen.
 - Scrollback can now drive the program instead of muxr's ring. A pane whose
   program has turned on mouse tracking (DECSET 1000/1002/1003 — `lazygit`,
   `k9s`, `htop`) gets `C-a [` routed to *it*: muxr synthesises

@@ -44,6 +44,9 @@ module Muxr
       @foreground_command = nil
       @origin = nil
       @mirror_size = nil
+      @activity = false
+      @bell = false
+      hush!
     end
 
     def mirror?
@@ -101,6 +104,37 @@ module Muxr
     # etc.) instead of once per ~8 KiB chunk — the latter shows intermediate
     # frames and is the main source of in-pane flicker. Bounded by a byte cap
     # so a runaway producer can't starve other panes on a single tick.
+    ATTENTION_GRACE = 1.5
+
+    def self.now
+      Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def activity?
+      @activity
+    end
+
+    def bell?
+      @bell
+    end
+
+    def note_output(now = Pane.now)
+      @activity = true if now >= @quiet_until
+    end
+
+    def note_bell
+      @bell = true
+    end
+
+    def clear_attention!
+      @activity = false
+      @bell = false
+    end
+
+    def hush!(now = Pane.now)
+      @quiet_until = now + ATTENTION_GRACE
+    end
+
     READ_BUDGET = 1 << 20 # 1 MiB
     def read_from_pty
       total = 0
@@ -130,9 +164,13 @@ module Muxr
     # absolute cursor addresses for *that* geometry. We only forward the
     # viewport we can offer and wait for the size the owner settles on.
     def resize(rows, cols)
-      return @process.resize(rows, cols) if mirror?
+      if mirror?
+        hush! unless rows == @terminal.rows && cols == @terminal.cols
+        return @process.resize(rows, cols)
+      end
       rows, cols = fit_to_mirrors(rows, cols)
       return if rows == @terminal.rows && cols == @terminal.cols
+      hush!
       @terminal.resize(rows, cols)
       @process.resize(rows, cols)
     end
@@ -148,6 +186,7 @@ module Muxr
     def clamp_to_mirrors!
       rows, cols = fit_to_mirrors(@terminal.rows, @terminal.cols)
       return if rows == @terminal.rows && cols == @terminal.cols
+      hush!
       @terminal.resize(rows, cols)
       @process.resize(rows, cols)
     end

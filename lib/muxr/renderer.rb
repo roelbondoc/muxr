@@ -141,7 +141,7 @@ module Muxr
         next if monocle && i != win.focused_index
 
         focused = (i == win.focused_index) && !(session.focus_drawer && session.drawer&.visible?)
-        title = "##{i + 1}"
+        title = "##{i + 1}#{attention_marker(pane)}"
         title += "/#{win.panes.length}" if monocle
         # Stable id sits after the slot number so monocle reads "#1/3 a3f9b2".
         # respond_to? guard keeps renderer tests (which use simple struct fakes)
@@ -175,6 +175,23 @@ module Muxr
         draw_mode_chip(frame, rect, input_state, title) if focused
         copy_terminal(frame, pane, rect)
       end
+    end
+
+    def attention_marker(pane)
+      if pane.respond_to?(:bell?) && pane.bell?
+        "!"
+      elsif pane.respond_to?(:activity?) && pane.activity?
+        "•"
+      else
+        ""
+      end
+    end
+
+    def attention_label(win)
+      win.panes.each_with_index.filter_map do |pane, i|
+        marker = attention_marker(pane)
+        "#{i + 1}#{marker}" unless marker.empty?
+      end.join(",")
     end
 
     def compose_drawer(frame, session, input_state: :normal)
@@ -282,6 +299,8 @@ module Muxr
           "##{win.focused_index + 1}"
         end
       left << " focused:#{focused_label}"
+      alerts = attention_label(win)
+      left << " alerts:#{alerts}" unless alerts.empty?
       left << " drawer:#{drawer_state} "
 
       right = " muxr ^a ? "
