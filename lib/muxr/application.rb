@@ -22,11 +22,11 @@ module Muxr
   # attach via Renderer#reset_frame!.
   class Application
     SELECT_TIMEOUT = 0.05
-    # ~60 Hz cap on full repaints. Keystrokes in fzf or vim navigation can
+    # ~30 Hz cap on full repaints. Keystrokes in fzf or vim navigation can
     # trigger PTY bursts faster than the terminal can usefully display them;
     # the cap collapses those bursts and stops intermediate frames from
     # showing through.
-    MIN_FRAME_INTERVAL = 1.0 / 60
+    MIN_FRAME_INTERVAL = 1.0 / 30
     SOCKETS_DIR    = File.join(Dir.home, ".muxr", "sockets").freeze
     CAPTURES_DIR   = File.join(Dir.home, ".muxr", "captures").freeze
     DEFAULT_WIDTH  = 80

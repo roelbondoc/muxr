@@ -285,4 +285,61 @@ class TestRenderer < Minitest::Test
   ensure
     Muxr::Terminal.box_wide = false
   end
+
+  def test_an_unchanged_pane_emits_nothing_on_the_next_frame
+    session = build_session(layout: :tall, focused_index: 0, width: 80, height: 20)
+    out = StringIO.new
+    renderer = Muxr::Renderer.new(out: out)
+    renderer.render(session)
+    out.truncate(0)
+    out.rewind
+
+    session.window.panes[1].terminal.feed("\r\nfresh output")
+    renderer.render(session)
+
+    assert_includes out.string, "fresh"
+    refute_includes out.string, "AAA"
+    refute_includes out.string, "CCC"
+  end
+
+  def test_reused_panes_leave_the_outer_screen_identical_to_a_full_repaint
+    session = build_session(layout: :tall, focused_index: 0, width: 80, height: 20)
+    busy = session.window.panes[1].terminal
+    steps = [
+      -> {},
+      -> { busy.feed("\r\ntick 1") },
+      -> { busy.feed("\r\ntick 2") },
+      -> { :help },
+      -> { busy.feed("\r\ntick 3") },
+      -> { session.window.panes[2].terminal.start_selection_at_visible(0, 0) },
+      -> { session.window.panes[2].terminal.move_selection_cursor_by(0, 2) },
+      -> { session.window.panes[2].terminal.clear_selection },
+      -> { session.window.set_layout(:grid) },
+      -> { busy.feed("\r\ntick 4") },
+      -> { session.window.set_layout(:monocle) },
+      -> { session.window.focused_index = 1 },
+      -> { session.window.focused_index = 2 },
+      -> { session.window.set_layout(:tall) }
+    ]
+    stream = StringIO.new
+    renderer = Muxr::Renderer.new(out: stream)
+    steps.each_with_index do |step, i|
+      help = step.call == :help
+      renderer.render(session, help: help)
+      assert_equal full_repaint_screen(session, help: help), outer_screen(stream.string, session),
+        "outer screen diverged from a full repaint after step #{i}"
+    end
+  end
+
+  def outer_screen(bytes, session)
+    outer = Muxr::Terminal.new(rows: session.height, cols: session.width)
+    outer.feed(bytes)
+    outer.dump_ansi
+  end
+
+  def full_repaint_screen(session, help:)
+    fresh = StringIO.new
+    Muxr::Renderer.new(out: fresh).render(session, help: help)
+    outer_screen(fresh.string, session)
+  end
 end

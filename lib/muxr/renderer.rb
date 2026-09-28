@@ -58,6 +58,8 @@ module Muxr
       @prev_w = 0
       @prev_h = 0
       @scroll_source = :ring
+      @pane_regions = {}
+      @reused_regions = []
     end
 
     def enter_alt_screen
@@ -66,7 +68,7 @@ module Muxr
       # reality.
       @out.write("\e[?1049h\e[?25l\e[2J\e[H\e[0m\e]8;;\e\\")
       @out.flush
-      @prev = nil
+      reset_frame!
     end
 
     def exit_alt_screen
@@ -76,6 +78,7 @@ module Muxr
 
     def reset_frame!
       @prev = nil
+      @pane_regions = {}
     end
 
     def self.prefix_letter(prefix)
@@ -91,7 +94,11 @@ module Muxr
       frame = Array.new(h) { Array.new(w) { Cell.new(" ", nil, nil, 0, nil) } }
 
       @scroll_source = scroll_source
+      @reuse_panes = @prev && @prev_w == w && @prev_h == h && !session.drawer&.visible? && !help && !picker
+      @reused_regions = []
+      @next_pane_regions = {}
       compose_panes(frame, session, input_state: input_state)
+      @pane_regions = @reuse_panes ? @next_pane_regions : {}
       compose_drawer(frame, session, input_state: input_state) if session.drawer&.visible?
       compose_status_bar(
         frame, session,
@@ -182,8 +189,25 @@ module Muxr
         # the same edge as the title but on the opposite side keeps both
         # readable without one crowding the other.
         draw_mode_chip(frame, rect, input_state, title) if focused
+        paint_pane(frame, pane, rect)
+      end
+    end
+
+    def paint_pane(frame, pane, rect)
+      term = pane.terminal
+      region = [rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2]
+      identity = [term.object_id, term.rows, term.cols]
+      if @reuse_panes && @pane_regions[region] == identity && reusable?(term)
+        @reused_regions << region
+      else
         copy_terminal(frame, pane, rect)
       end
+      term.clear_dirty! if term.respond_to?(:clear_dirty!)
+      @next_pane_regions[region] = identity
+    end
+
+    def reusable?(term)
+      term.respond_to?(:dirty?) && !term.dirty? && !term.selection_active? && !term.search_active?
     end
 
     def pane_label(pane)
@@ -727,8 +751,10 @@ module Muxr
       cur_hyperlink = nil
       last_y = nil
       last_x = nil
+      reused = same_size ? reused_spans(frame) : {}
 
       frame.each_with_index do |row, y|
+        spans = reused[y]
         # When the previous glyph on this row had an uncertain display width
         # (set below), the outer terminal may have drawn it two columns wide and
         # stolen the column to its right. Force that next cell to repaint even
@@ -736,7 +762,17 @@ module Muxr
         # linger until a full repaint. Reset per row — a steal can't cross a
         # line boundary.
         force_next = false
-        row.each_with_index do |cell, x|
+        x = -1
+        width = row.length
+        span_index = 0
+        while (x += 1) < width
+          if spans && (span = spans[span_index]) && span[0] == x
+            x = span[1]
+            span_index += 1
+            force_next = false
+            next
+          end
+          cell = row[x]
           if same_size && @prev[y][x] == cell && !force_next
             next
           end
@@ -792,9 +828,26 @@ module Muxr
       out << "\e[?2026l"
       @out.write(out)
       @out.flush
-      @prev = frame.map { |row| row.map(&:dup) }
+      reused.each do |y, row_spans|
+        row_spans.each { |x0, x1| frame[y][x0..x1] = @prev[y][x0..x1] }
+      end
+      @prev = frame
       @prev_w = frame[0].length
       @prev_h = frame.length
+    end
+
+    def reused_spans(frame)
+      h = frame.length
+      w = frame[0].length
+      spans = {}
+      @reused_regions.each do |x, y, rw, rh|
+        x0 = x.clamp(0, w)
+        x1 = (x + rw - 1).clamp(-1, w - 1)
+        next if x1 < x0
+        (y...(y + rh)).each { |ry| (spans[ry] ||= []) << [x0, x1] if ry >= 0 && ry < h }
+      end
+      spans.each_value(&:sort!)
+      spans
     end
 
     # Whether we can trust the outer terminal's cursor to be exactly one
