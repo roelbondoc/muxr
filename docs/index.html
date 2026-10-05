@@ -15,6 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,400..800&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/asciinema-player@3.17.0/dist/bundle/asciinema-player.css">
+<script src="https://cdn.jsdelivr.net/npm/asciinema-player@3.17.0/dist/bundle/asciinema-player.min.js" defer></script>
 <style>
 :root {
   color-scheme: light dark;
@@ -296,6 +298,16 @@ h1 .caret {
 .term-bar b { color: var(--term-accent); font-weight: 500; }
 .term-bar .rule { flex: 1; height: 1px; background: var(--term-line); }
 .term img { display: block; width: 100%; height: auto; }
+.cast { background: #1e1e2e; }
+.cast .ap-player { border-radius: 0; }
+.asciinema-player-theme-muxr {
+  --term-color-foreground: #cdd6f4;
+  --term-color-background: #1e1e2e;
+  --term-color-0: #45475a;  --term-color-1: #f38ba8;  --term-color-2: #a6e3a1;  --term-color-3: #f9e2af;
+  --term-color-4: #89b4fa;  --term-color-5: #f5c2e7;  --term-color-6: #94e2d5;  --term-color-7: #bac2de;
+  --term-color-8: #585b70;  --term-color-9: #f38ba8;  --term-color-10: #a6e3a1; --term-color-11: #f9e2af;
+  --term-color-12: #89b4fa; --term-color-13: #f5c2e7; --term-color-14: #94e2d5; --term-color-15: #a6adc8;
+}
 
 figure { margin: 0; }
 figcaption {
@@ -565,8 +577,8 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <p class="hero-tagline">Stop resizing panes. Pick a layout instead.</p>
         <p class="hero-sub">
           A keyboard-driven terminal multiplexer written in pure Ruby. GNU Screen's
-          keybindings, xmonad's automatic tiling, and a Quake-style drop-down drawer —
-          in about nine thousand lines of stdlib, with no runtime gems at all.
+          keybindings, xmonad's automatic tiling, and a Quake-style overlay drawer —
+          in about ten thousand lines of stdlib, with no runtime gems at all.
         </p>
         <div class="cta-row">
           <div class="install">
@@ -644,7 +656,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <p class="hint">
           <b>Screen</b> resizes the simulated terminal. <kbd>F</kbd> —
           <code>auto</code>, the layout new sessions start in — is the one that
-          reads it: <code>spiral</code> from 180×30 up, <code>stack</code> below.
+          reads it: <code>spiral</code> once the pane area is 180×30 or more, <code>stack</code> below.
         </p>
       </div>
     </div>
@@ -685,8 +697,16 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
       <figcaption>
         The <b>[MODE]</b> chip and the focused border track your input mode — cyan normal,
         green passthrough, orange scrollback, magenta selection, yellow command prompt,
-        red confirmation, blue help.
+        red confirmation, blue for help and the pickers.
       </figcaption>
+    </figure>
+
+    <figure style="margin-top:2.6rem;">
+      <div class="term">
+        <div class="term-bar"><b>tour</b><span class="rule"></span><span>recorded with muxr --record</span></div>
+        <div class="cast" data-cast="media/tour.cast"><img src="media/tour.gif" loading="lazy" width="1233" height="941" alt="creating panes, moving focus, dragging a pane, growing the master, zooming, and cycling through every layout"></div>
+      </div>
+      <figcaption>Forty seconds of real keystrokes. The chip at the bottom right is <b>:showkeys</b>, which prints each key as it is pressed.</figcaption>
     </figure>
   </div>
 </section>
@@ -722,6 +742,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           <tr><td><kbd>a</kbd> <kbd>1</kbd>…<kbd>9</kbd></td><td>last pane / jump by number</td></tr>
           <tr><td><kbd>s</kbd> <kbd>]</kbd></td><td>scrollback / paste the yank buffer</td></tr>
           <tr><td><kbd>~</kbd> <kbd>C</kbd> <kbd>P</kbd></td><td>drawer / Claude drawer / private flag</td></tr>
+          <tr><td><kbd>o</kbd> <kbd>N</kbd></td><td>switch to any pane in any session / start a directory's session</td></tr>
           <tr><td><kbd>A</kbd> <kbd>r</kbd></td><td>borrow a pane / force a redraw</td></tr>
           <tr><td><kbd>:</kbd> <kbd>?</kbd></td><td>command prompt / help</td></tr>
           <tr><td><kbd>d</kbd> <kbd>q</kbd></td><td>detach / kill session (asks <code>y/n</code>)</td></tr>
@@ -740,6 +761,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           <tr><td><kbd>C-a</kbd> <kbd>&lt;</kbd> <kbd>&gt;</kbd> <kbd>,</kbd> <kbd>.</kbd> <kbd>z</kbd></td><td>master size / count / zoom</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>[</kbd> <kbd>]</kbd></td><td>scrollback / paste</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>~</kbd> <kbd>C</kbd> <kbd>P</kbd></td><td>drawer / Claude drawer / private</td></tr>
+          <tr><td><kbd>C-a</kbd> <kbd>Space</kbd> <kbd>N</kbd></td><td>switch to any pane / start a directory's session</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>A</kbd> <kbd>r</kbd></td><td>borrow a pane / redraw</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>d</kbd> <kbd>q</kbd></td><td>detach / kill session</td></tr>
           <tr><td><kbd>C-a</kbd> <kbd>:</kbd> <kbd>?</kbd></td><td>command prompt / help</td></tr>
@@ -773,7 +795,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           <p>
             It is also where the verbs without a key live: <code>:rename</code>,
             <code>:silence 30</code>, <code>:sync</code>, <code>:ratio 60</code>,
-            <code>:masters 2</code>, <code>:capture</code> and <code>:reload</code> —
+            <code>:masters 2</code>, <code>:capture</code>, <code>:showkeys</code> and <code>:reload</code> —
             any of which you can put on a key of your own in the
             <a href="#config">config file</a>.
           </p>
@@ -827,6 +849,13 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <figcaption>A movable cursor with vim motions; <b>Ctrl-v</b> switches to a rectangular block.</figcaption>
       </figure>
     </div>
+
+    <figure style="margin-top:2.2rem;">
+      <div class="term">
+        <div class="term-bar"><b>s / v y</b><span class="rule"></span><span>scroll, search, select, yank</span></div>
+        <div class="cast" data-cast="media/scrollback.cast"><img src="media/scrollback.gif" loading="lazy" width="1233" height="941" alt="scrolling back, searching, stepping through matches, and yanking a selection"></div>
+      </div>
+    </figure>
   </div>
 </section>
 
@@ -885,6 +914,14 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         </dl>
       </div>
     </div>
+
+    <figure style="margin-top:2.2rem;">
+      <div class="term">
+        <div class="term-bar"><b>! • :sync</b><span class="rule"></span><span>bells, activity, and typing everywhere</span></div>
+        <div class="cast" data-cast="media/attention.cast"><img src="media/attention.gif" loading="lazy" width="1233" height="941" alt="a bell and background output marking panes, then :sync typing one command into all three"></div>
+      </div>
+      <figcaption>A pane rings while you look elsewhere and is marked <b>#2!</b>; another prints and is marked <b>#3•</b>. Then <b>:sync</b> sends one command to all three.</figcaption>
+    </figure>
   </div>
 </section>
 
@@ -896,8 +933,8 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <h2 style="font-size:var(--step-2)">A shell that drops in from nowhere.</h2>
         <div class="prose">
           <p>
-            <code>~</code> drops a persistent overlay shell over the whole layout — the
-            terminal equivalent of a Quake console. It's the right home for the command
+            <code>~</code> slides a persistent overlay shell over the bottom of the layout,
+            just above the status bar — the terminal equivalent of a Quake console. It's the right home for the command
             you keep needing but don't want to spend a pane on.
           </p>
           <p>
@@ -910,9 +947,69 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
       <figure>
         <div class="term">
           <div class="term-bar"><b>drawer</b><span class="rule"></span><span>overlay shell</span></div>
-          <img src="screenshots/drawer.png" alt="muxr's Quake-style drawer overlay dropped over a grid of five panes" loading="lazy" width="1200" height="760">
+          <div class="cast" data-cast="media/drawer.cast"><img src="screenshots/drawer.png" alt="muxr's Quake-style drawer overlay over a grid of five panes" loading="lazy" width="1200" height="760"></div>
         </div>
       </figure>
+    </div>
+  </div>
+</section>
+
+<section id="switch">
+  <div class="shell">
+    <p class="eyebrow"><span class="key">o N</span> every session</p>
+    <div class="split" style="align-items:start; margin-bottom:2.4rem;">
+      <h2 style="font-size:var(--step-3)">One terminal tab for every session.</h2>
+      <div class="prose">
+        <p>
+          <code>o</code> lists every pane of every running session, most recently
+          updated first, with what muxr knows about it: <code>busy</code> while the
+          program reports progress, <code>active</code> or <code>idle</code> by output age,
+          the attention marks, the foreground command, and the window title or last
+          notification. <kbd>Enter</kbd> moves this terminal's client to that session
+          and focuses the pane. The session you left keeps running.
+        </p>
+        <p>
+          The filter is a list of terms that must all match, so
+          <code>cmd:claude -is:busy</code> is every Claude waiting on you. <code>N</code>
+          asks for a directory and takes you to its session, starting a server first if
+          nothing is running there.
+        </p>
+      </div>
+    </div>
+
+    <div class="gallery" style="margin-bottom:2.2rem;">
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>o</b><span class="rule"></span><span>pane switcher</span></div>
+          <img src="screenshots/switcher.png" alt="the switcher listing panes from three sessions with their state, command, idle time and title" loading="lazy" width="1200" height="760">
+        </div>
+        <figcaption>A busy Claude, a pane that sent a notification, and the rest — across three sessions.</figcaption>
+      </figure>
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>N</b><span class="rule"></span><span>new session</span></div>
+          <img src="screenshots/new-session.png" alt="the new-session prompt completing a directory and saying it will start a new session" loading="lazy" width="1200" height="760">
+        </div>
+        <figcaption><kbd>Tab</kbd> completes directories, and the line underneath says whether <kbd>Enter</kbd> starts a session or switches to a running one.</figcaption>
+      </figure>
+    </div>
+
+    <div class="split" style="align-items:start;">
+      <figure>
+        <div class="term">
+          <div class="term-bar"><b>o / N</b><span class="rule"></span><span>moving between sessions</span></div>
+          <div class="cast" data-cast="media/switcher.cast"><img src="media/switcher.gif" loading="lazy" width="1233" height="941" alt="switching panes across sessions with the switcher, then starting a session for a new directory"></div>
+        </div>
+      </figure>
+<pre class="snippet"><span class="c"># the same list, from any shell</span>
+<span class="k">$</span> muxr panes
+<span class="k">$</span> muxr panes cmd:claude is:idle
+<span class="k">$</span> muxr panes --json
+<span class="k">$</span> muxr go work:2
+
+<span class="c"># fuzzy-find a pane and go there</span>
+<span class="k">$</span> muxr panes cmd:claude | fzf \
+    | awk '{print $1}' | xargs muxr go</pre>
     </div>
   </div>
 </section>
@@ -945,6 +1042,13 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <figcaption>A borrowed pane names its owner in the title: <b>@api:b338b0</b> — and keeps the owner's working directory.</figcaption>
       </figure>
     </div>
+
+    <figure style="margin-bottom:2.6rem;">
+      <div class="term">
+        <div class="term-bar"><b>A Enter / m</b><span class="rule"></span><span>share, then move</span></div>
+        <div class="cast" data-cast="media/share.cast"><img src="media/share.gif" loading="lazy" width="1233" height="941" alt="sharing a pane from another session, typing into it, then moving a second one over for good"></div>
+      </div>
+    </figure>
 
     <div class="split">
       <div class="stack-2">
@@ -1005,10 +1109,12 @@ anywhere leaves the pane where it was.</pre>
     <div class="split" style="align-items:start;">
       <div class="stack-2">
 <pre class="snippet"><span class="c"># the surface</span>
-session.get   panes.list    pane.read
+ping          session.get   panes.list
+pane.read
 pane.send_input             pane.run
 pane.focus    pane.new      pane.kill
 pane.promote  pane.redraw   layout.set
+layout.cycle  client.switch
 pane.subscribe / unsubscribe
 pane.mirror / mirror_resize / unmirror
 pane.move / move_commit / move_abort
@@ -1169,6 +1275,39 @@ drawer.read / send_input    session.save
   </div>
 </section>
 
+<section id="record">
+  <div class="shell">
+    <p class="eyebrow"><span class="key">--record</span> recording</p>
+    <div class="split" style="align-items:start;">
+      <div class="stack-2">
+        <h2 style="font-size:var(--step-3)">It records itself.</h2>
+        <div class="prose">
+          <p>
+            <code>muxr --record demo.cast</code> attaches as usual and writes everything
+            your terminal shows to an asciicast file, with timing and resizes, until you
+            detach. The recording follows the client, so jumping to another session with
+            <code>o</code> or <code>N</code> stays in the same file. Play it with
+            asciinema, embed it on a page, or turn it into a GIF with <code>agg</code>.
+          </p>
+          <p>
+            A keyboard-driven tool is hard to follow on video, so <code>:showkeys</code>
+            puts the keys you press in the status bar: the multiplexer keys and the prefix
+            chords, but not the text you type into a shell, which is already on screen.
+            Every video on this page was made this way, from tapes in the repository.
+          </p>
+        </div>
+      </div>
+<pre class="snippet"><span class="k">$</span> muxr --record demo.cast work
+<span class="c">  … C-a d to stop</span>
+<span class="k">$</span> asciinema play demo.cast
+<span class="k">$</span> agg demo.cast demo.gif
+
+<span class="c"># ~/.muxr/config.json</span>
+{ <span class="k">"show_keys"</span>: true }</pre>
+    </div>
+  </div>
+</section>
+
 <section id="install" class="closer">
   <div class="shell">
     <h2>Ten layouts. Zero dependencies.</h2>
@@ -1204,7 +1343,8 @@ drawer.read / send_input    session.save
     <a href="#keys"><span class="k">keys:</span>two&nbsp;modes</a>
     <a href="#scrollback" class="hide-sm"><span class="k">scrollback:</span>50000</a>
     <a href="#attention"><span class="k">alerts:</span>2!,3•</a>
-    <a href="#sessions"><span class="k">panes:</span>shared</a>
+    <a href="#switch"><span class="k">switch:</span>o</a>
+    <a href="#sessions" class="hide-sm"><span class="k">panes:</span>shared</a>
     <a href="#agents"><span class="k">ctrl:</span>mcp</a>
     <a href="#config" class="hide-sm"><span class="k">config:</span>json</a>
     <a href="#internals" class="hide-sm"><span class="k">deps:</span>0</a>
@@ -1443,7 +1583,7 @@ const SCREENS = [
 ];
 const WIDEST = Math.max(...SCREENS.map((s) => s.cols));
 const SAMPLES = [
-  ["$ rake test", "613 runs, 0 failures"],
+  ["$ rake test", "692 runs, 0 failures"],
   ["$ git log --oneline", "61df55c Move a pane"],
   ["$ vim lib/muxr/pane.rb", "-- INSERT --"],
   ["$ tail -f log/dev.log", "GET /health 200"],
@@ -1733,6 +1873,32 @@ if ("IntersectionObserver" in window) {
   }, { rootMargin: "-45% 0px -45% 0px" });
   targets.forEach((t) => io.observe(t));
 }
+</script>
+<script>
+window.addEventListener("load", () => {
+  if (!window.AsciinemaPlayer) return;
+  document.querySelectorAll(".cast[data-cast]").forEach((el) => {
+    const start = () => {
+      el.replaceChildren();
+      AsciinemaPlayer.create(el.dataset.cast, el, {
+        theme: "muxr",
+        fit: "width",
+        loop: true,
+        autoPlay: true,
+        idleTimeLimit: 1.5,
+        terminalFontFamily: "'JetBrains Mono', ui-monospace, monospace",
+        controls: "auto"
+      });
+    };
+    if (!("IntersectionObserver" in window)) return start();
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      io.disconnect();
+      start();
+    }, { rootMargin: "200px" });
+    io.observe(el);
+  });
+});
 </script>
 </body>
 </html>

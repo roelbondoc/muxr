@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>A keyboard-driven terminal multiplexer in pure Ruby.</strong><br/>
-  GNU Screen's keybindings · xmonad's automatic tiling · a Quake-style drop-down drawer
+  GNU Screen's keybindings · xmonad's automatic tiling · a Quake-style overlay drawer
 </p>
 
 <p align="center">
@@ -36,7 +36,7 @@ protocol, the tiling maths — is stdlib Ruby with no runtime gems.
 | **Ten automatic layouts** | tall, wide, columns, rows, grid, spiral, centered, stack, monocle, auto — each a pure function of pane count and screen size, with an xmonad-style resizable master area and a one-key zoom |
 | **Two input modes** | *normal* acts on the multiplexer with single keys; *passthrough* forwards everything to the shell behind the classic `Ctrl-a` prefix |
 | **Detach and reattach** | the server keeps every PTY alive; reattaching gives you back the same shells with full history |
-| **Quake-style drawer** | a persistent overlay shell that drops from the top of the screen and never loses its scrollback |
+| **Quake-style drawer** | a persistent overlay shell that slides over the bottom of the layout and never loses its scrollback |
 | **Real terminal emulation** | truecolor SGR, scroll regions, alternate screen, bracketed paste, wide/CJK/emoji cells, OSC 8 hyperlinks |
 | **Scrollback with vi motions** | 50,000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard, `:capture` a whole history to a file |
 | **Knows which pane wants you** | a pane that rang the bell, printed while you looked away, or went quiet for longer than you asked is marked in its title and the status bar |
@@ -44,6 +44,7 @@ protocol, the tiling maths — is stdlib Ruby with no runtime gems.
 | **One tab for every session** | a filterable list of every pane in every session, with what is running, whether it is busy, and how long it has been quiet — `Enter` takes this terminal straight there |
 | **Panes across sessions** | borrow a live pane from another muxr session, or hand it over for good by passing its pty file descriptor down a socket |
 | **Built for agents** | a JSON-RPC control socket, an MCP bridge, panes you can name and refer to by name, and private panes that programmatic callers cannot see or touch |
+| **Records itself** | `muxr --record demo.cast` writes an asciicast of exactly what your terminal shows, and `:showkeys` puts the keys you press on screen — every video on this page was made that way |
 | **Configurable without patching** | `~/.muxr/config.json` sets the default layout, scrollback depth, master shape, the prefix key, and remaps any key onto an action or a `:` command |
 
 ## Install
@@ -62,6 +63,7 @@ muxr work                # attach (or start) a session named "work"
 muxr --list              # list running sessions and exit
 muxr panes cmd:claude    # list matching panes across every session
 muxr go work:2           # jump to pane 2 of session "work"
+muxr --record demo.cast  # attach and record the session to an asciicast file
 muxr --install-skill     # install the Claude Code skill + MCP bridge
 muxr --help
 ```
@@ -103,6 +105,10 @@ s  /error    scroll back and search
 d            detach; `muxr` again to pick up exactly where you left off
 ```
 
+Here is most of that, with the keys shown in the status bar as they are pressed:
+
+![creating panes, moving focus, dragging a pane, growing the master, zooming, and cycling through every layout](docs/media/tour.gif)
+
 Press `?` at any time for the full keymap:
 
 ![the built-in help overlay](docs/screenshots/help.png)
@@ -124,7 +130,7 @@ a pane simply recomputes the tiling on the next frame.
 | `centered` | `e`  | master in a centred column, the rest dealt to both sides |
 | `stack`    | `S`  | accordion — the focused pane expands, others collapse to title slivers |
 | `monocle`  | `m`  | focused pane fullscreen |
-| `auto`     | `F`  | `spiral` when the screen is at least 180×30, `stack` below that |
+| `auto`     | `F`  | `spiral` when the pane area is at least 180×30, `stack` below that |
 
 `Tab` cycles through them in that order. New sessions start in `auto`, or in
 whatever `layout` your [config](#configuration) names.
@@ -211,7 +217,8 @@ roughly every 750ms so this stays current without ever blocking the render loop.
 The `[MODE]` chip in the top-right corner and the focused pane's border colour
 both track the current mode: **cyan** normal, **green** passthrough, **orange**
 scrollback and its `/` search, **magenta** selection, **yellow** the command
-prompt, **red** a `y/n` confirmation, **blue** while help is open. Unfocused
+prompt, **red** a `y/n` confirmation, **blue** while help, the pane picker, the
+switcher or the new-session prompt is open. Unfocused
 panes use the grey border, except while [`:sync`](#typing-into-every-pane-at-once)
 is on, when they turn red because they receive your keystrokes too.
 
@@ -299,7 +306,7 @@ drawer {toggle|show|hide|reset}
 claude                 # toggle the Claude Code drawer
 private                # toggle the private flag on the focused pane
 attach                 # open the pane picker (same as A)
-switch [filter]        # open the pane switcher, pre-filtered (same as o)
+switch | panes [filter]  # open the pane switcher, pre-filtered (same as o)
 new [dir]              # start (or switch to) the session for dir; bare opens the prompt (same as N)
 new_pane | c           # open a new pane (same as c)
 save                   # write ~/.muxr/sessions/<name>.json
@@ -308,6 +315,7 @@ sessions | ls          # list saved sessions and live servers
 rename [name]          # label the focused pane; bare clears it
 silence {30|30s|2m|off}  # alert when the focused pane goes quiet
 sync [on|off]          # type into every pane at once; bare toggles
+showkeys [on|off]      # show the keys you press in the status bar; bare toggles
 ratio <percent>        # the master's share of the screen (10–90)
 masters <n>            # how many panes share the master area
 zoom                   # same as z
@@ -357,14 +365,19 @@ drawer is left out in both directions: when the drawer is focused, what you
 type stays in the drawer. Sync is deliberately never saved with the session.
 There is no default key for it, but you can [bind one](#configuration).
 
+![a bell and background output marking panes, then :sync typing one command into all three](docs/media/attention.gif)
+
 ## The drawer
 
-`~` (normal), `C-a ~` (passthrough), or `:drawer toggle` drops a persistent
-overlay shell over the top of the layout — the terminal equivalent of a Quake
-console. It is the right place for the command you keep needing but do not
+`~` (normal), `C-a ~` (passthrough), or `:drawer toggle` slides a persistent
+overlay shell over the bottom of the layout, just above the status bar — the
+terminal equivalent of a Quake console. It takes 35% of the screen, and never
+less than 16 rows. It is the right place for the command you keep needing but do not
 want to give a pane to.
 
 ![the drawer overlay](docs/screenshots/drawer.png)
+
+![the drawer dropping in, running a command, and coming back with its output intact](docs/media/drawer.gif)
 
 Hiding the drawer **never tears down its PTY**: the shell keeps running, so
 the next toggle restores exactly what was on screen, scrollback and all. Only
@@ -447,8 +460,8 @@ Press `v` for a movable-cursor selection with vim motions:
 | `w` `W` `e` `E` `b` `B` | word and WORD motions |
 | `g` `G` | top / bottom of the timeline |
 | `H` `M` `L` | top / middle / bottom of the viewport |
-| `C-d` `C-u` `C-f` `C-b` Space | half and full page |
-| `v` / `C-v` | toggle character / block (rectangular) selection |
+| `d` `u` `f`, `C-d` `C-u` `C-f` `C-b` | half and full page |
+| `v` or Space / `C-v` | toggle character / block (rectangular) selection |
 | `y` or `Enter` | yank and stay in scrollback |
 | `q` `Esc` `C-c` | cancel back to scrollback |
 
@@ -458,6 +471,8 @@ Switching between `v` and `C-v` preserves the anchor. Yanking fills muxr's
 internal buffer *and* pipes the text to `pbcopy` in the background (a silent
 no-op where `pbcopy` does not exist). `]` / `C-a ]` writes the buffer back
 into the focused pane.
+
+![scrolling back, searching, stepping through matches, and yanking a selection](docs/media/scrollback.gif)
 
 ### Capturing a whole history
 
@@ -474,7 +489,7 @@ the shell underneath rather than the program's frame.
 
 `o` (or `C-a Space`, or `:switch`) opens a modal listing every pane of every running session, this
 one included. Typing filters the list; `↑`/`↓` or `C-n`/`C-p` select, `Enter`
-goes there, `C-r` refreshes, `C-u` clears the filter and `Esc` backs out. A
+goes there (`Tab` moves down too), `C-r` refreshes, `Backspace` edits the filter, `C-u` clears it and `Esc` backs out. A
 pane in another session is reached by moving this terminal's client over to
 that session and focusing the pane — the session you left keeps running,
 exactly as if you had detached. If another terminal is attached to the target
@@ -494,15 +509,18 @@ in it:
 | cwd | the pane's directory, on screens wide enough for it |
 | title / notice | the program's window title (OSC 0/2), else its last notification (OSC 9 / 777) |
 
+![the switcher listing panes from three sessions with their state, command and title](docs/screenshots/switcher.png)
+
 Claude Code fills all of these in: it reports progress for the length of a
 turn, keeps the task in its title, and sends `Claude is waiting for your input`
 as a notification once it stops.
 
 The filter is a list of terms that must all match. A bare word matches any
 column; `cmd:`, `s:` (session), `n:` (name), `title:`, `cwd:` and `id:` match
-one; `is:busy`, `is:idle`, `is:active`, `is:error`, `is:bell`, `is:activity`,
-`is:silent`, `is:attention`, `is:here` and `is:focused` test state; a leading
-`-` excludes. So `cmd:claude -is:busy` is every Claude that is waiting on you.
+one (`c:`, `session:`, `name:`, `t:` and `dir:` are aliases); `is:busy`,
+`is:idle`, `is:active`, `is:error`, `is:bell`, `is:activity`, `is:silent`,
+`is:attention`, `is:private`, `is:here` and `is:focused` test state; a leading
+`-` excludes, and an unknown `key:value` is matched as plain text. So `cmd:claude -is:busy` is every Claude that is waiting on you.
 Bind it to a key in the [config](#configuration) with `":switch cmd:claude"`.
 
 The same list is available from a shell:
@@ -528,6 +546,10 @@ completes directory names, `C-w` deletes back one directory, and the line
 under the path says whether `Enter` will start a new session or switch to a
 running one. Relative paths resolve against the directory this session was
 started in. `:new ~/src/project` does the same without the prompt.
+
+![the new-session prompt completing a directory and saying it will start a new session](docs/screenshots/new-session.png)
+
+![switching panes across sessions with the switcher, then starting a session for a new directory](docs/media/switcher.gif)
 
 ## Sharing and moving panes
 
@@ -589,6 +611,8 @@ muxr will not move the **last** pane out of a session (that would shut the
 session down as a side effect), and a pane that is itself borrowed cannot be
 moved on — move it from the session that owns it.
 
+![sharing a pane from another session, typing into it, then moving a second one over for good](docs/media/share.gif)
+
 ## Terminal fidelity
 
 The per-pane `Terminal` is a real VT100/xterm emulator, not a line buffer: a
@@ -643,7 +667,7 @@ Alongside the TTY socket, each server exposes a control listener at
 `~/.muxr/sockets/<name>.ctrl.sock` speaking newline-delimited JSON-RPC:
 
 ```
-session.get   panes.list   pane.read       pane.send_input  pane.run
+ping          session.get   panes.list   pane.read       pane.send_input  pane.run
 pane.focus    pane.new     pane.kill       pane.promote     pane.redraw
 pane.subscribe / unsubscribe               pane.mirror / mirror_resize / unmirror
 pane.move / move_commit / move_abort       layout.set / layout.cycle
@@ -730,7 +754,8 @@ and a symlink into it would dangle — re-run `muxr --install-skill` after each
 `P` (normal), `C-a P` (passthrough), or `:private` flips the private flag on
 the focused pane. Private panes are hidden from programmatic callers:
 `panes.list` strips their cwd and dimensions, and `pane.read`,
-`pane.send_input`, `pane.run`, `pane.subscribe`, and `pane.kill` refuse with
+`pane.send_input`, `pane.run`, `pane.subscribe`, `pane.kill`, `pane.redraw`,
+`pane.mirror` and `pane.move` refuse with
 an error pointing the human back at the TTY. They are also never offered in
 another session's pane picker.
 
@@ -784,6 +809,27 @@ those panes is your shell's job, not muxr's.
  └─ logs/<name>.log             server stdout and stderr
 ```
 
+## Recording a demo
+
+```bash
+muxr --record demo.cast work   # attach to "work" and record until you detach
+```
+
+`--record` makes the client write everything it puts on your terminal to an
+[asciicast v2](https://docs.asciinema.org/manual/asciicast/v2/) file, with
+timing and resizes, until it exits. The recording follows the client, so a
+switch to another session with `o` or `N` stays in the same file. Nothing on
+screen changes while it runs. Play it with
+[asciinema](https://asciinema.org) (`asciinema play demo.cast`), embed it
+with asciinema-player, or turn it into a GIF with
+[agg](https://github.com/asciinema/agg) (`agg demo.cast demo.gif`).
+
+A viewer cannot see which keys drive a keyboard-only program, so `:showkeys`
+(or `"show_keys": true` in the [config](#configuration)) shows the last few
+keys in the status bar as you press them: `C-a Esc`, `t`, `J`, `Enter`.
+Text typed into a shell or a prompt is left out, since it is already on
+screen.
+
 ## Configuration
 
 muxr reads `~/.muxr/config.json` when the server starts, or whatever file
@@ -798,6 +844,7 @@ in a running session.
   "master_count": 1,
   "auto_spiral_min": {"cols": 200, "rows": 40},
   "prefix": "C-b",
+  "show_keys": false,
   "keys": {
     "normal": {"Z": "toggle_zoom", "Y": ":sync", "q": null},
     "prefix": {"Space": "cycle_layout", "S": ":capture"}
@@ -812,6 +859,7 @@ in a running session.
 | `master_ratio`, `master_count` | the starting master shape, 0.1–0.9 and 1+ |
 | `auto_spiral_min` | the screen size at which `auto` switches from `stack` to `spiral` |
 | `prefix` | the passthrough prefix, any control key: `"C-b"` for tmux habits |
+| `show_keys` | start every session with `:showkeys` on, for recording demos |
 | `keys.normal`, `keys.prefix` | remap keys in normal mode and after the prefix |
 
 A key is one character, `C-x`, `Tab`, `Enter`, `Space` or `Esc`. It maps to
@@ -885,20 +933,25 @@ movement, SGR, erase, scroll-region, autowrap, alternate-screen, and snapshot
 round-trip behaviour.
 PTY-spawning code paths are dependency-injected, so tests never spawn a shell.
 
-### Regenerating the screenshots
+### Regenerating the screenshots and videos
 
-Every image in this README is produced by [`vhs`](https://github.com/charmbracelet/vhs)
-driving muxr itself — one `.tape` file per screenshot under
-`docs/screenshots/tapes/`:
+Every image and video in this README is produced by
+[`vhs`](https://github.com/charmbracelet/vhs) driving muxr itself — one
+`.tape` file per screenshot or video under `docs/screenshots/tapes/`:
 
 ```bash
-brew install vhs                       # one-time
-docs/screenshots/tapes/regenerate.sh   # re-renders everything
+brew install vhs agg                              # one-time
+docs/screenshots/tapes/regenerate.sh              # re-renders everything
+docs/screenshots/tapes/regenerate.sh video-tour   # or just the tapes you name
 ```
 
-Each tape spawns a throwaway `shot` session, populates panes with real output,
-drives the feature being shown, and writes a single PNG. Tapes whose names
-start with `_` are shared fragments pulled in with `Source`.
+Each tape spawns a throwaway `shot` session under a scratch `HOME`, populates
+panes with real output, and drives the feature being shown. Screenshot tapes
+write a PNG to `docs/screenshots/`. Video tapes (`video-*.tape`) attach with
+`muxr --record` and `show_keys` on, so muxr writes `docs/media/<name>.cast`
+itself, and `agg` renders that to the GIF the README uses; the project page
+plays the `.cast` directly. Tapes whose names start with `_` are shared
+fragments pulled in with `Source`.
 
 ## Contributing
 

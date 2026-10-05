@@ -16,4 +16,5 @@ PROMPT_COMMAND=
 HISTFILE=
 RC
 
-mkdir -p "$HOME/work/api" "$HOME/notes"
+mkdir -p "$HOME/work/api" "$HOME/work/web" "$HOME/notes"
+printf "release checklist\n  - tag v0.3.0\n  - changelog\n  - gem push\n" > "$HOME/notes/release.md"

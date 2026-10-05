@@ -25,6 +25,19 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   directory names and a preview line says which session `Enter` will open.
 - `:new <dir>` does the same without the prompt; bare `:new` opens it.
 
+- `muxr --record <file.cast> [name]` writes everything the client shows to
+  an asciicast v2 file, with timing and resizes, until it exits. It follows
+  the client across `o` / `N` session switches.
+- `:showkeys [on|off]` (or `"show_keys": true` in the config) shows the last
+  few keys pressed in the status bar, for recordings. Text typed into a
+  shell or a prompt is left out.
+- Videos of the main features in the README and on the project page, made
+  by the VHS tapes in `docs/screenshots/tapes/` through `--record`.
+
+### Docs
+- The drawer is described as sliding over the bottom of the layout, which is
+  where it has always been drawn, not the top.
+
 ### Changed
 - `:new` no longer opens a pane; use `:new_pane` (or `:c`, `c`, `C-a c`).
 

@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.summary       = "A keyboard-driven terminal multiplexer with tiling layouts and a Quake-style drawer"
   spec.description   = <<~DESC
     muxr is a Ruby terminal multiplexer that combines GNU Screen's familiar
-    keybindings, xmonad-inspired automatic tiling, and a Quake-style drop-down
+    keybindings, xmonad-inspired automatic tiling, and a Quake-style
     drawer overlay. Panes are treated as tiling clients: layouts are pure
     functions of pane count and screen dimensions, not user-resized regions.
   DESC
