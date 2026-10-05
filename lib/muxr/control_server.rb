@@ -54,6 +54,10 @@ module Muxr
 
     attr_reader :app, :socket_path
 
+    def local_call(method, params = {})
+      @dispatcher.call(method: method, params: params, client_io: nil, request_id: nil)
+    end
+
     def start
       File.unlink(@socket_path) if File.exist?(@socket_path)
       @server = UNIXServer.new(@socket_path)
@@ -554,6 +558,7 @@ module Muxr
       when "pane.move"          then pane_move(params, client_io, request_id)
       when "pane.move_commit"   then pane_move_commit(client_io)
       when "pane.move_abort"    then pane_move_abort(client_io)
+      when "client.switch"      then client_switch(params)
       when "layout.set"       then layout_set(params)
       when "layout.cycle"     then layout_cycle
       when "drawer.toggle"    then drawer_action(:toggle_drawer)
@@ -595,6 +600,7 @@ module Muxr
       win = @app.session.window
       focused_idx = win.focused_index
       master_idx  = win.master_index
+      now = Pane.now
       panes = win.panes.each_with_index.map do |pane, i|
         private_pane = pane_private?(pane)
         entry = {
@@ -618,10 +624,29 @@ module Muxr
           # pane.kill only drops the mirror.
           entry["origin"] = pane.origin if pane.respond_to?(:origin) && pane.origin
           entry["name"] = pane.name if pane.respond_to?(:name) && pane.name
+          entry.merge!(pane_status(pane, now))
         end
         entry
       end
       { "panes" => panes }
+    end
+
+    def pane_status(pane, now)
+      term = pane.terminal
+      status = {
+        "command"  => pane.foreground_command,
+        "title"    => term.title,
+        "state"    => pane.state(now),
+        "idle"     => pane.idle_seconds(now).round(1),
+        "bell"     => pane.bell?,
+        "activity" => pane.activity?,
+        "silent"   => pane.silent?
+      }
+      if term.notice
+        status["notice"] = term.notice
+        status["notice_age"] = (now - term.notice_at).round(1)
+      end
+      status
     end
 
     def pane_read(params)
@@ -812,6 +837,14 @@ module Muxr
 
     def pane_move_abort(client_io)
       { "aborted" => @server.abort_handoff(client_io) }
+    end
+
+    def client_switch(params)
+      session = require_string(params, "session")
+      pane = params["pane"]
+      raise Error.new("client.switch: no client attached") unless @app.client_attached?
+      @app.switch_client(session, pane.nil? ? nil : pane.to_s)
+      { "session" => session, "pane" => pane }
     end
 
     def pane_redraw(params)

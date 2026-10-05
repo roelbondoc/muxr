@@ -22,6 +22,49 @@ if ARGV.include?("-l") || ARGV.include?("--list")
   exit 0
 end
 
+def format_age(seconds)
+  s = seconds.to_i
+  if s < 60 then "#{s}s"
+  elsif s < 3600 then "#{s / 60}m"
+  elsif s < 86_400 then "#{s / 3600}h"
+  else "#{s / 86_400}d"
+  end
+end
+
+def print_panes(args)
+  json = args.delete("--json")
+  filter = Muxr::PaneFilter.new(args.join(" "))
+  here = ENV["MUXR_SESSION"]
+  entries = Muxr::SessionDirectory.all_panes.each { |entry| entry.here = entry.session == here }
+  rows = entries.select { |entry| filter.match?(entry) }
+  if json
+    require "json"
+    puts JSON.pretty_generate(rows.map(&:to_h))
+    return
+  end
+  table = rows.map do |entry|
+    [
+      entry.label,
+      entry.private ? "priv" : (entry.state || "-"),
+      entry.name.to_s,
+      entry.command.to_s,
+      entry.idle ? format_age(entry.idle) : "",
+      { "!" => entry.bell, "~" => entry.silent, "*" => entry.activity }.select { |_, on| on }.keys.join,
+      (entry.title || entry.notice || entry.cwd).to_s
+    ]
+  end
+  table.unshift(%w[TARGET STATE NAME CMD IDLE ATTN DETAIL]) if $stdout.tty?
+  widths = (0..5).map { |i| table.map { |row| row[i].length }.max.to_i }
+  table.each do |row|
+    puts (row[0..5].each_with_index.map { |cell, i| cell.ljust(widths[i]) } + [row[6]]).join("  ").rstrip
+  end
+end
+
+if ARGV[0] == "panes"
+  print_panes(ARGV[1..])
+  exit 0
+end
+
 install_skill_arg = ARGV.find { |a| a == "--install-skill" || a.start_with?("--install-skill=") }
 
 if install_skill_arg
@@ -119,6 +162,13 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       muxr <name>          attach (or start) the named session
       muxr -s <name>       same as above
       muxr --list          list running sessions and exit
+      muxr panes [filter] [--json]
+                           list the panes of every running session; filter terms
+                           are words or cmd: s: n: title: cwd: is:busy|idle|bell|…
+      muxr go <session>[:<pane>]
+                           jump to a pane: inside muxr this moves the attached
+                           client, outside it attaches (taking the session over
+                           from any other client)
       muxr --install-skill install the MCP skill into ~/.claude/skills and exit
                            (symlinks from a source checkout, copies from an
                             installed gem; force with --install-skill=copy|link)
@@ -132,6 +182,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       C-#{letter} ~   toggle drawer       C-#{letter} Enter   promote to master
       C-#{letter} C   Claude drawer       (as is claude in any pane; needs `muxr --install-skill`)
       C-#{letter} :   command prompt      C-#{letter} ?       toggle help
+      C-#{letter} Space  switch to any pane in any session
       C-#{letter} d   detach (server stays running)
       C-#{letter} q   kill session (with y/n confirmation)
       C-#{letter} C-#{letter} send literal C-#{letter}
@@ -205,7 +256,36 @@ def wait_for_socket(path, deadline)
   true
 end
 
-name = session_name_from(ARGV)
+def go_target(arg)
+  session, pane = arg.to_s.split(":", 2)
+  if session.nil? || session.empty?
+    $stderr.puts "usage: muxr go <session>[:<pane>]"
+    exit 1
+  end
+  [session, pane.nil? || pane.empty? ? nil : pane]
+end
+
+go = ARGV[0] == "go"
+if go
+  session, pane = go_target(ARGV[1])
+  unless Muxr::Application.alive_socket?(Muxr::Application.socket_path_for(session))
+    $stderr.puts "muxr: no running session #{session}"
+    exit 1
+  end
+  control = ENV["MUXR_CONTROL_SOCKET"]
+  if control && Muxr::Application.alive_socket?(control)
+    result = Muxr::SessionDirectory.query(control, "client.switch", { "session" => session, "pane" => pane }.compact)
+    exit 0 if result
+    $stderr.puts "muxr: could not switch (no client attached to #{ENV["MUXR_SESSION"]})"
+    exit 1
+  end
+  if pane
+    ref = pane.match?(/\A\d{1,2}\z/) ? pane.to_i : pane
+    Muxr::SessionDirectory.query(Muxr::Application.control_socket_path_for(session), "pane.focus", { "pane" => ref })
+  end
+end
+
+name = go ? session : session_name_from(ARGV)
 socket_path = Muxr::Application.socket_path_for(name)
 
 case probe_socket(socket_path)
@@ -223,7 +303,7 @@ when :missing, :stale
   end
 end
 
-client = Muxr::Client.new(name)
+client = Muxr::Client.new(name, takeover: go)
 begin
   client.connect
 rescue Errno::ECONNREFUSED, Errno::ENOENT => e

@@ -9,7 +9,7 @@ module Muxr
     # typed, but completing to a shorter alias would be surprising, and
     # offering both halves would clutter the ambiguity list.
     COMPLETIONS = %w[
-      layout drawer claude private save restore sessions attach
+      layout drawer claude private save restore sessions attach switch
       new close next prev master detach help quit silence ratio masters zoom sync rename reload capture
     ].freeze
 
@@ -82,6 +82,7 @@ module Muxr
       when "restore" then @app.restore_session
       when "sessions", "ls" then @app.list_sessions
       when "attach"  then @app.open_pane_picker
+      when "switch", "panes" then @app.open_switcher(args.join(" "))
       when "quit", "q", "exit"
         @app.quit
       when "new", "c"

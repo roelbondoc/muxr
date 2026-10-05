@@ -74,6 +74,7 @@ module Muxr
       "P"  => :toggle_private_focused,
       "d"  => :detach,
       "A"  => :open_pane_picker,
+      "o"  => :open_switcher,
       "?"  => :show_help,
       "q"  => :quit_immediate,
       "s"  => :enter_scrollback,
@@ -100,6 +101,7 @@ module Muxr
       "P"    => :toggle_private_focused,
       "d"    => :detach,
       "A"    => :open_pane_picker,
+      " "    => :open_switcher,
       "?"    => :show_help,
       "q"    => :quit_immediate,
       "["    => :enter_scrollback,
@@ -192,6 +194,13 @@ module Muxr
     # from and this one owns the shell afterwards.
     PICKER_MOVE = ["m"].freeze
 
+    SWITCHER_MOVE = { "\x0e" => 1, "\x10" => -1, "\t" => 1 }.freeze
+    SWITCHER_CANCEL = ["\e", "\x03"].freeze
+    SWITCHER_CONFIRM = ["\r", "\n"].freeze
+    SWITCHER_BACKSPACE = ["\x7f", "\b"].freeze
+    SWITCHER_CLEAR = "\x15"
+    SWITCHER_REFRESH = "\x12"
+
     SELECTION_YANK = ["\r", "\n", "y"].freeze
     SELECTION_CANCEL = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
 
@@ -249,7 +258,7 @@ module Muxr
         # doesn't kick the user out of the prompt. An incomplete `\e[…`
         # (rare in raw-mode TTY) falls through and the bare `\e` exits as
         # before.
-        if (@state == :scrollback || @state == :search || @state == :pane_picker) && remaining.start_with?("\e[")
+        if (@state == :scrollback || @state == :search || @state == :pane_picker || @state == :switcher) && remaining.start_with?("\e[")
           consumed = consume_csi_escape(remaining)
           if consumed > 0
             remaining = remaining[consumed..] || ""
@@ -281,6 +290,8 @@ module Muxr
           handle_selection_input(ch)
         when :pane_picker
           handle_pane_picker_input(ch)
+        when :switcher
+          handle_switcher_input(ch)
         end
       end
     end
@@ -314,6 +325,10 @@ module Muxr
 
     def enter_pane_picker_mode
       @state = :pane_picker
+    end
+
+    def enter_switcher_mode
+      @state = :switcher
     end
 
     # Drop into passthrough — every key reaches the focused pane until the
@@ -534,6 +549,9 @@ module Muxr
           when :pane_picker
             delta = PICKER_CSI[seq]
             @app.move_pane_picker(delta) if delta
+          when :switcher
+            delta = PICKER_CSI[seq]
+            @app.move_switcher(delta) if delta
           end
           return i + 1
         end
@@ -594,6 +612,26 @@ module Muxr
       delta = PICKER_BINDINGS[ch]
       @app.move_pane_picker(delta) if delta
       # Unknown keys ignored — same rationale as scrollback mode.
+    end
+
+    def handle_switcher_input(ch)
+      if SWITCHER_CONFIRM.include?(ch)
+        @state = @base_mode
+        @app.confirm_switcher
+      elsif SWITCHER_CANCEL.include?(ch)
+        @state = @base_mode
+        @app.cancel_switcher
+      elsif SWITCHER_BACKSPACE.include?(ch)
+        @app.backspace_switcher
+      elsif ch == SWITCHER_CLEAR
+        @app.clear_switcher_query
+      elsif ch == SWITCHER_REFRESH
+        @app.refresh_switcher
+      elsif (delta = SWITCHER_MOVE[ch])
+        @app.move_switcher(delta)
+      elsif ch.match?(/\A[[:print:]]\z/)
+        @app.type_switcher(ch)
+      end
     end
 
     def handle_command_input(ch)

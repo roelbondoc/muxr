@@ -6,6 +6,25 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- A pane switcher: `o` / `C-a Space` / `:switch [filter]` lists every pane of
+  every running session with its state (`busy` while the program reports
+  OSC 9;4 progress, else `active` / `idle`), attention flags, foreground
+  command, idle time and window title or last notification. Typing filters
+  (`cmd:claude -is:busy`), and `Enter` moves this terminal's client to that
+  session and focuses the pane, taking the session over from any other
+  attached client.
+- `muxr panes [filter] [--json]` and `muxr go <session>[:<pane>]` expose the
+  same list and jump from a shell; inside muxr, `go` moves the attached
+  client via the new `client.switch` control method.
+- `panes.list` reports `command`, `title`, `state`, `idle`, `notice` and the
+  `bell` / `activity` / `silent` flags.
+
+### Fixed
+- OSC 9;4 progress no longer marks a pane as having rung the bell. Claude
+  Code sends it at the start and end of every turn, so every background
+  Claude pane wore a `!`.
+
 ## [0.2.0] - 2026-09-23
 
 ### Fixed

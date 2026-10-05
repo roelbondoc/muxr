@@ -28,6 +28,12 @@ Before doing anything else, call **`muxr_session_get`** and
 - Each pane's stable id (6 hex chars, e.g. `a3f9b2`), its 1-based slot
   number as shown on screen (`#1`, `#2`, …), its cwd, and whether it's the
   focused or master pane.
+- What each pane is doing: `command` (foreground program, absent at a bare
+  prompt), `title` (the program's window title), `state` (`busy` while the
+  program reports progress, `active` for recent output, else `idle`), `idle`
+  (seconds since it last printed), the last `notice` it raised, and the
+  `bell` / `activity` / `silent` attention flags. A pane running Claude Code
+  with `state: "idle"` is waiting on the user, not working.
 - The `focused_pane` field in `session.get` tells you which pane the user
   was last looking at — if the user just said "run X" without naming a
   pane, that's the natural target.

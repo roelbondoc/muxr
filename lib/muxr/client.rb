@@ -16,8 +16,12 @@ module Muxr
   class Client
     SELECT_TIMEOUT = 0.1
 
-    def initialize(session_name)
+    attr_reader :session_name
+
+    def initialize(session_name, takeover: false)
       @session_name = session_name
+      @takeover = takeover
+      @caps = nil
       @socket_path = Application.socket_path_for(session_name)
       @sock = nil
       @running = false
@@ -40,12 +44,16 @@ module Muxr
       raise "must call #connect first" unless @sock
 
       enter_terminal_mode
-      @running = true
-      send_hello          # may clear @running if the socket is already gone
       install_winch_trap
 
       begin
-        loop_forever
+        loop do
+          @running = true
+          send_hello          # may clear @running if the socket is already gone
+          loop_forever
+          target = switch_target
+          break unless target && switch_to(*target)
+        end
       ensure
         leave_terminal_mode
         @sock.close rescue nil
@@ -55,6 +63,44 @@ module Muxr
     end
 
     private
+
+    SWITCH_REASON = /\Aswitch (\S+)(?: (\S+))?\z/
+
+    def switch_target
+      match = SWITCH_REASON.match(@bye_reason.to_s)
+      match && [match[1], match[2]]
+    end
+
+    def switch_to(session_name, pane_ref)
+      previous = @session_name
+      @sock.close rescue nil
+      [session_name, previous].uniq.each do |name|
+        focus_remote_pane(name, pane_ref) if name == session_name && pane_ref
+        next unless connect_to(name)
+        @bye_reason = name == session_name ? nil : "could not switch to #{session_name}"
+        return true
+      end
+      @bye_reason = "could not switch to #{session_name}"
+      false
+    end
+
+    def connect_to(name)
+      @sock = UNIXSocket.new(Application.socket_path_for(name))
+      @session_name = name
+      @socket_path = Application.socket_path_for(name)
+      @takeover = true
+      @write_buffer = +"".b
+      STDOUT.write("\e[0m\e[2J\e[H")
+      STDOUT.flush
+      true
+    rescue SystemCallError
+      false
+    end
+
+    def focus_remote_pane(name, pane_ref)
+      ref = pane_ref.match?(/\A\d{1,2}\z/) ? pane_ref.to_i : pane_ref
+      SessionDirectory.query(Application.control_socket_path_for(name), "pane.focus", { "pane" => ref })
+    end
 
     def loop_forever
       while @running
@@ -145,7 +191,9 @@ module Muxr
     # the server can align its emulator/Renderer with this exact terminal.
     def send_hello
       rows, cols = terminal_size
-      Protocol.write(@sock, Protocol::HELLO, Protocol.encode_size(rows, cols, probe_caps))
+      @caps ||= probe_caps
+      caps = @takeover ? @caps.merge(takeover: 1) : @caps
+      Protocol.write(@sock, Protocol::HELLO, Protocol.encode_size(rows, cols, caps))
     rescue Errno::EPIPE, Errno::ECONNRESET, IOError
       @running = false
     end

@@ -12,9 +12,48 @@ module Muxr
   module SessionDirectory
     QUERY_TIMEOUT = 0.5
 
-    Entry = Struct.new(:session, :socket_path, :pane_id, :slot, :cwd, :rows, :cols, :focused, :name, keyword_init: true) do
+    Entry = Struct.new(
+      :session, :socket_path, :pane_id, :slot, :cwd, :rows, :cols, :focused, :name,
+      :command, :title, :state, :idle, :notice, :notice_age, :bell, :activity, :silent,
+      :private, :origin, :here,
+      keyword_init: true
+    ) do
       def label
         "#{session}:#{pane_id}"
+      end
+
+      def attention?
+        !!(bell || activity || silent)
+      end
+
+      def self.from_listing(session, socket_path, pane, here: false)
+        new(
+          session: session,
+          socket_path: socket_path,
+          pane_id: pane["id"].to_s,
+          slot: pane["slot"],
+          cwd: pane["cwd"],
+          rows: pane["rows"],
+          cols: pane["cols"],
+          focused: !!pane["focused"],
+          name: pane["name"],
+          command: pane["command"],
+          title: pane["title"],
+          state: pane["state"],
+          idle: pane["idle"],
+          notice: pane["notice"],
+          notice_age: pane["notice_age"],
+          bell: !!pane["bell"],
+          activity: !!pane["activity"],
+          silent: !!pane["silent"],
+          private: !!pane["private"],
+          origin: pane["origin"],
+          here: here
+        )
+      end
+
+      def to_h
+        super.reject { |key, _| key == :socket_path }
       end
     end
 
@@ -39,26 +78,40 @@ module Muxr
     # session then slot order. Private panes are omitted for the same reason
     # the MCP surface hides them: the user marked them not-for-sharing.
     def self.panes(exclude: nil)
-      live_sessions.flat_map do |name, control|
-        next [] if name == exclude
-        list = query(control, "panes.list")
-        next [] unless list
-        (list["panes"] || []).filter_map do |pane|
+      listings(live_sessions.reject { |name, _| name == exclude }).flat_map do |name, control, list|
+        list.filter_map do |pane|
           next if pane["private"]
           next unless pane["alive"]
-          Entry.new(
-            session: name,
-            socket_path: control,
-            pane_id: pane["id"].to_s,
-            slot: pane["slot"],
-            cwd: pane["cwd"],
-            rows: pane["rows"],
-            cols: pane["cols"],
-            focused: !!pane["focused"],
-            name: pane["name"]
-          )
+          Entry.from_listing(name, control, pane)
         end
       end
+    end
+
+    def self.all_panes(local: nil)
+      sessions = live_sessions
+      remote = local ? sessions.reject { |name, _| name == local[0] } : sessions
+      found = listings(remote)
+      found.unshift([local[0], sessions[local[0]], local[1]]) if local
+      entries = found.flat_map do |name, control, list|
+        list.filter_map do |pane|
+          next if pane.key?("alive") && !pane["alive"]
+          next if pane["origin"]
+          Entry.from_listing(name, control, pane, here: local && name == local[0])
+        end
+      end
+      most_recently_updated_first(entries)
+    end
+
+    def self.most_recently_updated_first(entries)
+      entries.each_with_index.sort_by { |entry, i| [entry.idle ? 0 : 1, entry.idle || 0, i] }.map(&:first)
+    end
+
+    def self.listings(sessions)
+      sessions.map { |name, control| [name, control, Thread.new { query(control, "panes.list") }] }
+              .filter_map do |name, control, thread|
+                list = thread.value
+                [name, control, list["panes"] || []] if list
+              end
     end
 
     def self.query(control_path, method, params = {})

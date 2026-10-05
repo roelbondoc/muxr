@@ -30,7 +30,8 @@ module Muxr
       confirm_quit:  [:c256, 196].freeze, # red
       confirm_close: [:c256, 196].freeze, # red
       help:          [:c256, 39].freeze,  # blue
-      pane_picker:   [:c256, 39].freeze   # blue
+      pane_picker:   [:c256, 39].freeze,  # blue
+      switcher:      [:c256, 39].freeze   # blue
     }.freeze
 
     # Background applied to cells that match the active scrollback search.
@@ -85,7 +86,7 @@ module Muxr
       (prefix.ord + 0x60).chr
     end
 
-    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, prefix: "\x01")
+    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, switcher: nil, prefix: "\x01")
       @prefix_letter = self.class.prefix_letter(prefix)
       w = session.width
       h = session.height
@@ -94,7 +95,7 @@ module Muxr
       frame = Array.new(h) { Array.new(w) { Cell.new(" ", nil, nil, 0, nil) } }
 
       @scroll_source = scroll_source
-      @reuse_panes = @prev && @prev_w == w && @prev_h == h && !session.drawer&.visible? && !help && !picker
+      @reuse_panes = @prev && @prev_w == w && @prev_h == h && !session.drawer&.visible? && !help && !picker && !switcher
       @reused_regions = []
       @next_pane_regions = {}
       compose_panes(frame, session, input_state: input_state)
@@ -111,6 +112,7 @@ module Muxr
       )
       compose_help(frame, session) if help
       compose_pane_picker(frame, session, picker) if picker
+      compose_switcher(frame, session, switcher) if switcher
 
       emit_frame(frame, session, input_state: input_state, command_buffer: command_buffer, search_buffer: search_buffer)
     end
@@ -319,6 +321,7 @@ module Muxr
       when :confirm_close then "CLOSE?"
       when :help          then "HELP"
       when :pane_picker   then "ATTACH"
+      when :switcher      then "PANES"
       else                    "?"
       end
     end
@@ -513,6 +516,7 @@ module Muxr
       "  r               refresh / redraw (fixes a corrupted pane)",
       "  s               enter scrollback",
       "  ~ / C / P       drawer / Claude drawer / toggle private",
+      "  o               switch to any pane in any session (type to filter)",
       "  A               share or move a pane from another muxr session",
       "  : / ?           command prompt / toggle this help",
       "  ] / d / q       paste buffer / detach / kill session",
@@ -526,6 +530,7 @@ module Muxr
       "  C-a n / p / a   next / prev / last pane",
       "  C-a r           refresh / redraw (fixes a corrupted pane)",
       "  C-a [ ]         scrollback / paste buffer",
+      "  C-a Space       switch to any pane in any session (type to filter)",
       "  C-a A           share or move a pane from another muxr session",
       "  C-a C-a         send literal Ctrl-a to focused pane",
       "",
@@ -544,6 +549,7 @@ module Muxr
       "Commands: layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle|auto},",
       "          drawer {toggle|show|hide|reset},",
       "          claude, save, restore, sessions, attach, quit, new, close, next, prev,",
+      "          switch [filter] (e.g. cmd:claude -is:busy),",
       "          silence {<secs>|<n>m|off} (alert when the pane goes quiet),",
       "          ratio <percent>, masters <n>, zoom,",
       "          sync {on|off} (type into every pane at once),",
@@ -632,6 +638,148 @@ module Muxr
       PICKER_HINT[0, inner_w].chars.each_with_index do |ch, j|
         set_cell(frame, hint_y, rect.x + 2 + j, ch, fg: PICKER_DIM_FG, bg: PICKER_BG)
       end
+    end
+
+    SWITCHER_HINT = "cmd: s: n: is:busy|idle|bell · -term excludes · ↑↓ select · Enter go · C-r refresh · Esc".freeze
+    SWITCHER_STATE_FG = {
+      "busy"   => [:c256, 214].freeze,
+      "error"  => [:c256, 196].freeze,
+      "active" => [:c256, 42].freeze,
+      "idle"   => [:c256, 245].freeze
+    }.freeze
+    SWITCHER_ATTENTION_FG = [:c256, 226].freeze
+    SWITCHER_SESSION_MAX = 28
+    SWITCHER_SESSION_MAX_WIDE = 40
+    SWITCHER_CWD_WIDTH = 32
+    SWITCHER_WITH_CWD = 130
+    SWITCHER_WIDE = 170
+
+    def compose_switcher(frame, session, switcher)
+      w = session.width
+      h = session.height
+      return if w < 20 || h < 8
+      rect = switcher_rect(w, h)
+      (rect.y...(rect.y + rect.h)).each do |yy|
+        (rect.x...(rect.x + rect.w)).each do |xx|
+          set_cell(frame, yy, xx, " ", fg: PICKER_FG, bg: PICKER_BG)
+        end
+      end
+      draw_box(frame, rect, border: PICKER_BORDER, bold_border: true, title: "Panes", title_focused: true)
+
+      left = rect.x + 2
+      inner_w = rect.w - 4
+      count = "#{switcher.rows.length}/#{switcher.entries.length}"
+      prompt_w = inner_w - count.length - 1
+      put_text(frame, rect.y + 1, left, "> #{switcher.query}", prompt_w, fg: PICKER_FG, bg: PICKER_BG, attrs: Terminal::BOLD)
+      cursor_x = left + [2 + switcher.query.length, prompt_w - 1].min
+      set_cell(frame, rect.y + 1, cursor_x, " ", fg: PICKER_BG, bg: PICKER_FG)
+      put_text(frame, rect.y + 1, left + inner_w - count.length, count, count.length, fg: PICKER_DIM_FG, bg: PICKER_BG)
+
+      columns = switcher_columns(switcher.entries, inner_w)
+      put_text(frame, rect.y + 2, left, switcher_header(columns), inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
+
+      list_h = rect.h - 5
+      visible = picker_window(switcher.rows.each_with_index.to_a, switcher.index, list_h)
+      visible.each_with_index do |(entry, i), row|
+        draw_switcher_row(frame, rect.y + 3 + row, left, inner_w, entry, columns, selected: i == switcher.index)
+      end
+      if switcher.empty?
+        put_text(frame, rect.y + 3, left, "no panes match", inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
+      end
+
+      put_text(frame, rect.y + rect.h - 2, left, SWITCHER_HINT, inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
+    end
+
+    def switcher_rect(w, h)
+      area_h = h - 1
+      box_w = [w - 4, [w, 60].min].max
+      box_h = (area_h * 0.8).round.clamp([area_h, 12].min, area_h)
+      LayoutManager::Rect.new((w - box_w) / 2, (area_h - box_h) / 2, box_w, box_h)
+    end
+
+    def switcher_columns(entries, inner_w)
+      session_max = inner_w >= SWITCHER_WIDE ? SWITCHER_SESSION_MAX_WIDE : SWITCHER_SESSION_MAX
+      session_w = [entries.map { |e| e.session.length }.max.to_i, 7].max.clamp(7, session_max)
+      columns = [[:mark, 1], [:state, 6], [:session, session_w], [:pane, 16], [:command, 10], [:idle, 7]]
+      columns << [:cwd, SWITCHER_CWD_WIDTH] if inner_w >= SWITCHER_WITH_CWD
+      columns << [:detail, nil]
+    end
+
+    def switcher_header(columns)
+      labels = { mark: "", state: "STATE", session: "SESSION", pane: "PANE", command: "CMD", idle: "UPDATED", cwd: "CWD", detail: "TITLE / NOTICE" }
+      columns.map { |key, width| width ? labels[key].ljust(width) : labels[key] }.join(" ")
+    end
+
+    def draw_switcher_row(frame, y, left, inner_w, entry, columns, selected:)
+      bg = selected ? PICKER_SELECTED_BG : PICKER_BG
+      attrs = selected ? Terminal::BOLD : 0
+      (left...(left + inner_w)).each { |x| set_cell(frame, y, x, " ", fg: PICKER_FG, bg: bg) }
+      cwd_shown = columns.any? { |key, _| key == :cwd }
+      x = left
+      columns.each do |key, width|
+        room = width || (left + inner_w - x)
+        break if room <= 0
+        text, fg = switcher_cell(entry, key, width, cwd_shown)
+        put_text(frame, y, x, text, room, fg: fg, bg: bg, attrs: attrs)
+        x += room + 1
+      end
+    end
+
+    def switcher_cell(entry, key, width, cwd_shown)
+      case key
+      when :mark
+        [switcher_attention(entry), SWITCHER_ATTENTION_FG]
+      when :state
+        state = entry.private ? "priv" : (entry.state || "-")
+        [state, SWITCHER_STATE_FG[state] || PICKER_DIM_FG]
+      when :session
+        [tail_truncate(entry.session, width), entry.here ? PICKER_SESSION_FG : PICKER_FG]
+      when :pane
+        ["##{entry.slot} #{entry.name || entry.pane_id}", PICKER_FG]
+      when :command
+        [entry.command.to_s, PICKER_FG]
+      when :idle
+        [entry.idle ? format_age(entry.idle) : "", PICKER_DIM_FG]
+      when :cwd
+        [tail_truncate(shorten_path(entry.cwd), width), PICKER_DIM_FG]
+      when :detail
+        [entry.title || entry.notice || (cwd_shown ? "" : shorten_path(entry.cwd)), PICKER_DIM_FG]
+      end
+    end
+
+    def switcher_attention(entry)
+      if entry.bell then "!"
+      elsif entry.silent then "~"
+      elsif entry.activity then "*"
+      else ""
+      end
+    end
+
+    def tail_truncate(text, width)
+      return text if text.length <= width
+      ".." + text[-(width - 2)..]
+    end
+
+    def format_age(seconds)
+      s = seconds.to_i
+      if s < 60 then "#{s}s"
+      elsif s < 3600 then "#{s / 60}m"
+      elsif s < 86_400 then "#{s / 3600}h"
+      else "#{s / 86_400}d"
+      end
+    end
+
+    def put_text(frame, y, x, text, max_w, fg:, bg:, attrs: 0)
+      col = 0
+      text.to_s.each_char do |ch|
+        width = Terminal.char_width(ch.ord)
+        next if width.zero?
+        break if col + width > max_w
+        set_cell(frame, y, x + col, ch, fg: fg, bg: bg, attrs: attrs)
+        set_cell(frame, y, x + col + 1, "", fg: fg, bg: bg, attrs: attrs) if width == 2
+        col += width
+      end
+      col
     end
 
     def picker_lines(picker)

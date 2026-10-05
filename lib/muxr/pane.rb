@@ -48,6 +48,7 @@ module Muxr
       @bell = false
       @silent = false
       @silence_after = nil
+      @last_output_at = Pane.now
       hush!
     end
 
@@ -137,6 +138,21 @@ module Muxr
     end
 
     attr_reader :silence_after
+
+    ACTIVE_WINDOW = 3.0
+
+    def idle_seconds(now = Pane.now)
+      now - @last_output_at
+    end
+
+    def state(now = Pane.now)
+      progress_state = terminal.progress&.first
+      if progress_state && !(pid && foreground_command.nil?)
+        return "error" if progress_state == 2
+        return "busy"
+      end
+      idle_seconds(now) < ACTIVE_WINDOW ? "active" : "idle"
+    end
 
     def note_output(now = Pane.now, attended: false)
       return if now < @quiet_until

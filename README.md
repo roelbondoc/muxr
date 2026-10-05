@@ -41,6 +41,7 @@ protocol, the tiling maths — is stdlib Ruby with no runtime gems.
 | **Scrollback with vi motions** | 50,000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard, `:capture` a whole history to a file |
 | **Knows which pane wants you** | a pane that rang the bell, printed while you looked away, or went quiet for longer than you asked is marked in its title and the status bar |
 | **Type into every pane at once** | `:sync` broadcasts keystrokes and pastes across the window, with a red status chip so you never forget it is on |
+| **One tab for every session** | a filterable list of every pane in every session, with what is running, whether it is busy, and how long it has been quiet — `Enter` takes this terminal straight there |
 | **Panes across sessions** | borrow a live pane from another muxr session, or hand it over for good by passing its pty file descriptor down a socket |
 | **Built for agents** | a JSON-RPC control socket, an MCP bridge, panes you can name and refer to by name, and private panes that programmatic callers cannot see or touch |
 | **Configurable without patching** | `~/.muxr/config.json` sets the default layout, scrollback depth, master shape, the prefix key, and remaps any key onto an action or a `:` command |
@@ -59,6 +60,8 @@ stdlib.
 muxr                     # attach the session for the current directory
 muxr work                # attach (or start) a session named "work"
 muxr --list              # list running sessions and exit
+muxr panes cmd:claude    # list matching panes across every session
+muxr go work:2           # jump to pane 2 of session "work"
 muxr --install-skill     # install the Claude Code skill + MCP bridge
 muxr --help
 ```
@@ -236,6 +239,7 @@ multiplexer, no prefix required.
 | `r` | refresh — repaint the pane and nudge its program to redraw |
 | `s` | enter scrollback / copy-mode |
 | `~` / `C` / `P` | drawer / Claude Code drawer / toggle private flag |
+| `o` | switch to any pane in any session (filterable) |
 | `A` | share or move in a pane from another muxr session |
 | `]` | paste the internal yank buffer into the focused pane |
 | `:` / `?` | command prompt / help |
@@ -262,6 +266,7 @@ the historical `Ctrl-a` prefix.
 | `C-a z` | zoom the focused pane / restore the layout |
 | `C-a r` | refresh / redraw |
 | `C-a ~` / `C-a C` / `C-a P` | drawer / Claude Code drawer / toggle private |
+| `C-a Space` | switch to any pane in any session (filterable) |
 | `C-a A` | share or move in a pane from another session |
 | `C-a [` / `C-a ]` | scrollback (or the app's own scroll) / paste yank buffer |
 | `C-a d` / `C-a q` | detach / kill session (asks `y/n`) |
@@ -292,6 +297,7 @@ drawer {toggle|show|hide|reset}
 claude                 # toggle the Claude Code drawer
 private                # toggle the private flag on the focused pane
 attach                 # open the pane picker (same as A)
+switch [filter]        # open the pane switcher, pre-filtered (same as o)
 save                   # write ~/.muxr/sessions/<name>.json
 restore                # print the path to the saved session
 sessions | ls          # list saved sessions and live servers
@@ -460,6 +466,54 @@ writes where you say, resolving a relative path against the directory the
 session was started in. While a full-screen program is up, the capture holds
 the shell underneath rather than the program's frame.
 
+## Switching between sessions
+
+`o` (or `C-a Space`, or `:switch`) opens a modal listing every pane of every running session, this
+one included. Typing filters the list; `↑`/`↓` or `C-n`/`C-p` select, `Enter`
+goes there, `C-r` refreshes, `C-u` clears the filter and `Esc` backs out. A
+pane in another session is reached by moving this terminal's client over to
+that session and focusing the pane — the session you left keeps running,
+exactly as if you had detached. If another terminal is attached to the target
+session, it is detached (as `tmux attach -d` would), so one tab can hold
+everything.
+
+Panes are listed most recently updated first, so whatever just printed sits
+at the top. Each row shows what muxr knows about the pane, whatever is running
+in it:
+
+| Column | Source |
+|--------|--------|
+| state | `busy` / `error` while the program reports progress (OSC 9;4), else `active` for output in the last 3 s, else `idle` |
+| attention | `!` bell or notification, `*` output while you looked away, `~` silent |
+| cmd | the foreground command |
+| updated | time since the pane last printed (a resize redraw doesn't count) |
+| cwd | the pane's directory, on screens wide enough for it |
+| title / notice | the program's window title (OSC 0/2), else its last notification (OSC 9 / 777) |
+
+Claude Code fills all of these in: it reports progress for the length of a
+turn, keeps the task in its title, and sends `Claude is waiting for your input`
+as a notification once it stops.
+
+The filter is a list of terms that must all match. A bare word matches any
+column; `cmd:`, `s:` (session), `n:` (name), `title:`, `cwd:` and `id:` match
+one; `is:busy`, `is:idle`, `is:active`, `is:error`, `is:bell`, `is:activity`,
+`is:silent`, `is:attention`, `is:here` and `is:focused` test state; a leading
+`-` excludes. So `cmd:claude -is:busy` is every Claude that is waiting on you.
+Bind it to a key in the [config](#configuration) with `":switch cmd:claude"`.
+
+The same list is available from a shell:
+
+```bash
+muxr panes                       # every pane, as a table
+muxr panes cmd:claude is:idle    # the same filter language
+muxr panes --json                # for scripts
+muxr go work:2                   # jump to a pane by session:id, name or slot
+muxr panes cmd:claude | fzf | awk '{print $1}' | xargs muxr go
+```
+
+`muxr go` run inside a muxr pane moves that session's attached client; run
+anywhere else it attaches, taking the session over from any other client.
+
 ## Sharing and moving panes
 
 `A` (or `C-a A`, or `:attach`) opens a picker listing every pane the other
@@ -578,6 +632,7 @@ session.get   panes.list   pane.read       pane.send_input  pane.run
 pane.focus    pane.new     pane.kill       pane.promote     pane.redraw
 pane.subscribe / unsubscribe               pane.mirror / mirror_resize / unmirror
 pane.move / move_commit / move_abort       layout.set / layout.cycle
+client.switch
 drawer.toggle / show / hide / reset / read / send_input     session.save
 ```
 
@@ -755,6 +810,7 @@ set_layout:{tall,wide,columns,rows,grid,spiral,centered,stack,monocle,auto}
 focus_direction:{left,down,up,right}   move_direction:{left,down,up,right}
 focus_next focus_prev focus_last refresh_focused enter_scrollback
 toggle_drawer toggle_claude_drawer toggle_private_focused open_pane_picker
+open_switcher
 paste_from_buffer show_help detach quit_immediate
 ```
 

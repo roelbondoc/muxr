@@ -320,6 +320,11 @@ module Muxr
       # bound, and it's drained even while detached since pbcopy is local to the
       # server host and doesn't need an attached client.
       @pending_clipboard = nil
+      @title = nil
+      @progress = nil
+      @notice = nil
+      @notice_at = nil
+      @alerted = false
       @search_query = nil
       @search_direction = :forward
       @search_matches = []
@@ -398,6 +403,14 @@ module Muxr
       data = @pending_notifications
       @pending_notifications = +"".b
       data
+    end
+
+    attr_reader :title, :progress, :notice, :notice_at
+
+    def take_alert!
+      alerted = @alerted
+      @alerted = false
+      alerted
     end
 
     # The latest OSC 52 clipboard write (raw, already base64-decoded), or nil if
@@ -1132,13 +1145,25 @@ module Muxr
     #     the outer terminal verbatim so the user's real terminal raises the
     #     notification. Claude Code emits these (alongside the bell) when it
     #     wants your attention.
-    # Anything else (window-title OSC 0/1/2, palette OSC 4, …) is silently
-    # consumed — the emulator doesn't model it.
+    # The window title (OSC 0/2) and progress (OSC 9;4) are kept as pane
+    # status for the switcher, never forwarded as a title. Anything else (icon
+    # name OSC 1, palette OSC 4, …) is silently consumed.
     def finalize_osc
       payload = @parser_osc
       @parser_osc = +""
       return if payload.empty?
+      if payload.start_with?("0;", "2;")
+        @title = status_text(payload.split(";", 2)[1])
+        return
+      end
+      if payload.start_with?("9;4;")
+        note_progress(payload)
+        queue_notification("\e]#{payload}\a")
+        return
+      end
       if payload.start_with?("9;", "777;")
+        note_notice(payload)
+        @alerted = true
         # Re-wrap with a BEL terminator (universally accepted) — the original
         # ST/BEL was consumed by the parser. The OUTPUT path carries raw bytes,
         # so this reaches the outer terminal unchanged.
@@ -1157,6 +1182,32 @@ module Muxr
       else
         @current_hyperlink = (@hyperlink_intern[payload] ||= payload.dup.freeze)
       end
+    end
+
+    STATUS_TEXT_MAX = 200
+
+    def note_progress(payload)
+      _, _, state, percent = payload.split(";", 4)
+      state = state.to_i
+      @progress = state.zero? ? nil : [state, percent.to_s.empty? ? nil : percent.to_i]
+    end
+
+    def note_notice(payload)
+      text =
+        if payload.start_with?("777;")
+          _, kind, title, body = payload.split(";", 4)
+          return unless kind == "notify"
+          [title, body].compact.reject(&:empty?).join(": ")
+        else
+          payload.split(";", 2)[1]
+        end
+      @notice = status_text(text)
+      @notice_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def status_text(raw)
+      text = raw.to_s.dup.force_encoding(Encoding::UTF_8).scrub("").gsub(/[[:cntrl:]]/, "").strip
+      text.empty? ? nil : text[0, STATUS_TEXT_MAX]
     end
 
     # Decode an OSC 52 clipboard write and stash it for the Application to pipe
@@ -1312,6 +1363,7 @@ module Muxr
         @parser_state = :escape
       when 0x07 # BEL
         queue_notification("\a")
+        @alerted = true
       when 0x08 # BS
         @cursor_col -= 1 if @cursor_col > 0
         @autowrap_pending = false

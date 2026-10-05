@@ -4,6 +4,7 @@ require "securerandom"
 require "muxr/remote_pane"
 require "muxr/pane_transfer"
 require "muxr/pane_picker"
+require "muxr/pane_switcher"
 require "muxr/session_directory"
 require "muxr/config"
 
@@ -32,7 +33,7 @@ module Muxr
     DEFAULT_WIDTH  = 80
     DEFAULT_HEIGHT = 24
 
-    attr_reader :session, :renderer, :input, :session_name, :control_server, :pane_picker
+    attr_reader :session, :renderer, :input, :session_name, :control_server, :pane_picker, :switcher
 
     def self.socket_path_for(name)
       File.join(SOCKETS_DIR, "#{name}.sock")
@@ -85,6 +86,7 @@ module Muxr
       @message_expires = nil
       @help_visible = false
       @pane_picker = nil
+      @switcher = nil
       @current_client = nil
       @client_write_buffer = +"".b
       @listening_socket = nil
@@ -643,6 +645,86 @@ module Muxr
       cancel_pane_picker
       return unless entry
       move ? move_remote_pane(entry) : attach_remote_pane(entry)
+    end
+
+    def open_switcher(query = "")
+      @switcher = PaneSwitcher.new(switcher_entries, query: query)
+      @input.enter_switcher_mode
+      invalidate
+    end
+
+    def move_switcher(delta)
+      @switcher&.move(delta)
+      invalidate
+    end
+
+    def type_switcher(text)
+      @switcher&.type(text)
+      invalidate
+    end
+
+    def backspace_switcher
+      @switcher&.backspace
+      invalidate
+    end
+
+    def clear_switcher_query
+      @switcher&.clear_query
+      invalidate
+    end
+
+    def refresh_switcher
+      @switcher&.replace_entries(switcher_entries)
+      invalidate
+    end
+
+    def cancel_switcher
+      @switcher = nil
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def confirm_switcher
+      entry = @switcher&.selected
+      cancel_switcher
+      return unless entry
+      switch_client(entry.session, entry.pane_id)
+    end
+
+    def switcher_entries
+      local = @control_server && [@session_name, @control_server.local_call("panes.list")["panes"]]
+      SessionDirectory.all_panes(local: local)
+    end
+
+    def client_attached?
+      !@current_client.nil?
+    end
+
+    def switch_client(session_name, pane_ref = nil)
+      if session_name == @session_name
+        focus_pane_ref(pane_ref) if pane_ref
+        return
+      end
+      unless self.class.alive_socket?(self.class.socket_path_for(session_name))
+        flash("no running session #{session_name}")
+        return
+      end
+      disconnect_client(reason: ["switch", session_name, pane_ref].compact.join(" "))
+    end
+
+    def focus_pane_ref(ref)
+      panes = @session.window.panes
+      idx = panes.index { |pane| pane.id.to_s == ref }
+      idx ||= begin
+        named = panes.each_index.select { |i| panes[i].name == ref }
+        named.first if named.length == 1
+      end
+      idx ||= ref.to_i - 1 if ref.match?(/\A\d+\z/)
+      unless idx && idx >= 0 && idx < panes.length
+        flash("no pane #{ref}")
+        return
+      end
+      focus_pane_number(idx + 1)
     end
 
     # Take the pane away from its session rather than sharing it. The pty fd
@@ -1315,13 +1397,6 @@ module Muxr
 
     def accept_client
       sock = @listening_socket.accept
-      if @current_client
-        # Single attached client at a time. Reject newcomers politely.
-        safe_protocol_write(sock, Protocol::BYE, "busy")
-        sock.close rescue nil
-        return
-      end
-
       type, payload = Protocol.read(sock)
       unless type == Protocol::HELLO
         safe_protocol_write(sock, Protocol::BYE, "expected HELLO")
@@ -1329,9 +1404,19 @@ module Muxr
         return
       end
 
+      caps = Protocol.decode_caps(payload)
+      if @current_client
+        unless caps[:takeover] == 1
+          safe_protocol_write(sock, Protocol::BYE, "busy")
+          sock.close rescue nil
+          return
+        end
+        disconnect_client(reason: "session #{@session_name} was taken over by another client")
+      end
+
       size = Protocol.decode_size(payload)
       apply_size(*size) if size
-      apply_caps(Protocol.decode_caps(payload))
+      apply_caps(caps)
 
       @current_client = sock
       @renderer.reset_frame!
@@ -1412,7 +1497,7 @@ module Muxr
     def forward_notifications(pane)
       bytes = pane.terminal.take_pending_notifications!
       return unless bytes
-      pane.note_bell unless attended?(pane)
+      pane.note_bell if pane.terminal.take_alert! && !attended?(pane)
       deliver_output(bytes) if @current_client
     end
 
@@ -1522,6 +1607,7 @@ module Muxr
         message: @message,
         help: @help_visible,
         picker: @pane_picker,
+        switcher: @switcher,
         prefix: @input.prefix
       )
     end
