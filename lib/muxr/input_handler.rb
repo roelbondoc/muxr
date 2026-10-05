@@ -75,6 +75,7 @@ module Muxr
       "d"  => :detach,
       "A"  => :open_pane_picker,
       "o"  => :open_switcher,
+      "N"  => :open_new_session_prompt,
       "?"  => :show_help,
       "q"  => :quit_immediate,
       "s"  => :enter_scrollback,
@@ -102,6 +103,7 @@ module Muxr
       "d"    => :detach,
       "A"    => :open_pane_picker,
       " "    => :open_switcher,
+      "N"    => :open_new_session_prompt,
       "?"    => :show_help,
       "q"    => :quit_immediate,
       "["    => :enter_scrollback,
@@ -201,6 +203,14 @@ module Muxr
     SWITCHER_CLEAR = "\x15"
     SWITCHER_REFRESH = "\x12"
 
+    DIRECTORY_PROMPT_EDITS = {
+      "\t"   => :complete,
+      "\x7f" => :backspace,
+      "\b"   => :backspace,
+      "\x15" => :clear,
+      "\x17" => :delete_component
+    }.freeze
+
     SELECTION_YANK = ["\r", "\n", "y"].freeze
     SELECTION_CANCEL = ["q", "\e", "\x03"].freeze # q, Esc, Ctrl-c
 
@@ -258,7 +268,7 @@ module Muxr
         # doesn't kick the user out of the prompt. An incomplete `\e[…`
         # (rare in raw-mode TTY) falls through and the bare `\e` exits as
         # before.
-        if (@state == :scrollback || @state == :search || @state == :pane_picker || @state == :switcher) && remaining.start_with?("\e[")
+        if (@state == :scrollback || @state == :search || @state == :pane_picker || @state == :switcher || @state == :directory_prompt) && remaining.start_with?("\e[")
           consumed = consume_csi_escape(remaining)
           if consumed > 0
             remaining = remaining[consumed..] || ""
@@ -292,6 +302,8 @@ module Muxr
           handle_pane_picker_input(ch)
         when :switcher
           handle_switcher_input(ch)
+        when :directory_prompt
+          handle_directory_prompt_input(ch)
         end
       end
     end
@@ -329,6 +341,10 @@ module Muxr
 
     def enter_switcher_mode
       @state = :switcher
+    end
+
+    def enter_directory_prompt_mode
+      @state = :directory_prompt
     end
 
     # Drop into passthrough — every key reaches the focused pane until the
@@ -631,6 +647,20 @@ module Muxr
         @app.move_switcher(delta)
       elsif ch.match?(/\A[[:print:]]\z/)
         @app.type_switcher(ch)
+      end
+    end
+
+    def handle_directory_prompt_input(ch)
+      if SWITCHER_CONFIRM.include?(ch)
+        @state = @base_mode
+        @app.confirm_directory_prompt
+      elsif SWITCHER_CANCEL.include?(ch)
+        @state = @base_mode
+        @app.cancel_directory_prompt
+      elsif (edit = DIRECTORY_PROMPT_EDITS[ch])
+        @app.edit_directory_prompt(edit)
+      elsif ch.match?(/\A[[:print:]]\z/)
+        @app.edit_directory_prompt(:type, ch)
       end
     end
 

@@ -20,6 +20,14 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `panes.list` reports `command`, `title`, `state`, `idle`, `notice` and the
   `bell` / `activity` / `silent` flags.
 
+- `N` / `C-a N` asks for a directory and switches to that directory's
+  session, starting a server there if none is running. Tab completes
+  directory names and a preview line says which session `Enter` will open.
+- `:new <dir>` does the same without the prompt; bare `:new` opens it.
+
+### Changed
+- `:new` no longer opens a pane; use `:new_pane` (or `:c`, `c`, `C-a c`).
+
 ### Fixed
 - OSC 9;4 progress no longer marks a pane as having rung the bell. Claude
   Code sends it at the start and end of every turn, so every background

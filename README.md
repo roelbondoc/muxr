@@ -240,6 +240,7 @@ multiplexer, no prefix required.
 | `s` | enter scrollback / copy-mode |
 | `~` / `C` / `P` | drawer / Claude Code drawer / toggle private flag |
 | `o` | switch to any pane in any session (filterable) |
+| `N` | start (or switch to) the session for a directory |
 | `A` | share or move in a pane from another muxr session |
 | `]` | paste the internal yank buffer into the focused pane |
 | `:` / `?` | command prompt / help |
@@ -267,6 +268,7 @@ the historical `Ctrl-a` prefix.
 | `C-a r` | refresh / redraw |
 | `C-a ~` / `C-a C` / `C-a P` | drawer / Claude Code drawer / toggle private |
 | `C-a Space` | switch to any pane in any session (filterable) |
+| `C-a N` | start (or switch to) the session for a directory |
 | `C-a A` | share or move in a pane from another session |
 | `C-a [` / `C-a ]` | scrollback (or the app's own scroll) / paste yank buffer |
 | `C-a d` / `C-a q` | detach / kill session (asks `y/n`) |
@@ -298,6 +300,8 @@ claude                 # toggle the Claude Code drawer
 private                # toggle the private flag on the focused pane
 attach                 # open the pane picker (same as A)
 switch [filter]        # open the pane switcher, pre-filtered (same as o)
+new [dir]              # start (or switch to) the session for dir; bare opens the prompt (same as N)
+new_pane | c           # open a new pane (same as c)
 save                   # write ~/.muxr/sessions/<name>.json
 restore                # print the path to the saved session
 sessions | ls          # list saved sessions and live servers
@@ -309,7 +313,7 @@ masters <n>            # how many panes share the master area
 zoom                   # same as z
 capture [path]         # save the pane's history as plain text
 reload                 # re-read ~/.muxr/config.json
-new | close | next | prev | master | detach | quit | help
+close | next | prev | master | detach | quit | help
 ```
 
 ## Bells, activity, and silence
@@ -513,6 +517,17 @@ muxr panes cmd:claude | fzf | awk '{print $1}' | xargs muxr go
 
 `muxr go` run inside a muxr pane moves that session's attached client; run
 anywhere else it attaches, taking the session over from any other client.
+
+### Starting a session from inside muxr
+
+`N` (or `C-a N`, or a bare `:new`) asks for a directory and moves this
+terminal into that directory's session, starting its server first if nothing
+is running there. The session gets the same name `muxr` would give it if you
+ran it in that directory, so the two always land in the same place. `Tab`
+completes directory names, `C-w` deletes back one directory, and the line
+under the path says whether `Enter` will start a new session or switch to a
+running one. Relative paths resolve against the directory this session was
+started in. `:new ~/src/project` does the same without the prompt.
 
 ## Sharing and moving panes
 
@@ -810,7 +825,7 @@ set_layout:{tall,wide,columns,rows,grid,spiral,centered,stack,monocle,auto}
 focus_direction:{left,down,up,right}   move_direction:{left,down,up,right}
 focus_next focus_prev focus_last refresh_focused enter_scrollback
 toggle_drawer toggle_claude_drawer toggle_private_focused open_pane_picker
-open_switcher
+open_switcher open_new_session_prompt
 paste_from_buffer show_help detach quit_immediate
 ```
 

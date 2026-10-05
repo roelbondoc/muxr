@@ -1,10 +1,12 @@
 require "socket"
 require "fileutils"
 require "securerandom"
+require "rbconfig"
 require "muxr/remote_pane"
 require "muxr/pane_transfer"
 require "muxr/pane_picker"
 require "muxr/pane_switcher"
+require "muxr/directory_prompt"
 require "muxr/session_directory"
 require "muxr/config"
 
@@ -33,10 +35,33 @@ module Muxr
     DEFAULT_WIDTH  = 80
     DEFAULT_HEIGHT = 24
 
-    attr_reader :session, :renderer, :input, :session_name, :control_server, :pane_picker, :switcher
+    attr_reader :session, :renderer, :input, :session_name, :control_server, :pane_picker, :switcher, :directory_prompt
+
+    BIN_PATH = File.expand_path("../../bin/muxr", __dir__).freeze
 
     def self.socket_path_for(name)
       File.join(SOCKETS_DIR, "#{name}.sock")
+    end
+
+    def self.log_path_for(name)
+      File.join(File.dirname(SOCKETS_DIR), "logs", "#{name}.log")
+    end
+
+    def self.spawn_server(name, cwd: Dir.pwd)
+      log_path = log_path_for(name)
+      FileUtils.mkdir_p(File.dirname(log_path))
+      log = File.open(log_path, "a")
+      pid = Process.spawn(
+        RbConfig.ruby, BIN_PATH, "--server", name,
+        chdir: cwd,
+        in: "/dev/null",
+        out: log,
+        err: log,
+        pgroup: true
+      )
+      log.close
+      Process.detach(pid)
+      pid
     end
 
     # The name a bare `muxr` (no name argument) resolves to: a slug of the
@@ -87,6 +112,7 @@ module Muxr
       @help_visible = false
       @pane_picker = nil
       @switcher = nil
+      @directory_prompt = nil
       @current_client = nil
       @client_write_buffer = +"".b
       @listening_socket = nil
@@ -694,6 +720,49 @@ module Muxr
     def switcher_entries
       local = @control_server && [@session_name, @control_server.local_call("panes.list")["panes"]]
       SessionDirectory.all_panes(local: local)
+    end
+
+    def open_new_session_prompt
+      @directory_prompt = DirectoryPrompt.new(base: @origin_cwd)
+      @input.enter_directory_prompt_mode
+      invalidate
+    end
+
+    def edit_directory_prompt(action, *args)
+      @directory_prompt&.public_send(action, *args)
+      invalidate
+    end
+
+    def cancel_directory_prompt
+      @directory_prompt = nil
+      @renderer.reset_frame!
+      invalidate
+    end
+
+    def confirm_directory_prompt
+      prompt = @directory_prompt
+      cancel_directory_prompt
+      new_session(prompt.buffer) if prompt
+    end
+
+    def new_session(path)
+      path = path.to_s.strip
+      if path.empty?
+        flash("new: give a directory")
+        return
+      end
+      dir = DirectoryPrompt.new(base: @origin_cwd, buffer: path).resolved_dir
+      unless dir
+        flash("not a directory: #{path}")
+        return
+      end
+      name = self.class.default_session_name(dir)
+      if name == @session_name
+        flash("already in session #{name}")
+        return
+      end
+      self.class.spawn_server(name, cwd: dir) unless self.class.alive_socket?(self.class.socket_path_for(name))
+      disconnect_client(reason: "switch #{name}")
     end
 
     def client_attached?
@@ -1608,6 +1677,7 @@ module Muxr
         help: @help_visible,
         picker: @pane_picker,
         switcher: @switcher,
+        directory_prompt: @directory_prompt,
         prefix: @input.prefix
       )
     end

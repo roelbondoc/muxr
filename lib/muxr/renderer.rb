@@ -31,7 +31,8 @@ module Muxr
       confirm_close: [:c256, 196].freeze, # red
       help:          [:c256, 39].freeze,  # blue
       pane_picker:   [:c256, 39].freeze,  # blue
-      switcher:      [:c256, 39].freeze   # blue
+      switcher:      [:c256, 39].freeze,  # blue
+      directory_prompt: [:c256, 39].freeze
     }.freeze
 
     # Background applied to cells that match the active scrollback search.
@@ -86,7 +87,7 @@ module Muxr
       (prefix.ord + 0x60).chr
     end
 
-    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, switcher: nil, prefix: "\x01")
+    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, switcher: nil, directory_prompt: nil, prefix: "\x01")
       @prefix_letter = self.class.prefix_letter(prefix)
       w = session.width
       h = session.height
@@ -95,7 +96,7 @@ module Muxr
       frame = Array.new(h) { Array.new(w) { Cell.new(" ", nil, nil, 0, nil) } }
 
       @scroll_source = scroll_source
-      @reuse_panes = @prev && @prev_w == w && @prev_h == h && !session.drawer&.visible? && !help && !picker && !switcher
+      @reuse_panes = @prev && @prev_w == w && @prev_h == h && !session.drawer&.visible? && !help && !picker && !switcher && !directory_prompt
       @reused_regions = []
       @next_pane_regions = {}
       compose_panes(frame, session, input_state: input_state)
@@ -113,6 +114,7 @@ module Muxr
       compose_help(frame, session) if help
       compose_pane_picker(frame, session, picker) if picker
       compose_switcher(frame, session, switcher) if switcher
+      compose_directory_prompt(frame, session, directory_prompt) if directory_prompt
 
       emit_frame(frame, session, input_state: input_state, command_buffer: command_buffer, search_buffer: search_buffer)
     end
@@ -322,6 +324,7 @@ module Muxr
       when :help          then "HELP"
       when :pane_picker   then "ATTACH"
       when :switcher      then "PANES"
+      when :directory_prompt then "NEW"
       else                    "?"
       end
     end
@@ -517,6 +520,7 @@ module Muxr
       "  s               enter scrollback",
       "  ~ / C / P       drawer / Claude drawer / toggle private",
       "  o               switch to any pane in any session (type to filter)",
+      "  N               start or switch to the session for a directory",
       "  A               share or move a pane from another muxr session",
       "  : / ?           command prompt / toggle this help",
       "  ] / d / q       paste buffer / detach / kill session",
@@ -531,6 +535,7 @@ module Muxr
       "  C-a r           refresh / redraw (fixes a corrupted pane)",
       "  C-a [ ]         scrollback / paste buffer",
       "  C-a Space       switch to any pane in any session (type to filter)",
+      "  C-a N           start or switch to the session for a directory",
       "  C-a A           share or move a pane from another muxr session",
       "  C-a C-a         send literal Ctrl-a to focused pane",
       "",
@@ -548,7 +553,8 @@ module Muxr
       "COMMAND prompt (: to open;  Tab completes,  Esc/C-c cancels)",
       "Commands: layout {tall|wide|columns|rows|grid|spiral|centered|stack|monocle|auto},",
       "          drawer {toggle|show|hide|reset},",
-      "          claude, save, restore, sessions, attach, quit, new, close, next, prev,",
+      "          claude, save, restore, sessions, attach, quit, new_pane, close, next, prev,",
+      "          new [dir] (start or switch to the session for a directory),",
       "          switch [filter] (e.g. cmd:claude -is:busy),",
       "          silence {<secs>|<n>m|off} (alert when the pane goes quiet),",
       "          ratio <percent>, masters <n>, zoom,",
@@ -688,6 +694,61 @@ module Muxr
       end
 
       put_text(frame, rect.y + rect.h - 2, left, SWITCHER_HINT, inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
+    end
+
+    DIRECTORY_PROMPT_HINT = "Tab complete · C-w up a dir · C-u clear · Enter open · Esc cancel".freeze
+    DIRECTORY_PROMPT_WIDTH = 100
+    DIRECTORY_PROMPT_CANDIDATE_ROWS = 8
+    DIRECTORY_PROMPT_OK_FG = [:c256, 42].freeze
+    DIRECTORY_PROMPT_BAD_FG = [:c256, 203].freeze
+
+    def compose_directory_prompt(frame, session, prompt)
+      w = session.width
+      h = session.height
+      return if w < 20 || h < 8
+      candidate_lines = directory_candidate_lines(prompt.candidates, [w - 4, DIRECTORY_PROMPT_WIDTH].min - 4)
+      box_w = [w - 4, DIRECTORY_PROMPT_WIDTH].min
+      box_h = [6 + candidate_lines.length, h - 1].min
+      rect = LayoutManager::Rect.new((w - box_w) / 2, [(h - 1 - box_h) / 3, 0].max, box_w, box_h)
+      (rect.y...(rect.y + rect.h)).each do |yy|
+        (rect.x...(rect.x + rect.w)).each do |xx|
+          set_cell(frame, yy, xx, " ", fg: PICKER_FG, bg: PICKER_BG)
+        end
+      end
+      draw_box(frame, rect, border: PICKER_BORDER, bold_border: true, title: "New session", title_focused: true)
+
+      left = rect.x + 2
+      inner_w = rect.w - 4
+      input = "> #{prompt.buffer}"
+      shown = input.length > inner_w - 1 ? "> ..#{input[-(inner_w - 5)..]}" : input
+      put_text(frame, rect.y + 1, left, shown, inner_w, fg: PICKER_FG, bg: PICKER_BG, attrs: Terminal::BOLD)
+      set_cell(frame, rect.y + 1, left + [shown.length, inner_w - 1].min, " ", fg: PICKER_BG, bg: PICKER_FG)
+
+      status, fg = directory_prompt_status(prompt)
+      put_text(frame, rect.y + 2, left, status, inner_w, fg: fg, bg: PICKER_BG)
+
+      candidate_lines.each_with_index do |line, i|
+        break if rect.y + 3 + i >= rect.y + rect.h - 2
+        put_text(frame, rect.y + 3 + i, left, line, inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
+      end
+      put_text(frame, rect.y + rect.h - 2, left, DIRECTORY_PROMPT_HINT, inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
+    end
+
+    def directory_prompt_status(prompt)
+      return ["relative to #{shorten_path(prompt.base)}", PICKER_DIM_FG] if prompt.buffer.strip.empty?
+      preview = prompt.preview
+      return ["not a directory", DIRECTORY_PROMPT_BAD_FG] unless preview
+      verb = preview.running ? "switch to running session" : "start session"
+      ["#{verb} #{preview.session}  (#{shorten_path(preview.dir)})", DIRECTORY_PROMPT_OK_FG]
+    end
+
+    def directory_candidate_lines(names, width)
+      return [] if names.empty? || width <= 0
+      cell = [names.map(&:length).max + 2, width].min
+      per_line = [width / cell, 1].max
+      lines = names.each_slice(per_line).map { |row| row.map { |name| "#{name}/".ljust(cell) }.join.rstrip }
+      return lines if lines.length <= DIRECTORY_PROMPT_CANDIDATE_ROWS
+      lines.first(DIRECTORY_PROMPT_CANDIDATE_ROWS - 1) + ["… #{names.length} matches"]
     end
 
     def switcher_rect(w, h)

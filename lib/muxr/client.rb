@@ -84,8 +84,10 @@ module Muxr
       false
     end
 
+    SWITCH_CONNECT_WAIT = 3.0
+
     def connect_to(name)
-      @sock = UNIXSocket.new(Application.socket_path_for(name))
+      @sock = open_when_ready(Application.socket_path_for(name))
       @session_name = name
       @socket_path = Application.socket_path_for(name)
       @takeover = true
@@ -95,6 +97,17 @@ module Muxr
       true
     rescue SystemCallError
       false
+    end
+
+    def open_when_ready(path)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + SWITCH_CONNECT_WAIT
+      begin
+        UNIXSocket.new(path)
+      rescue Errno::ENOENT, Errno::ECONNREFUSED
+        raise if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+        sleep 0.05
+        retry
+      end
     end
 
     def focus_remote_pane(name, pane_ref)

@@ -10,7 +10,7 @@ module Muxr
     # offering both halves would clutter the ambiguity list.
     COMPLETIONS = %w[
       layout drawer claude private save restore sessions attach switch
-      new close next prev master detach help quit silence ratio masters zoom sync rename reload capture
+      new new_pane close next prev master detach help quit silence ratio masters zoom sync rename reload capture
     ].freeze
 
     # Argument candidates for the commands that take a fixed vocabulary.
@@ -85,7 +85,9 @@ module Muxr
       when "switch", "panes" then @app.open_switcher(args.join(" "))
       when "quit", "q", "exit"
         @app.quit
-      when "new", "c"
+      when "new"
+        args.empty? ? @app.open_new_session_prompt : @app.new_session(args.join(" "))
+      when "new_pane", "c"
         @app.new_pane
       when "close", "kill", "k"
         @app.request_close

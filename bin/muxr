@@ -4,7 +4,6 @@
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "muxr"
 require "fileutils"
-require "rbconfig"
 require "socket"
 
 def configured_prefix_letter
@@ -183,6 +182,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       C-#{letter} C   Claude drawer       (as is claude in any pane; needs `muxr --install-skill`)
       C-#{letter} :   command prompt      C-#{letter} ?       toggle help
       C-#{letter} Space  switch to any pane in any session
+      C-#{letter} N   start or switch to the session for a directory
       C-#{letter} d   detach (server stays running)
       C-#{letter} q   kill session (with y/n confirmation)
       C-#{letter} C-#{letter} send literal C-#{letter}
@@ -233,21 +233,6 @@ def probe_socket(path)
   end
 end
 
-def spawn_server(name, log_path)
-  FileUtils.mkdir_p(File.dirname(log_path))
-  log = File.open(log_path, "a")
-  pid = Process.spawn(
-    RbConfig.ruby, __FILE__, "--server", name,
-    in:  "/dev/null",
-    out: log,
-    err: log,
-    pgroup: true
-  )
-  log.close
-  Process.detach(pid)
-  pid
-end
-
 def wait_for_socket(path, deadline)
   until File.exist?(path)
     return false if Time.now >= deadline
@@ -295,8 +280,8 @@ when :forbidden
 when :alive
   # great — attach.
 when :missing, :stale
-  log_path = File.join(Dir.home, ".muxr", "logs", "#{name}.log")
-  spawn_server(name, log_path)
+  log_path = Muxr::Application.log_path_for(name)
+  Muxr::Application.spawn_server(name)
   unless wait_for_socket(socket_path, Time.now + 3.0)
     $stderr.puts "muxr: server did not start within 3s (see #{log_path})"
     exit 1
