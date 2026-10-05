@@ -168,6 +168,9 @@ if ARGV.include?("-h") || ARGV.include?("--help")
                            jump to a pane: inside muxr this moves the attached
                            client, outside it attaches (taking the session over
                            from any other client)
+      muxr --record <file.cast> [name]
+                           attach as usual and record everything this terminal
+                           shows to an asciicast v2 file, until you detach
       muxr --install-skill install the MCP skill into ~/.claude/skills and exit
                            (symlinks from a source checkout, copies from an
                             installed gem; force with --install-skill=copy|link)
@@ -213,6 +216,20 @@ if ARGV.include?("--server")
 end
 
 # ---- client mode (the default) ----
+
+def extract_record_path(argv)
+  idx = argv.index { |a| a == "--record" || a.start_with?("--record=") }
+  return nil unless idx
+  flag = argv.delete_at(idx)
+  path = flag.include?("=") ? flag.split("=", 2)[1] : argv.delete_at(idx)
+  if path.nil? || path.empty?
+    $stderr.puts "usage: muxr --record <file.cast> [name]"
+    exit 1
+  end
+  File.expand_path(path)
+end
+
+record_path = extract_record_path(ARGV)
 
 def session_name_from(argv)
   idx = argv.index("-s") || argv.index("--session")
@@ -288,7 +305,7 @@ when :missing, :stale
   end
 end
 
-client = Muxr::Client.new(name, takeover: go)
+client = Muxr::Client.new(name, takeover: go, record: record_path)
 begin
   client.connect
 rescue Errno::ECONNREFUSED, Errno::ENOENT => e

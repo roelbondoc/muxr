@@ -9,6 +9,7 @@ require "muxr/pane_switcher"
 require "muxr/directory_prompt"
 require "muxr/session_directory"
 require "muxr/config"
+require "muxr/key_display"
 
 module Muxr
   # The Application is the muxr server. It owns the Session, panes, Renderer,
@@ -229,6 +230,25 @@ module Muxr
       end
       flash(win.synchronized ? "sync on: typing reaches all #{win.panes.length} panes" : "sync off")
       invalidate
+    end
+
+    def set_show_keys(arg)
+      case arg
+      when nil then show_keys(@key_display.nil?)
+      when "on" then show_keys(true)
+      when "off" then show_keys(false)
+      else return flash("showkeys: expected on or off")
+      end
+      flash(@key_display ? "showing keys" : "keys hidden")
+    end
+
+    def show_keys(on)
+      @key_display = on ? (@key_display || KeyDisplay.new(prefix: @input.prefix)) : nil
+      invalidate
+    end
+
+    def key_labels
+      @key_display&.labels
     end
 
     # The client turns bracketed-paste mode on for the *outer* terminal so big
@@ -1189,6 +1209,8 @@ module Muxr
       Terminal.scrollback_max = config.scrollback if config.scrollback && !ENV["MUXR_SCROLLBACK"]
       LayoutManager.auto_spiral_min_cols = config.auto_spiral_min_cols
       LayoutManager.auto_spiral_min_rows = config.auto_spiral_min_rows
+      show_keys(config.show_keys) unless config.show_keys.nil?
+      @key_display&.prefix = @input.prefix
       invalidate
     end
 
@@ -1426,6 +1448,7 @@ module Muxr
         prune_dead_drawer
         report_silent_panes
         expire_message
+        invalidate if @key_display&.expire!
 
         if @session.window.panes.empty?
           @running = false
@@ -1518,6 +1541,7 @@ module Muxr
 
       case type
       when Protocol::INPUT
+        @key_display&.note(payload, @input.state)
         @input.feed(payload)
         invalidate
       when Protocol::RESIZE
@@ -1678,7 +1702,8 @@ module Muxr
         picker: @pane_picker,
         switcher: @switcher,
         directory_prompt: @directory_prompt,
-        prefix: @input.prefix
+        prefix: @input.prefix,
+        keys: key_labels
       )
     end
 

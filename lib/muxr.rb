@@ -23,6 +23,7 @@ require_relative "muxr/protocol"
 require_relative "muxr/width_probe"
 require_relative "muxr/control_server"
 require_relative "muxr/application"
+require_relative "muxr/recorder"
 require_relative "muxr/client"
 
 module Muxr

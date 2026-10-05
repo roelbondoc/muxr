@@ -18,9 +18,11 @@ module Muxr
 
     attr_reader :session_name
 
-    def initialize(session_name, takeover: false)
+    def initialize(session_name, takeover: false, record: nil)
       @session_name = session_name
       @takeover = takeover
+      @record_path = record
+      @recorder = nil
       @caps = nil
       @socket_path = Application.socket_path_for(session_name)
       @sock = nil
@@ -45,6 +47,7 @@ module Muxr
 
       enter_terminal_mode
       install_winch_trap
+      start_recording
 
       begin
         loop do
@@ -55,6 +58,7 @@ module Muxr
           break unless target && switch_to(*target)
         end
       ensure
+        @recorder&.close
         leave_terminal_mode
         @sock.close rescue nil
       end
@@ -92,8 +96,7 @@ module Muxr
       @socket_path = Application.socket_path_for(name)
       @takeover = true
       @write_buffer = +"".b
-      STDOUT.write("\e[0m\e[2J\e[H")
-      STDOUT.flush
+      show("\e[0m\e[2J\e[H")
       true
     rescue SystemCallError
       false
@@ -181,8 +184,7 @@ module Muxr
 
       case type
       when Protocol::OUTPUT
-        STDOUT.write(payload)
-        STDOUT.flush
+        show(payload)
       when Protocol::BYE
         @bye_reason = payload.to_s
         @running = false
@@ -191,8 +193,21 @@ module Muxr
       end
     end
 
+    def show(bytes)
+      STDOUT.write(bytes)
+      STDOUT.flush
+      @recorder&.output(bytes)
+    end
+
+    def start_recording
+      return unless @record_path
+      rows, cols = terminal_size
+      @recorder = Recorder.open(@record_path, rows: rows, cols: cols)
+    end
+
     def send_resize
       rows, cols = terminal_size
+      @recorder&.resize(rows, cols)
       queue_frame(Protocol::RESIZE, Protocol.encode_size(rows, cols))
     rescue Errno::EPIPE, Errno::ECONNRESET, IOError
       @running = false

@@ -12,6 +12,8 @@ module Muxr
     STATUS_FG           = [:c256, 252].freeze
     BORDER_SYNCED       = [:c256, 160].freeze
     SYNC_CHIP           = [:c256, 196].freeze
+    KEY_CHIP_FG         = [:c256, 232].freeze
+    KEY_CHIP_BG         = [:c256, 252].freeze
 
     # Vim-style mode palette. Used in two places: the focused pane border
     # (so the user can see at a glance what mode they're in) and the
@@ -87,7 +89,7 @@ module Muxr
       (prefix.ord + 0x60).chr
     end
 
-    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, switcher: nil, directory_prompt: nil, prefix: "\x01")
+    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, switcher: nil, directory_prompt: nil, prefix: "\x01", keys: nil)
       @prefix_letter = self.class.prefix_letter(prefix)
       w = session.width
       h = session.height
@@ -109,7 +111,8 @@ module Muxr
         command_completions: command_completions,
         search_buffer: search_buffer,
         search_direction: search_direction,
-        message: message
+        message: message,
+        keys: keys
       )
       compose_help(frame, session) if help
       compose_pane_picker(frame, session, picker) if picker
@@ -329,7 +332,7 @@ module Muxr
       end
     end
 
-    def compose_status_bar(frame, session, input_state:, command_buffer:, command_completions: nil, search_buffer: "", search_direction: :forward, message: nil)
+    def compose_status_bar(frame, session, input_state:, command_buffer:, command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, keys: nil)
       y = session.height - 1
       w = session.width
       win = session.window
@@ -472,7 +475,21 @@ module Muxr
         end
       end
 
+      draw_key_chip(frame, y, w, keys, message ? " #{message} ".length : right.length) if keys && !keys.empty?
       draw_status_message(frame, y, w, message) if message
+    end
+
+    def draw_key_chip(frame, y, w, keys, reserved)
+      chip = " #{keys.join("  ")} "
+      start = w - reserved - chip.length - 1
+      return if start < w / 3
+      chip.each_char.with_index do |ch, i|
+        c = frame[y][start + i]
+        c.char = ch
+        c.fg = KEY_CHIP_FG
+        c.bg = KEY_CHIP_BG
+        c.attrs = Terminal::BOLD
+      end
     end
 
     def paint_sync_chip(frame, y, bar)
@@ -559,6 +576,7 @@ module Muxr
       "          silence {<secs>|<n>m|off} (alert when the pane goes quiet),",
       "          ratio <percent>, masters <n>, zoom,",
       "          sync {on|off} (type into every pane at once),",
+      "          showkeys {on|off} (show the keys you press, for recordings),",
       "          rename [name] (label the focused pane; bare clears it),",
       "          reload (re-read ~/.muxr/config.json),",
       "          capture [path] (save the pane's history as text)",

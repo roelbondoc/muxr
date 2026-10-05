@@ -16,7 +16,7 @@ module Muxr
 
     attr_reader :path, :errors, :layout, :scrollback, :master_ratio, :master_count,
                 :auto_spiral_min_cols, :auto_spiral_min_rows, :prefix,
-                :normal_keys, :prefix_keys
+                :normal_keys, :prefix_keys, :show_keys
 
     def self.path_from_env
       path = ENV["MUXR_CONFIG"]
@@ -62,12 +62,12 @@ module Muxr
     def empty?
       @layout.nil? && @scrollback.nil? && @master_ratio.nil? && @master_count.nil? &&
         @auto_spiral_min_cols.nil? && @auto_spiral_min_rows.nil? &&
-        @prefix == InputHandler::PREFIX && @normal_keys.empty? && @prefix_keys.empty?
+        @prefix == InputHandler::PREFIX && @normal_keys.empty? && @prefix_keys.empty? && @show_keys.nil?
     end
 
     private
 
-    KNOWN = %w[layout scrollback master_ratio master_count auto_spiral_min prefix keys].freeze
+    KNOWN = %w[layout scrollback master_ratio master_count auto_spiral_min prefix keys show_keys].freeze
 
     def parse(data)
       (data.keys - KNOWN).each { |k| @errors << "unknown setting #{k.inspect}" }
@@ -78,6 +78,15 @@ module Muxr
       parse_auto(data["auto_spiral_min"]) if data.key?("auto_spiral_min")
       parse_prefix(data["prefix"]) if data.key?("prefix")
       parse_keys(data["keys"]) if data.key?("keys")
+      parse_show_keys(data["show_keys"]) if data.key?("show_keys")
+    end
+
+    def parse_show_keys(value)
+      if [true, false].include?(value)
+        @show_keys = value
+      else
+        @errors << "show_keys: expected true or false"
+      end
     end
 
     def parse_layout(value)

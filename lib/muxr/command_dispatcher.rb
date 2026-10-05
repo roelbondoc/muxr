@@ -10,7 +10,7 @@ module Muxr
     # offering both halves would clutter the ambiguity list.
     COMPLETIONS = %w[
       layout drawer claude private save restore sessions attach switch
-      new new_pane close next prev master detach help quit silence ratio masters zoom sync rename reload capture
+      new new_pane close next prev master detach help quit silence ratio masters zoom sync showkeys rename reload capture
     ].freeze
 
     # Argument candidates for the commands that take a fixed vocabulary.
@@ -50,7 +50,7 @@ module Muxr
       when "layout" then Window::LAYOUTS.map(&:to_s)
       when "drawer" then DRAWER_ARGS
       when "silence" then %w[off]
-      when "sync" then %w[on off]
+      when "sync", "showkeys" then %w[on off]
       else []
       end
     end
@@ -99,6 +99,7 @@ module Muxr
       when "silence" then @app.monitor_silence(args[0])
       when "zoom"    then @app.toggle_zoom
       when "sync"    then @app.set_sync(args[0])
+      when "showkeys" then @app.set_show_keys(args[0])
       when "reload"  then @app.reload_config
       when "capture" then @app.capture_focused(args.join(" "))
       when "rename"  then @app.rename_focused(args.join(" "))
