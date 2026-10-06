@@ -1,6 +1,6 @@
 require "test_helper"
 require "stringio"
-require "muxr/renderer"
+require "muxr"
 
 class TestRenderer < Minitest::Test
   # Renderer duck-types panes on rect/terminal/resize, so a small struct
@@ -341,5 +341,41 @@ class TestRenderer < Minitest::Test
     fresh = StringIO.new
     Muxr::Renderer.new(out: fresh).render(session, help: help)
     outer_screen(fresh.string, session)
+  end
+
+  KEY_LABELS = { "\t" => "Tab", "\r" => "Enter", " " => "Space", "\e" => "Esc" }.freeze
+
+  def help_section(title)
+    lines = Muxr::Renderer::HELP_LINES
+    start = lines.index { |line| line.start_with?(title) }
+    lines[(start + 1)..].take_while { |line| !line.empty? }
+  end
+
+  def help_tokens(title)
+    help_section(title).flat_map { |line| line.split(/[\s\/]+/) }
+  end
+
+  def key_label(key)
+    KEY_LABELS.fetch(key) { key.match?(/\A[1-9]\z/) ? "1..9" : key }
+  end
+
+  def test_help_lists_every_normal_mode_key
+    tokens = help_tokens("NORMAL")
+    keys = Muxr::InputHandler::NORMAL_BINDINGS.keys - ["\n"] + Muxr::Config::RESERVED_NORMAL_KEYS
+    missing = keys.map { |key| key_label(key) }.uniq.reject { |label| tokens.include?(label) }
+    assert_empty missing
+  end
+
+  def test_help_lists_every_passthrough_key
+    tokens = help_tokens("PASSTHROUGH")
+    keys = Muxr::InputHandler::PREFIX_BINDINGS.keys - ["\n"] + Muxr::Config::RESERVED_PREFIX_KEYS
+    missing = keys.map { |key| key_label(key) }.uniq.reject { |label| tokens.include?(label) }
+    assert_empty missing
+  end
+
+  def test_help_lists_every_command
+    text = help_section("COMMAND").join(" ")
+    missing = Muxr::CommandDispatcher::COMPLETIONS.reject { |command| text.match?(/(?<![\w-])#{command}(?![\w-])/) }
+    assert_empty missing
   end
 end

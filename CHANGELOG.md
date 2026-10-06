@@ -42,6 +42,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `:new` no longer opens a pane; use `:new_pane` (or `:c`, `c`, `C-a c`).
 
 ### Fixed
+- The `?` help lists every passthrough key (`C-a 1..9`, `~ C P`, `: ?`,
+  `d q`) and every command (`private`, `master`, `detach`, `help` were
+  missing). Tests now check it against the binding tables and the command
+  list, so a new key or command can't be left out again.
 - A shell pane keeps its output through a re-tile. A shrink used to keep the
   bottom rows even when they were blank, pushing the prompt and everything
   above it into scrollback, and a grow never brought them back. Now a shrink
