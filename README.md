@@ -497,7 +497,9 @@ session, it is detached (as `tmux attach -d` would), so one tab can hold
 everything.
 
 Panes are listed most recently updated first, so whatever just printed sits
-at the top. Each row shows what muxr knows about the pane, whatever is running
+at the top. The pane you are on stays in the list, drawn in cyan and labelled
+`this pane`, and the selection starts on the most recent pane other than it,
+so `o` `Enter` flips between your two latest panes. Each row shows what muxr knows about the pane, whatever is running
 in it:
 
 | Column | Source |

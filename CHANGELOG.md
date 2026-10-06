@@ -42,6 +42,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `:new` no longer opens a pane; use `:new_pane` (or `:c`, `c`, `C-a c`).
 
 ### Fixed
+- The pane switcher, the new-session prompt and help no longer show the
+  terminal cursor underneath them, at the focused pane's cursor position.
+- The switcher labels the pane you are on as `this pane`, and its selection
+  starts on the most recent other pane, both on opening and as you type, so
+  `Enter` never just lands you where you already are.
 - The `?` help lists every passthrough key (`C-a 1..9`, `~ C P`, `: ?`,
   `d q`) and every command (`private`, `master`, `detach`, `help` were
   missing). Tests now check it against the binding tables and the command

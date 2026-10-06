@@ -231,4 +231,35 @@ class TestRendererSwitcher < Minitest::Test
     assert_includes painted, "Fixing"
     assert_includes painted, "#2"
   end
+
+  def switcher_frame(entries, state: :switcher)
+    session = Muxr::Session.new(name: "spec", width: 140, height: 20)
+    terminal = Muxr::Terminal.new(rows: 5, cols: 20)
+    pane = Struct.new(:rect, :terminal) { def resize(*); end }.new(nil, terminal)
+    session.window.add_pane(pane)
+    out = StringIO.new
+    Muxr::Renderer.new(out: out).render(session, input_state: state, switcher: Muxr::PaneSwitcher.new(entries))
+    out.string
+  end
+
+  def entry(**fields)
+    Muxr::SessionDirectory::Entry.new(session: "spec", pane_id: "abc123", slot: 1, state: "idle", **fields)
+  end
+
+  def test_the_pane_you_are_on_is_labelled
+    painted = switcher_frame([entry(here: true, focused: true, title: "vim"), entry(pane_id: "def456", slot: 2, here: true)])
+    assert_includes painted, "this pane"
+    assert_equal 1, painted.scan("this pane").length
+  end
+
+  def test_the_focused_pane_of_another_session_is_not_labelled
+    refute_includes switcher_frame([entry(session: "other", focused: true)]), "this pane"
+  end
+
+  def test_the_real_cursor_stays_hidden_under_the_overlays
+    %i[switcher pane_picker directory_prompt help].each do |state|
+      painted = switcher_frame([entry], state: state)
+      refute_includes painted, "\e[?25h", "cursor shown under #{state}"
+    end
+  end
 end

@@ -134,3 +134,30 @@ class TestSessionDirectoryOrder < Minitest::Test
     assert_equal %w[fresh tie-a tie-b old unknown], sorted.map(&:pane_id)
   end
 end
+
+class TestPaneSwitcherDefault < Minitest::Test
+  def entry(id, here: false, focused: false, command: nil)
+    Muxr::SessionDirectory::Entry.new(session: "s", pane_id: id, here: here, focused: focused, command: command)
+  end
+
+  def test_the_selection_starts_on_the_last_other_pane
+    switcher = Muxr::PaneSwitcher.new([entry("mine", here: true, focused: true), entry("other"), entry("older")])
+    assert_equal "other", switcher.selected.pane_id
+  end
+
+  def test_the_focused_pane_of_another_session_is_not_skipped
+    switcher = Muxr::PaneSwitcher.new([entry("theirs", focused: true), entry("other")])
+    assert_equal "theirs", switcher.selected.pane_id
+  end
+
+  def test_filtering_skips_the_current_pane_too
+    switcher = Muxr::PaneSwitcher.new([entry("mine", here: true, focused: true, command: "vim"), entry("other", command: "vim"), entry("x")])
+    "cmd:vim".each_char { |ch| switcher.type(ch) }
+    assert_equal "other", switcher.selected.pane_id
+  end
+
+  def test_the_current_pane_is_selected_when_it_is_the_only_match
+    switcher = Muxr::PaneSwitcher.new([entry("mine", here: true, focused: true)])
+    assert_equal "mine", switcher.selected.pane_id
+  end
+end

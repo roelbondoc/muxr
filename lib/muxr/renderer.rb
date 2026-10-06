@@ -819,7 +819,7 @@ module Muxr
       when :session
         [tail_truncate(entry.session, width), entry.here ? PICKER_SESSION_FG : PICKER_FG]
       when :pane
-        ["##{entry.slot} #{entry.name || entry.pane_id}", PICKER_FG]
+        ["##{entry.slot} #{entry.name || entry.pane_id}", entry.current? ? PICKER_SESSION_FG : PICKER_FG]
       when :command
         [entry.command.to_s, PICKER_FG]
       when :idle
@@ -827,9 +827,13 @@ module Muxr
       when :cwd
         [tail_truncate(shorten_path(entry.cwd), width), PICKER_DIM_FG]
       when :detail
-        [entry.title || entry.notice || (cwd_shown ? "" : shorten_path(entry.cwd)), PICKER_DIM_FG]
+        detail = entry.title || entry.notice || (cwd_shown ? "" : shorten_path(entry.cwd))
+        return [detail, PICKER_DIM_FG] unless entry.current?
+        [[CURRENT_PANE_LABEL, detail].reject(&:empty?).join(" · "), PICKER_SESSION_FG]
       end
     end
+
+    CURRENT_PANE_LABEL = "this pane".freeze
 
     def switcher_attention(entry)
       if entry.bell then "!"
@@ -1102,8 +1106,10 @@ module Muxr
       !Terminal.box_wide && Terminal::BOX_RANGES.any? { |r| r.cover?(cp) }
     end
 
+    OVERLAY_STATES = %i[pane_picker switcher directory_prompt help].freeze
+
     def cursor_position(session, input_state:, command_buffer:, search_buffer: "")
-      return "\e[?25l" if input_state == :pane_picker
+      return "\e[?25l" if OVERLAY_STATES.include?(input_state)
       if input_state == :command
         col = 1 + command_buffer.length + 1 # ':' + buffer
         return "\e[#{session.height};#{col}H\e[?25h"

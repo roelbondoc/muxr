@@ -7,8 +7,8 @@ module Muxr
     def initialize(entries, query: "")
       @entries = entries
       @query = +query.to_s
-      @index = 0
       apply_filter
+      @index = default_index
     end
 
     def empty?
@@ -51,8 +51,12 @@ module Muxr
     private
 
     def refilter
-      @index = 0
       apply_filter
+      @index = default_index
+    end
+
+    def default_index
+      @rows.index { |entry| !entry.current? } || 0
     end
 
     def apply_filter

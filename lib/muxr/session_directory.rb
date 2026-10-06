@@ -26,6 +26,10 @@ module Muxr
         !!(bell || activity || silent)
       end
 
+      def current?
+        !!(here && focused)
+      end
+
       def self.from_listing(session, socket_path, pane, here: false)
         new(
           session: session,
