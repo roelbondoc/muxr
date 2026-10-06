@@ -42,6 +42,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `:new` no longer opens a pane; use `:new_pane` (or `:c`, `c`, `C-a c`).
 
 ### Fixed
+- A shell pane keeps its output through a re-tile. A shrink used to keep the
+  bottom rows even when they were blank, pushing the prompt and everything
+  above it into scrollback, and a grow never brought them back. Now a shrink
+  drops blank rows below the cursor first, a grow pulls rows back out of
+  scrollback, and the cursor moves with the content.
 - OSC 9;4 progress no longer marks a pane as having rung the bell. Claude
   Code sends it at the start and end of every turn, so every background
   Claude pane wore a `!`.

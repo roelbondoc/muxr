@@ -1298,4 +1298,63 @@ class TestTerminal < Minitest::Test
     sb = t.instance_variable_get(:@scrollback)
     assert_equal ["\u4f60", "", "\u597d", ""], sb[0].map(&:char)
   end
+
+  def test_a_shrink_drops_blank_rows_below_the_cursor_before_any_history
+    t = Muxr::Terminal.new(rows: 10, cols: 20)
+    t.feed("one\r\ntwo\r\n$ ")
+    t.resize(4, 20)
+    assert_equal 0, t.scrollback_size
+    assert_equal %w[one two $], (0..2).map { |r| row_text(t, r) }
+    assert_equal 2, t.cursor_row
+  end
+
+  def test_a_shrink_keeps_the_cursor_on_its_line_when_history_is_needed
+    t = Muxr::Terminal.new(rows: 10, cols: 20)
+    t.feed((0..5).map { |i| "line#{i}" }.join("\r\n"))
+    t.resize(3, 20)
+    assert_equal 3, t.scrollback_size
+    assert_equal %w[line3 line4 line5], (0..2).map { |r| row_text(t, r) }
+    assert_equal 2, t.cursor_row
+  end
+
+  def test_growing_back_restores_what_a_shrink_pushed_into_history
+    t = Muxr::Terminal.new(rows: 6, cols: 20)
+    t.feed((0..5).map { |i| "line#{i}" }.join("\r\n"))
+    t.resize(2, 20)
+    t.resize(6, 20)
+    assert_equal 0, t.scrollback_size
+    assert_equal (0..5).map { |i| "line#{i}" }, (0..5).map { |r| row_text(t, r) }
+    assert_equal 5, t.cursor_row
+    t.feed("!")
+    assert_equal "line5!", row_text(t, 5)
+  end
+
+  def test_growing_pulls_back_only_as_much_history_as_there_is
+    t = Muxr::Terminal.new(rows: 3, cols: 20)
+    t.feed("a\r\nb\r\nc\r\nd")
+    t.resize(6, 20)
+    assert_equal 0, t.scrollback_size
+    assert_equal %w[a b c d], (0..3).map { |r| row_text(t, r) }
+    assert_equal 3, t.cursor_row
+  end
+
+  def test_the_saved_cursor_moves_with_the_content
+    t = Muxr::Terminal.new(rows: 6, cols: 20)
+    t.feed((0..5).map { |i| "line#{i}" }.join("\r\n"))
+    t.feed("\e[5;1H\e7")
+    t.resize(3, 20)
+    t.resize(6, 20)
+    t.feed("\e8X")
+    assert_equal "Xine4", row_text(t, 4)
+  end
+
+  def test_the_shell_under_a_pager_survives_a_shrink_and_grow
+    t = Muxr::Terminal.new(rows: 6, cols: 20)
+    t.feed((0..5).map { |i| "line#{i}" }.join("\r\n"))
+    t.feed("\e[?1049h\e[Hpager")
+    t.resize(2, 20)
+    t.resize(6, 20)
+    t.feed("\e[?1049l")
+    assert_equal (0..5).map { |i| "line#{i}" }, (0..5).map { |r| row_text(t, r) }
+  end
 end

@@ -1000,17 +1000,19 @@ module Muxr
       was = [@rows, @cols]
       shape = [rows, cols]
       if (primary = @saved_primary)
-        primary[:buffer] = refit(primary[:buffer], was, shape, history: true)
-        primary[:cursor] = clamp_within(primary[:cursor], shape)
-        primary[:saved_cursor] = clamp_within(primary[:saved_cursor], shape)
+        primary[:buffer], shift = refit(primary[:buffer], was, shape, history: true, cursor_row: primary[:cursor][0])
+        primary[:cursor] = clamp_within(shifted(primary[:cursor], shift), shape)
+        primary[:saved_cursor] = clamp_within(shifted(primary[:saved_cursor], shift), shape)
         primary[:scroll] = [0, rows - 1]
       end
-      @buffer = refit(@buffer, was, shape, history: primary.nil?)
+      @buffer, shift = refit(@buffer, was, shape, history: primary.nil?, cursor_row: @cursor_row)
+      @saved_cursor = shifted(@saved_cursor, shift)
+      @view_offset = @view_offset.clamp(0, @scrollback.size)
       @rows = rows
       @cols = cols
       @scroll_top = 0
       @scroll_bottom = rows - 1
-      @cursor_row = @cursor_row.clamp(0, rows - 1)
+      @cursor_row = (@cursor_row + shift).clamp(0, rows - 1)
       @cursor_col = @cursor_col.clamp(0, cols - 1)
       @autowrap_pending = false
       # Selection points at timeline rows whose shape can't be remapped
@@ -1733,20 +1735,34 @@ module Muxr
         @buffer[(@scroll_top + 1)..@scroll_bottom] + [Array.new(@cols) { blank_cell }]
     end
 
-    def refit(buffer, old_shape, new_shape, history:)
-      old_rows, old_cols = old_shape
+    def refit(buffer, old_shape, new_shape, history:, cursor_row:)
+      old_rows, = old_shape
       rows, cols = new_shape
-      grid = Array.new(rows) { Array.new(cols) { blank_cell } }
-      keep_rows = [rows, old_rows].min
-      keep_cols = [cols, old_cols].min
-      src_start = old_rows - keep_rows
-      src_start.times { |i| push_scrollback(buffer[i]) } if history
-      keep_rows.times do |i|
-        keep_cols.times do |j|
-          grid[i][j].copy_from(buffer[src_start + i][j])
+      lines = buffer.first(old_rows)
+      shift = 0
+      if !history
+        lines = lines.last(rows)
+      elsif rows < old_rows
+        excess = old_rows - rows
+        while excess.positive? && lines.length - 1 > cursor_row && last_significant_column(lines.last).nil?
+          lines.pop
+          excess -= 1
         end
+        excess.times { push_scrollback(lines.shift) }
+        shift = -excess
+      else
+        shift = [rows - old_rows, @scrollback.size].min
+        shift.times { lines.unshift(@scrollback.pop) }
       end
-      grid
+      grid = Array.new(rows) { Array.new(cols) { blank_cell } }
+      lines.each_with_index do |line, i|
+        [cols, line.length].min.times { |j| grid[i][j].copy_from(line[j]) }
+      end
+      [grid, shift]
+    end
+
+    def shifted(position, rows)
+      [position[0] + rows, position[1]]
     end
 
     def pack_row(row)
