@@ -32,6 +32,7 @@ class TestMuxrMcp < Minitest::Test
   class FakeApp
     attr_accessor :session
     def invalidate; end
+    def client_attached?; false; end
     def new_pane(cwd: nil); pane = Muxr::Pane.new(process: FakeProcess.new); @session.window.add_pane(pane); pane; end
     def toggle_drawer; end
     def show_drawer; end

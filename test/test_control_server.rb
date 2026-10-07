@@ -33,6 +33,7 @@ class TestControlServer < Minitest::Test
     end
 
     def invalidate; @invalidated += 1; end
+    def client_attached?; false; end
 
     def new_pane(cwd: nil)
       pane = Muxr::Pane.new(process: FakeProcess.new)
@@ -121,6 +122,7 @@ class TestControlServer < Minitest::Test
     assert_equal 1, res["master_slot"]
     assert_includes res["available_layouts"], "grid"
     assert_equal({ "present" => false, "visible" => false }, res["drawer"])
+    assert_equal false, res["attached"]
   end
 
   def test_panes_list_returns_ids_and_slots

@@ -33,17 +33,18 @@ class TestSessionDirectory < Minitest::Test
   end
 
   # A stand-in muxr server that answers exactly one method with a canned result.
-  def serve(name, panes)
+  def serve(name, panes, session: nil)
     listen("#{name}.sock")
     control = listen("#{name}.ctrl.sock")
+    results = { "panes.list" => { "panes" => panes }, "session.get" => session }.compact
     @responders << Thread.new do
       loop do
         client = control.accept
         Thread.new do
           while (line = client.gets)
             msg = JSON.parse(line) rescue next
-            next unless msg["method"] == "panes.list"
-            client.write(JSON.generate("id" => msg["id"], "result" => { "panes" => panes }) + "\n")
+            next unless results.key?(msg["method"])
+            client.write(JSON.generate("id" => msg["id"], "result" => results[msg["method"]]) + "\n")
           end
         rescue IOError, SystemCallError
         end
@@ -72,6 +73,15 @@ class TestSessionDirectory < Minitest::Test
   def test_a_session_without_a_live_control_socket_is_skipped
     listen("half.sock")
     assert_empty Muxr::SessionDirectory.live_sessions
+  end
+
+  def test_detached_sessions_skips_attached_unknown_and_excluded_sessions
+    serve("alpha", [], session: { "attached" => false })
+    serve("beta", [], session: { "attached" => true })
+    serve("gamma", [])
+    serve("delta", [], session: { "attached" => false })
+    serve("here", [], session: { "attached" => false })
+    assert_equal ["alpha", "delta"], Muxr::SessionDirectory.detached_sessions(exclude: "here")
   end
 
   def test_a_stale_socket_file_is_skipped

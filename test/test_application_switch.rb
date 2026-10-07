@@ -3,6 +3,7 @@ require "tmpdir"
 require "socket"
 require "stringio"
 require "muxr"
+require "minitest/mock"
 
 class TestApplicationSwitch < Minitest::Test
   class FakeProcess
@@ -93,6 +94,32 @@ class TestApplicationSwitch < Minitest::Test
     @app.switch_client("elsewhere", "abc123")
     refute @app.client_attached?
     assert_equal "switch elsewhere abc123", bye_reason(client)
+  end
+
+  def test_a_departing_client_is_sent_to_a_detached_session_other_than_this_one
+    attach_client
+    pick = ->(exclude:) { exclude == "here" ? ["elsewhere"] : [] }
+    Muxr::SessionDirectory.stub(:detached_sessions, pick) do
+      assert_equal "switch elsewhere", @app.send(:departure_reason)
+    end
+  end
+
+  def test_a_departing_session_without_a_client_looks_nothing_up
+    Muxr::SessionDirectory.stub(:detached_sessions, ->(**) { flunk "queried other sessions" }) do
+      assert_nil @app.send(:departure_reason)
+    end
+  end
+
+  def test_quitting_moves_the_client_to_a_detached_session
+    client = attach_client
+    Muxr::SessionDirectory.stub(:detached_sessions, ["elsewhere"]) { @app.confirm_quit }
+    assert_equal "switch elsewhere", bye_reason(client)
+  end
+
+  def test_quitting_the_only_session_still_says_shutdown
+    client = attach_client
+    Muxr::SessionDirectory.stub(:detached_sessions, []) { @app.confirm_quit }
+    assert_equal "shutdown", bye_reason(client)
   end
 
   def test_a_takeover_hello_replaces_the_attached_client

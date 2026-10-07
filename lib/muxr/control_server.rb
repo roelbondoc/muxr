@@ -589,6 +589,7 @@ module Muxr
         "focused_slot"    => focused_pane_slot(session),
         "master_slot"     => win.panes.empty? ? nil : win.master_index + 1,
         "focus_drawer"    => !!session.focus_drawer,
+        "attached"        => @app.client_attached?,
         "drawer"          => {
           "present" => !drawer.nil?,
           "visible" => drawer&.visible? || false

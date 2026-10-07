@@ -6,6 +6,11 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- Ending a session, by `q` or by closing its last pane, moves the client to
+  another running session nobody else is attached to instead of exiting.
+  `session.get` reports `attached` so the server can tell which those are.
+
 ### Added
 - A pane switcher: `o` / `C-a Space` / `:switch [filter]` lists every pane of
   every running session with its state (`busy` while the program reports

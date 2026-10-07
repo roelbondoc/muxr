@@ -91,6 +91,12 @@ module Muxr
       end
     end
 
+    def self.detached_sessions(exclude: nil)
+      live_sessions.reject { |name, _| name == exclude }
+                   .map { |name, control| [name, Thread.new { query(control, "session.get") }] }
+                   .filter_map { |name, thread| name if thread.value&.fetch("attached", nil) == false }
+    end
+
     def self.all_panes(local: nil)
       sessions = live_sessions
       remote = local ? sessions.reject { |name, _| name == local[0] } : sessions

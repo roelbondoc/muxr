@@ -1451,6 +1451,7 @@ module Muxr
         invalidate if @key_display&.expire!
 
         if @session.window.panes.empty?
+          disconnect_client(reason: departure_reason)
           @running = false
           break
         end
@@ -1751,8 +1752,14 @@ module Muxr
 
     def shutdown_server
       flash("bye")
-      disconnect_client(reason: "shutdown")
+      disconnect_client(reason: departure_reason("shutdown"))
       @running = false
+    end
+
+    def departure_reason(fallback = nil)
+      return fallback unless @current_client
+      successor = SessionDirectory.detached_sessions(exclude: @session_name).first
+      successor ? "switch #{successor}" : fallback
     end
 
     # Fire-and-forget pipe to pbcopy. Runs on its own thread so even a slow

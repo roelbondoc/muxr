@@ -775,6 +775,11 @@ session never left the server process. `q` / `C-a q` / `:quit` flash
 `kill session? (y/n)` in the status bar and only tear the server down on `y` —
 there is no kill-without-confirm binding, by design.
 
+When a session ends under you, by `q` or by closing its last pane, the client
+moves to another running session that no other terminal is attached to,
+instead of exiting. It exits only when there is none, so closing every session
+is `C-a q`, `y`, repeated.
+
 `:save` writes a structural snapshot to `~/.muxr/sessions/<name>.json`:
 
 ```json
