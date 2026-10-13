@@ -6,7 +6,7 @@ module Muxr
   class PaneDescriber
     DEFAULT_INTERVAL = 120
     FIRST_SWEEP_DELAY = 15
-    DEFAULT_MODEL = "qwen3.5:9b".freeze
+    DEFAULT_MODEL = "qwen3.5:4b".freeze
     DEFAULT_HOST = "http://localhost:11434".freeze
     RUN_TIMEOUT = 60
     CONNECT_TIMEOUT = 2

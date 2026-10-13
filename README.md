@@ -519,7 +519,7 @@ as a notification once it stops.
 
 The description comes from a model on your own [Ollama](https://ollama.com)
 server. Every two minutes each muxr server takes the panes whose screens have
-changed since their last summary and asks `qwen3.5:9b` about each one, in the
+changed since their last summary and asks `qwen3.5:4b` about each one, in the
 background. Each request gets the pane's command, title and its last 25
 non-blank lines, and the reply goes into the column. A pane that has printed
 nothing new is skipped, and so is a pane whose screen still reads the same.
@@ -862,7 +862,7 @@ in a running session.
   "auto_spiral_min": {"cols": 200, "rows": 40},
   "prefix": "C-b",
   "show_keys": false,
-  "describe": {"interval": 300, "model": "qwen3.5:9b"},
+  "describe": {"interval": 300, "model": "qwen3.5:4b"},
   "keys": {
     "normal": {"Z": "toggle_zoom", "Y": ":sync", "q": null},
     "prefix": {"Space": "cycle_layout", "S": ":capture"}
@@ -878,7 +878,7 @@ in a running session.
 | `auto_spiral_min` | the screen size at which `auto` switches from `stack` to `spiral` |
 | `prefix` | the passthrough prefix, any control key: `"C-b"` for tmux habits |
 | `show_keys` | start every session with `:showkeys` on, for recording demos |
-| `describe` | `false` stops the local model from describing panes for the switcher; `{"interval": 120, "model": "qwen3.5:9b"}` sets how often, in seconds, and with which model |
+| `describe` | `false` stops the local model from describing panes for the switcher; `{"interval": 120, "model": "qwen3.5:4b"}` sets how often, in seconds, and with which model |
 | `keys.normal`, `keys.prefix` | remap keys in normal mode and after the prefix |
 
 A key is one character, `C-x`, `Tab`, `Enter`, `Space` or `Esc`. It maps to
