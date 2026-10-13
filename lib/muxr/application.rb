@@ -133,6 +133,8 @@ module Muxr
       @paste_marker_tail = +"".b
       @last_render_at = nil
       @foreground_poller = nil
+      @describer = PaneDescriber.new(on_update: ->(_pane) { invalidate })
+      @describe_panes = true
       # Opt-in diagnostic tap. When MUXR_TRACE_OUTPUT names a writable path, the
       # server appends every byte it sends to the client — i.e. exactly what the
       # outer terminal receives. Replaying it (`cat` it into a fresh terminal, or
@@ -1210,6 +1212,9 @@ module Muxr
       LayoutManager.auto_spiral_min_cols = config.auto_spiral_min_cols
       LayoutManager.auto_spiral_min_rows = config.auto_spiral_min_rows
       show_keys(config.show_keys) unless config.show_keys.nil?
+      @describe_panes = config.describe != false
+      @describer.interval = config.describe_interval || PaneDescriber::DEFAULT_INTERVAL
+      @describer.model = config.describe_model || PaneDescriber::DEFAULT_MODEL
       @key_display&.prefix = @input.prefix
       invalidate
     end
@@ -1366,6 +1371,7 @@ module Muxr
 
     def teardown
       stop_foreground_poller
+      @describer.stop
       disconnect_client
       @control_server&.stop
       @control_server = nil
@@ -1443,6 +1449,7 @@ module Muxr
         end
 
         @control_server&.tick
+        @describer.tick(@session.window.panes, monotonic_now) if @describe_panes
 
         prune_dead_panes
         prune_dead_drawer

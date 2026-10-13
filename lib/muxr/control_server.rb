@@ -643,6 +643,7 @@ module Muxr
         "activity" => pane.activity?,
         "silent"   => pane.silent?
       }
+      status["description"] = pane.description if pane.description
       if term.notice
         status["notice"] = term.notice
         status["notice_age"] = (now - term.notice_at).round(1)

@@ -16,7 +16,8 @@ module Muxr
 
     attr_reader :path, :errors, :layout, :scrollback, :master_ratio, :master_count,
                 :auto_spiral_min_cols, :auto_spiral_min_rows, :prefix,
-                :normal_keys, :prefix_keys, :show_keys
+                :normal_keys, :prefix_keys, :show_keys,
+                :describe, :describe_interval, :describe_model
 
     def self.path_from_env
       path = ENV["MUXR_CONFIG"]
@@ -62,12 +63,13 @@ module Muxr
     def empty?
       @layout.nil? && @scrollback.nil? && @master_ratio.nil? && @master_count.nil? &&
         @auto_spiral_min_cols.nil? && @auto_spiral_min_rows.nil? &&
-        @prefix == InputHandler::PREFIX && @normal_keys.empty? && @prefix_keys.empty? && @show_keys.nil?
+        @prefix == InputHandler::PREFIX && @normal_keys.empty? && @prefix_keys.empty? && @show_keys.nil? &&
+        @describe.nil? && @describe_interval.nil? && @describe_model.nil?
     end
 
     private
 
-    KNOWN = %w[layout scrollback master_ratio master_count auto_spiral_min prefix keys show_keys].freeze
+    KNOWN = %w[layout scrollback master_ratio master_count auto_spiral_min prefix keys show_keys describe].freeze
 
     def parse(data)
       (data.keys - KNOWN).each { |k| @errors << "unknown setting #{k.inspect}" }
@@ -79,6 +81,31 @@ module Muxr
       parse_prefix(data["prefix"]) if data.key?("prefix")
       parse_keys(data["keys"]) if data.key?("keys")
       parse_show_keys(data["show_keys"]) if data.key?("show_keys")
+      parse_describe(data["describe"]) if data.key?("describe")
+    end
+
+    def parse_describe(value)
+      if [true, false].include?(value)
+        @describe = value
+        return
+      end
+      unless value.is_a?(Hash)
+        @errors << "describe: expected true, false or {\"interval\": 120, \"model\": \"haiku\"}"
+        return
+      end
+      (value.keys - %w[enabled interval model]).each { |k| @errors << "describe: unknown setting #{k.inspect}" }
+      if value.key?("enabled") && [true, false].include?(value["enabled"])
+        @describe = value["enabled"]
+      elsif value.key?("enabled")
+        @errors << "describe.enabled: expected true or false"
+      end
+      @describe_interval = positive_integer("describe.interval", value["interval"]) if value.key?("interval")
+      return unless value.key?("model")
+      if value["model"].is_a?(String) && !value["model"].empty?
+        @describe_model = value["model"]
+      else
+        @errors << "describe.model: expected a model name"
+      end
     end
 
     def parse_show_keys(value)

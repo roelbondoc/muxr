@@ -38,6 +38,13 @@ class TestPaneFilter < Minitest::Test
     refute matches?("s:other", pane)
   end
 
+  def test_the_description_is_searchable
+    pane = entry(command: "zsh", description: "rails server on :3000")
+    assert matches?("rails", pane)
+    assert matches?("desc:3000", pane)
+    refute matches?("t:rails", pane)
+  end
+
   def test_every_term_must_match
     pane = entry(command: "claude", session: "phoenix")
     assert matches?("cmd:claude s:phoe", pane)

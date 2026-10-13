@@ -19,6 +19,24 @@ class TestConfig < Minitest::Test
     assert_equal "\x01", config.prefix
   end
 
+  def test_describe_takes_a_switch_or_its_settings
+    with_config("describe" => false) { |config| assert_equal false, config.describe }
+    with_config("describe" => { "interval" => 300, "model" => "sonnet" }) do |config|
+      assert_nil config.describe
+      assert_equal 300, config.describe_interval
+      assert_equal "sonnet", config.describe_model
+      assert_empty config.errors
+    end
+  end
+
+  def test_bad_describe_settings_are_reported
+    with_config("describe" => { "interval" => 0, "model" => "", "enabled" => "yes", "every" => 1 }) do |config|
+      assert_nil config.describe_interval
+      assert_nil config.describe_model
+      assert_equal 4, config.errors.length
+    end
+  end
+
   def test_settings_are_read
     with_config("layout" => "tall", "scrollback" => 5000, "master_ratio" => 0.6,
                 "master_count" => 2, "auto_spiral_min" => { "cols" => 200, "rows" => 40 },

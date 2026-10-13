@@ -49,7 +49,7 @@ def print_panes(args)
       entry.command.to_s,
       entry.idle ? format_age(entry.idle) : "",
       { "!" => entry.bell, "~" => entry.silent, "*" => entry.activity }.select { |_, on| on }.keys.join,
-      (entry.title || entry.notice || entry.cwd).to_s
+      (entry.description || entry.title || entry.notice || entry.cwd).to_s
     ]
   end
   table.unshift(%w[TARGET STATE NAME CMD IDLE ATTN DETAIL]) if $stdout.tty?
@@ -163,7 +163,7 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       muxr --list          list running sessions and exit
       muxr panes [filter] [--json]
                            list the panes of every running session; filter terms
-                           are words or cmd: s: n: title: cwd: is:busy|idle|bell|…
+                           are words or cmd: s: n: title: desc: cwd: is:busy|idle|bell|…
       muxr go <session>[:<pane>]
                            jump to a pane: inside muxr this moves the attached
                            client, outside it attaches (taking the session over

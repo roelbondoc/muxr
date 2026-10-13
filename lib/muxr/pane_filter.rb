@@ -5,11 +5,12 @@ module Muxr
       "session" => :session, "s" => :session,
       "name" => :name, "n" => :name,
       "title" => :title, "t" => :title,
+      "desc" => :description, "d" => :description,
       "cwd" => :cwd, "dir" => :cwd,
       "id" => :pane_id
     }.freeze
 
-    TEXT_FIELDS = %i[session pane_id name command title cwd notice].freeze
+    TEXT_FIELDS = %i[session pane_id name command title description cwd notice].freeze
 
     STATES = %w[busy error active idle].freeze
 

@@ -790,7 +790,7 @@ module Muxr
     end
 
     def switcher_header(columns)
-      labels = { mark: "", state: "STATE", session: "SESSION", pane: "PANE", command: "CMD", idle: "UPDATED", cwd: "CWD", detail: "TITLE / NOTICE" }
+      labels = { mark: "", state: "STATE", session: "SESSION", pane: "PANE", command: "CMD", idle: "UPDATED", cwd: "CWD", detail: "DESCRIPTION" }
       columns.map { |key, width| width ? labels[key].ljust(width) : labels[key] }.join(" ")
     end
 
@@ -827,7 +827,7 @@ module Muxr
       when :cwd
         [tail_truncate(shorten_path(entry.cwd), width), PICKER_DIM_FG]
       when :detail
-        detail = entry.title || entry.notice || (cwd_shown ? "" : shorten_path(entry.cwd))
+        detail = entry.description || entry.title || entry.notice || (cwd_shown ? "" : shorten_path(entry.cwd))
         return [detail, PICKER_DIM_FG] unless entry.current?
         [[CURRENT_PANE_LABEL, detail].reject(&:empty?).join(" · "), PICKER_SESSION_FG]
       end

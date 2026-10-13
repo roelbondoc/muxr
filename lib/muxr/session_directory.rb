@@ -14,7 +14,7 @@ module Muxr
 
     Entry = Struct.new(
       :session, :socket_path, :pane_id, :slot, :cwd, :rows, :cols, :focused, :name,
-      :command, :title, :state, :idle, :notice, :notice_age, :bell, :activity, :silent,
+      :command, :title, :description, :state, :idle, :notice, :notice_age, :bell, :activity, :silent,
       :private, :origin, :here,
       keyword_init: true
     ) do
@@ -43,6 +43,7 @@ module Muxr
           name: pane["name"],
           command: pane["command"],
           title: pane["title"],
+          description: pane["description"],
           state: pane["state"],
           idle: pane["idle"],
           notice: pane["notice"],
