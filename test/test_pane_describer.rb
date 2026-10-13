@@ -102,9 +102,26 @@ class TestPaneDescriber < Minitest::Test
     assert_match(/boom/, err)
   end
 
-  def test_without_claude_on_the_path_nothing_runs
-    subject = Muxr::PaneDescriber.new(claude: nil)
+  def test_without_an_ollama_host_nothing_runs
+    subject = Muxr::PaneDescriber.new(host: nil)
     refute subject.available?
     subject.tick([pane("a", "x")], 100)
+  end
+
+  def test_only_the_last_screen_lines_are_sent
+    subject, calls = describer
+    target = Muxr::Pane.new(id: "t", rows: 40, cols: 20, process: FakeProcess.new)
+    target.terminal.feed((1..35).map { |n| "line #{n}" }.join("\r\n").b)
+    sweep_and_wait(subject, [target])
+    sent = calls.first
+    refute_includes sent, "line 10\n"
+    assert_includes sent, "line 11\n"
+    assert sent.end_with?("line 35")
+  end
+
+  def test_the_ollama_host_defaults_to_localhost_and_honours_ollama_host
+    assert_equal "http://localhost:11434", Muxr::PaneDescriber.ollama_host({})
+    assert_equal "http://box:11434", Muxr::PaneDescriber.ollama_host("OLLAMA_HOST" => "box:11434")
+    assert_equal "https://box", Muxr::PaneDescriber.ollama_host("OLLAMA_HOST" => "https://box")
   end
 end

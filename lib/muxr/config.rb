@@ -90,7 +90,7 @@ module Muxr
         return
       end
       unless value.is_a?(Hash)
-        @errors << "describe: expected true, false or {\"interval\": 120, \"model\": \"haiku\"}"
+        @errors << "describe: expected true, false or {\"interval\": 120, \"model\": \"qwen3.5:9b\"}"
         return
       end
       (value.keys - %w[enabled interval model]).each { |k| @errors << "describe: unknown setting #{k.inspect}" }

@@ -509,7 +509,7 @@ in it:
 | cmd | the foreground command |
 | updated | time since the pane last printed (a resize redraw doesn't count) |
 | cwd | the pane's directory, on screens wide enough for it |
-| description | a one-line summary Claude wrote from the pane's screen, else the program's window title (OSC 0/2), else its last notification (OSC 9 / 777) |
+| description | a one-line summary a local model wrote from the pane's screen, else the program's window title (OSC 0/2), else its last notification (OSC 9 / 777) |
 
 ![the switcher listing panes from three sessions with their state, command and title](docs/screenshots/switcher.png)
 
@@ -517,15 +517,15 @@ Claude Code fills all of these in: it reports progress for the length of a
 turn, keeps the task in its title, and sends `Claude is waiting for your input`
 as a notification once it stops.
 
-The description comes from Claude. Every two minutes each muxr server takes
-the panes whose screens have changed since their last summary and runs
-`claude -p` on Haiku for each one, with no tools and no MCP servers, in the
-background. Each run gets the pane's command, title and visible screen, and
-the reply goes into the column. A pane that has printed nothing new is
-skipped, and so is a pane whose screen still reads the same. Private panes
-(`C-a P`) and borrowed panes are never sent. It needs `claude` on the
-server's `PATH`; turn it off or tune it with `describe` in the
-[config](#configuration).
+The description comes from a model on your own [Ollama](https://ollama.com)
+server. Every two minutes each muxr server takes the panes whose screens have
+changed since their last summary and asks `qwen3.5:9b` about each one, in the
+background. Each request gets the pane's command, title and its last 25
+non-blank lines, and the reply goes into the column. A pane that has printed
+nothing new is skipped, and so is a pane whose screen still reads the same.
+Private panes (`C-a P`) and borrowed panes are never sent. It talks to
+`localhost:11434`, or to `OLLAMA_HOST` when that is set; turn it off or pick
+another model with `describe` in the [config](#configuration).
 
 The filter is a list of terms that must all match. A bare word matches any
 column; `cmd:`, `s:` (session), `n:` (name), `title:`, `desc:`, `cwd:` and `id:` match
@@ -862,7 +862,7 @@ in a running session.
   "auto_spiral_min": {"cols": 200, "rows": 40},
   "prefix": "C-b",
   "show_keys": false,
-  "describe": {"interval": 300, "model": "haiku"},
+  "describe": {"interval": 300, "model": "qwen3.5:9b"},
   "keys": {
     "normal": {"Z": "toggle_zoom", "Y": ":sync", "q": null},
     "prefix": {"Space": "cycle_layout", "S": ":capture"}
@@ -878,7 +878,7 @@ in a running session.
 | `auto_spiral_min` | the screen size at which `auto` switches from `stack` to `spiral` |
 | `prefix` | the passthrough prefix, any control key: `"C-b"` for tmux habits |
 | `show_keys` | start every session with `:showkeys` on, for recording demos |
-| `describe` | `false` stops Claude from describing panes for the switcher; `{"interval": 120, "model": "haiku"}` sets how often, in seconds, and with which model |
+| `describe` | `false` stops the local model from describing panes for the switcher; `{"interval": 120, "model": "qwen3.5:9b"}` sets how often, in seconds, and with which model |
 | `keys.normal`, `keys.prefix` | remap keys in normal mode and after the prefix |
 
 A key is one character, `C-x`, `Tab`, `Enter`, `Space` or `Esc`. It maps to
