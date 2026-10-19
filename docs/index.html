@@ -578,7 +578,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <p class="hero-sub">
           A keyboard-driven terminal multiplexer written in pure Ruby. GNU Screen's
           keybindings, xmonad's automatic tiling, and a Quake-style overlay drawer —
-          in about ten thousand lines of stdlib, with no runtime gems at all.
+          in about eleven thousand lines of stdlib, with no runtime gems at all.
         </p>
         <div class="cta-row">
           <div class="install">
@@ -596,7 +596,7 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
         <div><dt>emulator</dt><dd>VT100, written here</dd></div>
         <div><dt>scrollback</dt><dd>50 000 rows / pane</dd></div>
         <div><dt>config</dt><dd>one JSON file, optional</dd></div>
-        <div><dt>tests</dt><dd>600+</dd></div>
+        <div><dt>tests</dt><dd>700+</dd></div>
         <div><dt>licence</dt><dd>MIT</dd></div>
       </dl>
     </div>
@@ -964,9 +964,16 @@ footer .shell { display: flex; flex-wrap: wrap; gap: 1rem 2rem; justify-content:
           <code>o</code> lists every pane of every running session, most recently
           updated first, with what muxr knows about it: <code>busy</code> while the
           program reports progress, <code>active</code> or <code>idle</code> by output age,
-          the attention marks, the foreground command, and the window title or last
-          notification. <kbd>Enter</kbd> moves this terminal's client to that session
-          and focuses the pane. The session you left keeps running.
+          the attention marks, the foreground command, and a one-line description.
+          <kbd>Enter</kbd> moves this terminal's client to that session and focuses the
+          pane. The session you left keeps running.
+        </p>
+        <p>
+          The description is written by <code>qwen3.5:4b</code> on your own
+          <a href="https://ollama.com">Ollama</a>, every two minutes, for panes whose
+          screen has changed. Screens never leave the machine, and private and borrowed
+          panes are never sent. Without Ollama it falls back to the window title or the
+          last notification.
         </p>
         <p>
           The filter is a list of terms that must all match, so
@@ -1188,6 +1195,7 @@ drawer.read / send_input    session.save
   <span class="k">"master_ratio"</span>: 0.6,
   <span class="k">"auto_spiral_min"</span>: { "cols": 200, "rows": 40 },
   <span class="k">"prefix"</span>: "C-b",
+  <span class="k">"describe"</span>: { "interval": 300, "model": "qwen3.5:4b" },
   <span class="k">"keys"</span>: {
     "normal": { "Z": "toggle_zoom", "Y": <span class="w">":sync"</span>, "q": null },
     "prefix": { "Space": "cycle_layout", "S": <span class="w">":capture"</span> }
@@ -1197,6 +1205,7 @@ drawer.read / send_input    session.save
         <li><span>A key is one character, <code>C-x</code>, <code>Tab</code>, <code>Enter</code>, <code>Space</code> or <code>Esc</code>.</span></li>
         <li><span>It maps to a built-in action (<code>set_layout:grid</code>, <code>focus_direction:left</code>), to a <code>:</code> command, or to <code>null</code> to unbind it.</span></li>
         <li><span>A mistake is never fatal: the bad setting is skipped, the first problem is flashed when you attach, and all of them go to the session log.</span></li>
+        <li><span><code>"describe": false</code> stops the local model from summarising panes for the switcher.</span></li>
         <li><span>A restored session keeps its own layout, and <code>MUXR_SCROLLBACK</code> still wins over <code>scrollback</code>.</span></li>
       </ul>
     </div>
@@ -1212,7 +1221,8 @@ drawer.read / send_input    session.save
         <code>Ctrl-a d</code> closes the client and leaves every PTY alive in the server.
         Reattach and you're back in the same shells with their full history, because the
         session never left the server process. Killing it takes a <code>y/n</code> — there
-        is no kill-without-confirm binding, by design.
+        is no kill-without-confirm binding, by design. When a session does end, the
+        client moves to another one nobody else is attached to instead of exiting.
       </p>
     </div>
 
@@ -1245,7 +1255,8 @@ drawer.read / send_input    session.save
       <div class="spec-row">
         <dt>diff rendering</dt>
         <dd>The renderer compares each composed frame against the last and emits only the
-          cells that changed, so a busy pane costs a handful of bytes per tick. Detached,
+          cells that changed, so a busy pane costs a handful of bytes per tick. An
+          unchanged pane isn't even copied, and frames are capped at 30 a second. Detached,
           rendering is skipped entirely while PTY data is still drained — the grids stay
           current for the next attach.</dd>
       </div>

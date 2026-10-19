@@ -16,6 +16,7 @@ Sleep 600ms
 Ctrl+a
 Escape
 Sleep 300ms
+Sleep 30s
 
 Type "o"
 Sleep 1500ms

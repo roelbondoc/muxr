@@ -24,6 +24,13 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   client via the new `client.switch` control method.
 - `panes.list` reports `command`, `title`, `state`, `idle`, `notice` and the
   `bell` / `activity` / `silent` flags.
+- Pane descriptions: every two minutes each server asks `qwen3.5:4b` on the
+  local Ollama (`OLLAMA_HOST`, default `localhost:11434`) for a one-line
+  summary of each pane whose screen changed. `panes.list` carries it as
+  `description`, the switcher and `muxr panes` show it ahead of the title,
+  and `desc:` filters on it. Private and borrowed panes are never sent.
+  `"describe": false` in the config turns it off; `{"interval", "model"}`
+  tunes it.
 
 - `N` / `C-a N` asks for a directory and switches to that directory's
   session, starting a server there if none is running. Tab completes

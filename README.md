@@ -41,7 +41,7 @@ protocol, the tiling maths — is stdlib Ruby with no runtime gems.
 | **Scrollback with vi motions** | 50,000-row ring per pane, `/` search with smart-case, character and block visual selection, yank to the system clipboard, `:capture` a whole history to a file |
 | **Knows which pane wants you** | a pane that rang the bell, printed while you looked away, or went quiet for longer than you asked is marked in its title and the status bar |
 | **Type into every pane at once** | `:sync` broadcasts keystrokes and pastes across the window, with a red status chip so you never forget it is on |
-| **One tab for every session** | a filterable list of every pane in every session, with what is running, whether it is busy, and how long it has been quiet — `Enter` takes this terminal straight there |
+| **One tab for every session** | a filterable list of every pane in every session, with what is running, whether it is busy, how long it has been quiet, and a one-line summary from a local model — `Enter` takes this terminal straight there |
 | **Panes across sessions** | borrow a live pane from another muxr session, or hand it over for good by passing its pty file descriptor down a socket |
 | **Built for agents** | a JSON-RPC control socket, an MCP bridge, panes you can name and refer to by name, and private panes that programmatic callers cannot see or touch |
 | **Records itself** | `muxr --record demo.cast` writes an asciicast of exactly what your terminal shows, and `:showkeys` puts the keys you press on screen — every video on this page was made that way |
@@ -927,11 +927,14 @@ payload carries the terminal size plus the width-probe verdict.
 
 The event loop is a single-threaded `IO.select` over both listeners, the
 attached client, every pane PTY, the drawer PTY, and every connected control
-client. The only off-main-thread work is the foreground-command poller. The
-renderer diffs each composed frame against the last and emits only the cells
-that changed, so a busy pane costs a handful of bytes per tick rather than a
-full repaint — and when no client is attached, rendering is skipped entirely
-while PTY data is still drained, so grids stay current for the next attach.
+client. The only off-main-thread work is the foreground-command poller and
+the HTTP call behind each pane description; both hand their result back as a
+single pointer write. The renderer diffs each composed frame against the last
+and emits only the cells that changed, so a busy pane costs a handful of bytes
+per tick rather than a full repaint. A pane whose grid has not changed is not
+even copied, frames are capped at 30 per second, and when no client is
+attached, rendering is skipped entirely while PTY data is still drained, so
+grids stay current for the next attach.
 
 ## Development
 
@@ -943,7 +946,7 @@ ruby -Ilib -Itest test/test_layout_manager.rb      # one file
 ruby -Ilib -Itest test/test_terminal.rb -n test_csi_cursor_position
 ```
 
-The suite is 600+ tests covering the layout algorithms (including spatial
+The suite is 700+ tests covering the layout algorithms (including spatial
 neighbour lookup), the input-handler state machine, the drawer, window pane
 ordering, session JSON round-trips, the client/server framing protocol, the
 control server and MCP bridge, pane mirroring and fd handoff, the width probe,

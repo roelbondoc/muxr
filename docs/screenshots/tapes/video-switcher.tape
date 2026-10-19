@@ -15,6 +15,7 @@ Sleep 800ms
 Ctrl+a
 Escape
 Sleep 500ms
+Sleep 30s
 Type "o"
 Sleep 2500ms
 Type "is:busy"
