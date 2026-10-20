@@ -2,10 +2,11 @@ require "muxr/pane_filter"
 
 module Muxr
   class PaneSwitcher
-    attr_reader :query, :rows, :index, :entries
+    attr_reader :query, :rows, :index, :entries, :kind
 
-    def initialize(entries, query: "")
+    def initialize(entries, query: "", kind: :panes)
       @entries = entries
+      @kind = kind
       @query = +query.to_s
       apply_filter
       @index = default_index

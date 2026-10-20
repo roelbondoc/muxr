@@ -6,6 +6,7 @@ require "muxr/remote_pane"
 require "muxr/pane_transfer"
 require "muxr/pane_picker"
 require "muxr/pane_switcher"
+require "muxr/claude_sessions"
 require "muxr/directory_prompt"
 require "muxr/session_directory"
 require "muxr/config"
@@ -696,10 +697,14 @@ module Muxr
       move ? move_remote_pane(entry) : attach_remote_pane(entry)
     end
 
-    def open_switcher(query = "")
-      @switcher = PaneSwitcher.new(switcher_entries, query: query)
+    def open_switcher(query = "", kind: :panes)
+      @switcher = PaneSwitcher.new(switcher_entries(kind), query: query, kind: kind)
       @input.enter_switcher_mode
       invalidate
+    end
+
+    def open_claude_sessions(query = "")
+      open_switcher(query, kind: :claude)
     end
 
     def move_switcher(delta)
@@ -723,7 +728,7 @@ module Muxr
     end
 
     def refresh_switcher
-      @switcher&.replace_entries(switcher_entries)
+      @switcher&.replace_entries(switcher_entries(@switcher.kind))
       invalidate
     end
 
@@ -734,15 +739,28 @@ module Muxr
     end
 
     def confirm_switcher
+      kind = @switcher&.kind
       entry = @switcher&.selected
       cancel_switcher
       return unless entry
+      return resume_claude_session(entry) if kind == :claude
       switch_client(entry.session, entry.pane_id)
     end
 
-    def switcher_entries
+    def switcher_entries(kind = :panes)
       local = @control_server && [@session_name, @control_server.local_call("panes.list")["panes"]]
-      SessionDirectory.all_panes(local: local)
+      panes = SessionDirectory.all_panes(local: local)
+      kind == :claude ? ClaudeSessions.entries(panes: panes) : panes
+    end
+
+    def resume_claude_session(entry)
+      return switch_client(entry.session, entry.pane_id) if entry.in_muxr?
+      return flash("claude #{entry.pid} is running outside muxr") if entry.running?
+      unless entry.cwd && File.directory?(entry.cwd)
+        flash("no such directory: #{entry.cwd}")
+        return
+      end
+      new_pane(cwd: entry.cwd).write("claude --resume #{entry.session_id}\r")
     end
 
     def open_new_session_prompt

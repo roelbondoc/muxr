@@ -15,7 +15,7 @@ module Muxr
     Entry = Struct.new(
       :session, :socket_path, :pane_id, :slot, :cwd, :rows, :cols, :focused, :name,
       :command, :title, :description, :state, :idle, :notice, :notice_age, :bell, :activity, :silent,
-      :private, :origin, :here,
+      :private, :origin, :here, :pid,
       keyword_init: true
     ) do
       def label
@@ -53,6 +53,7 @@ module Muxr
           silent: !!pane["silent"],
           private: !!pane["private"],
           origin: pane["origin"],
+          pid: pane["pid"],
           here: here
         )
       end

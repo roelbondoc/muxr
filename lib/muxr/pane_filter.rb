@@ -12,7 +12,7 @@ module Muxr
 
     TEXT_FIELDS = %i[session pane_id name command title description cwd notice].freeze
 
-    STATES = %w[busy error active idle].freeze
+    STATES = %w[busy error active idle saved].freeze
 
     def initialize(query)
       @terms = query.to_s.downcase.split

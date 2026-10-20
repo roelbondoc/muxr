@@ -12,6 +12,10 @@ follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `session.get` reports `attached` so the server can tell which those are.
 
 ### Added
+- A Claude Code session picker: `R` / `C-a R` / `:resume [filter]` lists
+  running and saved Claude sessions, newest first. `Enter` focuses the pane a
+  running one lives in, or resumes a saved one with `claude --resume` in a new
+  pane in its directory. `panes.list` now reports each pane's `pid`.
 - A pane switcher: `o` / `C-a Space` / `:switch [filter]` lists every pane of
   every running session with its state (`busy` while the program reports
   OSC 9;4 progress, else `active` / `idle`), attention flags, foreground

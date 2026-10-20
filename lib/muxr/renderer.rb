@@ -564,6 +564,7 @@ module Muxr
       "  s               enter scrollback",
       "  ~ / C / P       drawer / Claude drawer / toggle private",
       "  o               switch to any pane in any session (type to filter)",
+      "  R               resume a Claude session, running or saved",
       "  N               start or switch to the session for a directory",
       "  A               share or move a pane from another muxr session",
       "  : / ?           command prompt / toggle this help",
@@ -581,6 +582,7 @@ module Muxr
       "  C-a [ ]         scrollback / paste buffer",
       "  C-a ~ / C / P   drawer / Claude drawer / toggle private",
       "  C-a Space       switch to any pane in any session (type to filter)",
+      "  C-a R           resume a Claude session, running or saved",
       "  C-a N           start or switch to the session for a directory",
       "  C-a A           share or move a pane from another muxr session",
       "  C-a : / ?       command prompt / toggle this help",
@@ -605,6 +607,7 @@ module Muxr
       "          next, prev, master, detach, help, quit,",
       "          new [dir] (start or switch to the session for a directory),",
       "          switch [filter] (e.g. cmd:claude -is:busy),",
+      "          resume [filter] (Claude sessions, running or saved),",
       "          silence {<secs>|<n>m|off} (alert when the pane goes quiet),",
       "          ratio <percent>, masters <n>, zoom,",
       "          sync {on|off} (type into every pane at once),",
@@ -701,7 +704,8 @@ module Muxr
       "busy"   => [:c256, 214].freeze,
       "error"  => [:c256, 196].freeze,
       "active" => [:c256, 42].freeze,
-      "idle"   => [:c256, 245].freeze
+      "idle"   => [:c256, 245].freeze,
+      "saved"  => [:c256, 240].freeze
     }.freeze
     SWITCHER_ATTENTION_FG = [:c256, 226].freeze
     SWITCHER_SESSION_MAX = 28
@@ -720,7 +724,8 @@ module Muxr
           set_cell(frame, yy, xx, " ", fg: PICKER_FG, bg: PICKER_BG)
         end
       end
-      draw_box(frame, rect, border: PICKER_BORDER, bold_border: true, title: "Panes", title_focused: true)
+      claude = switcher.kind == :claude
+      draw_box(frame, rect, border: PICKER_BORDER, bold_border: true, title: claude ? "Claude sessions" : "Panes", title_focused: true)
 
       left = rect.x + 2
       inner_w = rect.w - 4
@@ -731,7 +736,7 @@ module Muxr
       set_cell(frame, rect.y + 1, cursor_x, " ", fg: PICKER_BG, bg: PICKER_FG)
       put_text(frame, rect.y + 1, left + inner_w - count.length, count, count.length, fg: PICKER_DIM_FG, bg: PICKER_BG)
 
-      columns = switcher_columns(switcher.entries, inner_w)
+      columns = claude ? claude_columns(inner_w) : switcher_columns(switcher.entries, inner_w)
       put_text(frame, rect.y + 2, left, switcher_header(columns), inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
 
       list_h = rect.h - 5
@@ -740,10 +745,10 @@ module Muxr
         draw_switcher_row(frame, rect.y + 3 + row, left, inner_w, entry, columns, selected: i == switcher.index)
       end
       if switcher.empty?
-        put_text(frame, rect.y + 3, left, "no panes match", inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
+        put_text(frame, rect.y + 3, left, claude ? "no sessions match" : "no panes match", inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
       end
 
-      put_text(frame, rect.y + rect.h - 2, left, SWITCHER_HINT, inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
+      put_text(frame, rect.y + rect.h - 2, left, claude ? CLAUDE_SWITCHER_HINT : SWITCHER_HINT, inner_w, fg: PICKER_DIM_FG, bg: PICKER_BG)
     end
 
     DIRECTORY_PROMPT_HINT = "Tab complete · C-w up a dir · C-u clear · Enter open · Esc cancel".freeze
@@ -816,8 +821,18 @@ module Muxr
       columns << [:detail, nil]
     end
 
+    CLAUDE_SWITCHER_HINT = "s: cwd: t: is:busy|idle · -term excludes · ↑↓ select · Enter go or resume · C-r refresh · Esc".freeze
+    CLAUDE_PANE_WIDTH = 22
+    CLAUDE_WITH_CWD = 100
+
+    def claude_columns(inner_w)
+      columns = [[:state, 6], [:idle, 7], [:claude_pane, CLAUDE_PANE_WIDTH]]
+      columns << [:cwd, SWITCHER_CWD_WIDTH] if inner_w >= CLAUDE_WITH_CWD
+      columns << [:claude_title, nil]
+    end
+
     def switcher_header(columns)
-      labels = { mark: "", state: "STATE", session: "SESSION", pane: "PANE", command: "CMD", idle: "UPDATED", cwd: "CWD", detail: "DESCRIPTION" }
+      labels = { mark: "", state: "STATE", session: "SESSION", pane: "PANE", command: "CMD", idle: "UPDATED", cwd: "CWD", detail: "DESCRIPTION", claude_pane: "WHERE", claude_title: "TITLE" }
       columns.map { |key, width| width ? labels[key].ljust(width) : labels[key] }.join(" ")
     end
 
@@ -853,6 +868,11 @@ module Muxr
         [entry.idle ? format_age(entry.idle) : "", PICKER_DIM_FG]
       when :cwd
         [tail_truncate(shorten_path(entry.cwd), width), PICKER_DIM_FG]
+      when :claude_pane
+        [claude_location(entry, width), entry.here ? PICKER_SESSION_FG : PICKER_DIM_FG]
+      when :claude_title
+        title = entry.title || (cwd_shown ? "" : shorten_path(entry.cwd))
+        [entry.current? ? [CURRENT_PANE_LABEL, title].reject(&:empty?).join(" · ") : title, entry.current? ? PICKER_SESSION_FG : PICKER_FG]
       when :detail
         detail = entry.description || entry.title || entry.notice || (cwd_shown ? "" : shorten_path(entry.cwd))
         return [detail, PICKER_DIM_FG] unless entry.current?
@@ -861,6 +881,11 @@ module Muxr
     end
 
     CURRENT_PANE_LABEL = "this pane".freeze
+
+    def claude_location(entry, width)
+      return tail_truncate("#{entry.session} ##{entry.slot}", width) if entry.in_muxr?
+      entry.running? ? "outside muxr" : "new pane here"
+    end
 
     def switcher_attention(entry)
       if entry.bell then "!"

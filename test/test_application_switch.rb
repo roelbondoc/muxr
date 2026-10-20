@@ -160,6 +160,37 @@ class TestApplicationSwitch < Minitest::Test
     assert_equal 2, @app.session.window.focused_index
   end
 
+  def confirm_claude(entry)
+    @app.instance_variable_set(:@switcher, Muxr::PaneSwitcher.new([entry], kind: :claude))
+    @app.confirm_switcher
+  end
+
+  def test_confirming_a_running_claude_focuses_its_pane
+    confirm_claude(Muxr::ClaudeSessions::Entry.new(session_id: "s", pid: 9, session: "here", pane_id: "pane02", here: true))
+    assert_equal 2, @app.session.window.focused_index
+  end
+
+  def test_confirming_a_claude_outside_muxr_flashes
+    confirm_claude(Muxr::ClaudeSessions::Entry.new(session_id: "s", pid: 9))
+    assert_match(/outside muxr/, @app.instance_variable_get(:@message))
+    assert_equal 3, @app.session.window.panes.length
+  end
+
+  def test_confirming_a_saved_claude_resumes_it_in_a_new_pane_in_its_cwd
+    process = FakeProcess.new
+    def process.write(data) = (@writes ||= +"") << data
+    def process.writes = @writes
+    spawned = nil
+    @app.define_singleton_method(:make_pane) do |cwd: nil, id: nil|
+      spawned = cwd
+      Muxr::Pane.new(id: "new", process: process)
+    end
+    confirm_claude(Muxr::ClaudeSessions::Entry.new(session_id: "abc-123", cwd: @dir, state: "saved"))
+    assert_equal @dir, spawned
+    assert_equal 3, @app.session.window.focused_index
+    assert_equal "claude --resume abc-123\r", process.writes
+  end
+
   def test_the_switcher_lists_local_panes_without_querying_its_own_socket
     server = Muxr::ControlServer.new(@app, File.join(@dir, "here.ctrl.sock"))
     @app.instance_variable_set(:@control_server, server)
@@ -220,6 +251,15 @@ class TestInputHandlerSwitcher < Minitest::Test
     @input.enter_switcher_mode
     @input.feed("\e")
     assert_equal :cancel_switcher, @app.calls.last
+  end
+
+  def test_r_prefix_r_and_the_resume_command_open_the_claude_picker
+    @input.feed("R")
+    @input.enter_passthrough_mode
+    @input.feed("\x01R")
+    assert_equal 2, @app.calls.count(:open_claude_sessions)
+    Muxr::CommandDispatcher.new(@app).dispatch("resume muxr")
+    assert_includes @app.calls, [:open_claude_sessions, "muxr"]
   end
 
   def test_the_switch_command_opens_it_with_a_query

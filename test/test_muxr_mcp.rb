@@ -26,6 +26,7 @@ class TestMuxrMcp < Minitest::Test
     def resize(_, _); end
     def alive?; true; end
     def cwd; "/tmp/fake"; end
+    def pid; nil; end
     def close; end
   end
 

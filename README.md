@@ -247,6 +247,7 @@ multiplexer, no prefix required.
 | `s` | enter scrollback / copy-mode |
 | `~` / `C` / `P` | drawer / Claude Code drawer / toggle private flag |
 | `o` | switch to any pane in any session (filterable) |
+| `R` | resume a Claude Code session, running or saved |
 | `N` | start (or switch to) the session for a directory |
 | `A` | share or move in a pane from another muxr session |
 | `]` | paste the internal yank buffer into the focused pane |
@@ -275,6 +276,7 @@ the historical `Ctrl-a` prefix.
 | `C-a r` | refresh / redraw |
 | `C-a ~` / `C-a C` / `C-a P` | drawer / Claude Code drawer / toggle private |
 | `C-a Space` | switch to any pane in any session (filterable) |
+| `C-a R` | resume a Claude Code session, running or saved |
 | `C-a N` | start (or switch to) the session for a directory |
 | `C-a A` | share or move in a pane from another session |
 | `C-a [` / `C-a ]` | scrollback (or the app's own scroll) / paste yank buffer |
@@ -574,6 +576,21 @@ muxr panes cmd:claude | fzf | awk '{print $1}' | xargs muxr go
 
 `muxr go` run inside a muxr pane moves that session's attached client; run
 anywhere else it attaches, taking the session over from any other client.
+
+### Resuming Claude Code sessions
+
+`R` (or `C-a R`, or `:resume [filter]`) opens the same kind of list for Claude
+Code sessions instead of panes: every running `claude` and the 150 most
+recently saved transcripts, newest first, each with its title and directory.
+`Enter` on a running session goes to the pane it runs in, in whichever muxr
+session that is. `Enter` on a saved one opens a new pane here in the session's
+directory and types `claude --resume <id>`, so you are back at a shell when it
+exits. A session running outside muxr is listed but can only be flashed.
+
+Running sessions come from `~/.claude/sessions/<pid>.json`, matched to a pane
+by walking up from the `claude` pid to a pane's shell; saved ones from
+`~/.claude/projects/*/<id>.jsonl`. The filter is the switcher's, plus
+`is:saved`.
 
 ### Starting a session from inside muxr
 

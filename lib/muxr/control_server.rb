@@ -618,6 +618,7 @@ module Muxr
         # it's private").
         unless private_pane
           entry["cwd"] = safe_cwd(pane)
+          entry["pid"] = pane.pid if pane.pid
           entry["rows"] = pane.terminal.rows
           entry["cols"] = pane.terminal.cols
           # Present on a pane borrowed from another session: "<session>:<id>"
