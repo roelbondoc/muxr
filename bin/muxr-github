@@ -1,0 +1,69 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+$LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
+require "muxr/alert_board"
+require "json"
+require "open3"
+require "optparse"
+
+KEY = "github"
+INBOX_URL = "https://github.com/notifications"
+NOTIFY_INDIVIDUALLY = 3
+
+interval = 60
+once = false
+notify = true
+OptionParser.new do |o|
+  o.banner = "usage: muxr-github [--interval SECONDS] [--once] [--no-notify]"
+  o.on("--interval SECONDS", Integer) { |v| interval = v }
+  o.on("--once") { once = true }
+  o.on("--[no-]notify") { |v| notify = v }
+end.parse!
+
+def gh_api(*args)
+  out, err, status = Open3.capture3("gh", "api", *args)
+  raise err.strip.empty? ? "gh api failed" : err.strip unless status.success?
+  out
+end
+
+def unread_threads
+  gh_api("--paginate", "notifications?per_page=100", "--jq", ".[] | {id, repo: .repository.full_name, title: .subject.title} | tojson")
+    .each_line.map { |line| JSON.parse(line) }
+end
+
+def total_count
+  headers, body = gh_api("-i", "notifications?all=true&per_page=1").split(/\r?\n\r?\n/, 2)
+  last = headers[/[?&]page=(\d+)>; rel="last"/, 1]
+  last ? last.to_i : JSON.parse(body).length
+end
+
+def announce(fresh)
+  if fresh.length > NOTIFY_INDIVIDUALLY
+    Muxr::AlertBoard.notify("GitHub", "#{fresh.length} new notifications", url: INBOX_URL, group: "muxr-github")
+  else
+    fresh.each do |thread|
+      Muxr::AlertBoard.notify("GitHub · #{thread["repo"]}", thread["title"], url: INBOX_URL)
+    end
+  end
+end
+
+trap("INT") { Muxr::AlertBoard.clear(KEY); exit }
+trap("TERM") { Muxr::AlertBoard.clear(KEY); exit }
+
+seen = nil
+loop do
+  begin
+    unread = unread_threads
+    read = [total_count - unread.length, 0].max
+    ids = unread.map { |thread| thread["id"] }
+    announce(unread.reject { |thread| seen.include?(thread["id"]) }) if notify && seen
+    seen = ids
+    Muxr::AlertBoard.write(KEY, "gh #{unread.length} unread #{read} read", url: INBOX_URL, urgent: unread.any?, ttl: interval * 3)
+  rescue StandardError => e
+    warn "muxr-github: #{e.message}"
+    Muxr::AlertBoard.write(KEY, "gh ?", url: INBOX_URL, ttl: interval * 3)
+  end
+  break if once
+  sleep interval
+end

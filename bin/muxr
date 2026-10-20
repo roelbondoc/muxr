@@ -64,6 +64,42 @@ if ARGV[0] == "panes"
   exit 0
 end
 
+def run_alert(args)
+  require "optparse"
+  opts = {}
+  OptionParser.new do |o|
+    o.on("--url URL") { |v| opts[:url] = v }
+    o.on("--urgent") { opts[:urgent] = true }
+    o.on("--ttl SECONDS", Float) { |v| opts[:ttl] = v }
+    o.on("--notify MESSAGE") { |v| opts[:notify] = v }
+  end.parse!(args)
+  case args.shift
+  when "set"
+    key, text = args
+    abort "usage: muxr alert set <key> <text> [--url URL] [--urgent] [--ttl SECONDS] [--notify MESSAGE]" unless key && text
+    Muxr::AlertBoard.write(key, text, url: opts[:url], urgent: opts[:urgent], ttl: opts[:ttl])
+    Muxr::AlertBoard.notify(key, opts[:notify], url: opts[:url], group: "muxr-#{key}") if opts[:notify]
+  when "clear"
+    abort "usage: muxr alert clear <key>" unless args[0]
+    Muxr::AlertBoard.clear(args[0])
+  when "notify"
+    title, message = args
+    abort "usage: muxr alert notify <title> <message> [--url URL]" unless title && message
+    Muxr::AlertBoard.notify(title, message, url: opts[:url])
+  when "list"
+    Muxr::AlertBoard.read_all.each { |alert| puts [alert.key, alert.urgent ? "urgent" : "-", alert.text].join("\t") }
+  else
+    abort "usage: muxr alert set|clear|notify|list ..."
+  end
+rescue ArgumentError, OptionParser::ParseError => e
+  abort "muxr alert: #{e.message}"
+end
+
+if ARGV[0] == "alert"
+  run_alert(ARGV[1..])
+  exit 0
+end
+
 install_skill_arg = ARGV.find { |a| a == "--install-skill" || a.start_with?("--install-skill=") }
 
 if install_skill_arg
@@ -164,6 +200,10 @@ if ARGV.include?("-h") || ARGV.include?("--help")
       muxr panes [filter] [--json]
                            list the panes of every running session; filter terms
                            are words or cmd: s: n: title: desc: cwd: is:busy|idle|bell|…
+      muxr alert set <key> <text> [--url URL] [--urgent] [--ttl SECONDS] [--notify MESSAGE]
+      muxr alert clear <key> | list | notify <title> <message> [--url URL]
+                           show a chip in every session's status bar, optionally
+                           with a macOS notification (muxr-github is one producer)
       muxr go <session>[:<pane>]
                            jump to a pane: inside muxr this moves the attached
                            client, outside it attaches (taking the session over

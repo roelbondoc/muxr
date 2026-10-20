@@ -14,6 +14,10 @@ module Muxr
     SYNC_CHIP           = [:c256, 196].freeze
     KEY_CHIP_FG         = [:c256, 232].freeze
     KEY_CHIP_BG         = [:c256, 252].freeze
+    ALERT_FG            = [:c256, 252].freeze
+    ALERT_BG            = [:c256, 239].freeze
+    ALERT_URGENT_FG     = [:c256, 15].freeze
+    ALERT_URGENT_BG     = [:c256, 161].freeze
 
     # Vim-style mode palette. Used in two places: the focused pane border
     # (so the user can see at a glance what mode they're in) and the
@@ -89,7 +93,7 @@ module Muxr
       (prefix.ord + 0x60).chr
     end
 
-    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, switcher: nil, directory_prompt: nil, prefix: "\x01", keys: nil)
+    def render(session, input_state: :normal, scroll_source: :ring, command_buffer: "", command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, help: false, picker: nil, switcher: nil, directory_prompt: nil, prefix: "\x01", keys: nil, alerts: [])
       @prefix_letter = self.class.prefix_letter(prefix)
       w = session.width
       h = session.height
@@ -112,7 +116,8 @@ module Muxr
         search_buffer: search_buffer,
         search_direction: search_direction,
         message: message,
-        keys: keys
+        keys: keys,
+        alerts: alerts
       )
       compose_help(frame, session) if help
       compose_pane_picker(frame, session, picker) if picker
@@ -332,7 +337,7 @@ module Muxr
       end
     end
 
-    def compose_status_bar(frame, session, input_state:, command_buffer:, command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, keys: nil)
+    def compose_status_bar(frame, session, input_state:, command_buffer:, command_completions: nil, search_buffer: "", search_direction: :forward, message: nil, keys: nil, alerts: [])
       y = session.height - 1
       w = session.width
       win = session.window
@@ -356,11 +361,13 @@ module Muxr
           "##{win.focused_index + 1}"
         end
       left << " focused:#{focused_label}"
-      alerts = attention_label(win)
-      left << " alerts:#{alerts}" unless alerts.empty?
+      attention = attention_label(win)
+      left << " alerts:#{attention}" unless attention.empty?
       left << " drawer:#{drawer_state} "
 
       right = " muxr ^#{@prefix_letter} ? "
+      chips = fitting_alert_chips(alerts, w - left.length - right.length)
+      right = chips.sum("") { |alert| " #{alert.text} " + " " } + right
 
       bar = (left + " " * w)[0, w - right.length] + right
       bar = bar[0, w]
@@ -388,6 +395,7 @@ module Muxr
         c.attrs |= Terminal::BOLD
       end
       paint_sync_chip(frame, y, bar) if synchronized?(win)
+      paint_alert_chips(frame, y, w - right.length, chips)
 
       if input_state == :command
         prompt = ":#{command_buffer}"
@@ -489,6 +497,25 @@ module Muxr
         c.fg = KEY_CHIP_FG
         c.bg = KEY_CHIP_BG
         c.attrs = Terminal::BOLD
+      end
+    end
+
+    def fitting_alert_chips(alerts, room)
+      alerts.take_while { |alert| (room -= alert.text.length + 3) >= 0 }
+    end
+
+    def paint_alert_chips(frame, y, x, chips)
+      chips.each do |alert|
+        " #{alert.text} ".each_char do |ch|
+          c = frame[y][x]
+          c.char = ch
+          c.fg = alert.urgent ? ALERT_URGENT_FG : ALERT_FG
+          c.bg = alert.urgent ? ALERT_URGENT_BG : ALERT_BG
+          c.attrs = alert.urgent ? Terminal::BOLD : 0
+          c.hyperlink = "8;;#{alert.url}" if alert.url
+          x += 1
+        end
+        x += 1
       end
     end
 

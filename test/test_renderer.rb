@@ -45,6 +45,20 @@ class TestRenderer < Minitest::Test
     out.string
   end
 
+  def test_alert_chips_sit_before_the_help_hint_and_link_to_their_url
+    session = build_session(layout: :tall, focused_index: 0, width: 160, height: 20)
+    alert = Muxr::AlertBoard::Alert.new(key: "github", text: "gh 3 unread 9 read", url: "https://github.com/notifications", urgent: true)
+    painted = render(session, alerts: [alert])
+    assert_includes painted, "\e]8;;https://github.com/notifications\e\\"
+    assert_operator painted.index("gh"), :<, painted.index("muxr ^a")
+  end
+
+  def test_alert_chips_that_do_not_fit_are_dropped
+    session = build_session(layout: :tall, focused_index: 0, width: 80, height: 20)
+    alert = Muxr::AlertBoard::Alert.new(key: "wide", text: "x" * 40, urgent: false)
+    refute_includes render(session, alerts: [alert]), "x" * 40
+  end
+
   def test_a_flash_is_visible_over_every_full_row_overlay
     session = build_session(layout: :tall, focused_index: 0, width: 120, height: 20)
     [:normal, :scrollback, :selection, :search, :command].each do |state|

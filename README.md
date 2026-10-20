@@ -352,6 +352,33 @@ and re-arms on the next output. It takes `30`, `30s` or `2m`, `:silence off`
 disarms it, and a bare `:silence` reports the setting. An armed pane shows
 `[silence 30s]` in its title, and the threshold is saved with the session.
 
+### Alerts from outside muxr
+
+Anything on the machine can put a chip in the status bar of every session,
+attached or not:
+
+```bash
+muxr alert set deploy "deploy ok" --url https://ci.example.com --ttl 600
+muxr alert set deploy "deploy failed" --urgent --notify "prod deploy failed"
+muxr alert clear deploy
+muxr alert list
+muxr alert notify "Build" "done"          # just the macOS notification
+```
+
+Alerts are files in `~/.muxr/alerts/`, and every server re-reads them once a
+second. `--urgent` paints the chip red, `--url` makes it Cmd-clickable, and
+`--ttl` lets it expire so a dead producer's chip does not linger. `--notify`
+posts a macOS notification once, from the CLI rather than from each session,
+through `terminal-notifier` when it is installed (clicking it opens `--url`)
+and `osascript` otherwise.
+
+`muxr-github` is a producer for GitHub notifications. It polls through `gh`
+every 60 seconds, shows `gh 3 unread 1743 read` linked to
+github.com/notifications, turns red while anything is unread, and posts a
+notification for each new unread thread (one summary past three). Run it in
+the drawer or as a launchd agent; `--interval`, `--once` and `--no-notify`
+adjust it.
+
 ## Typing into every pane at once
 
 `:sync` broadcasts what you type in passthrough mode to every pane in the

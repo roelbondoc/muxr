@@ -108,6 +108,7 @@ module Muxr
       @session_name = parse_session_name(argv)
       @running = false
       @needs_render = true
+      @alert_board = AlertBoard.new
       @message = nil
       @message_expires = nil
       @help_visible = false
@@ -1450,6 +1451,7 @@ module Muxr
 
         @control_server&.tick
         @describer.tick(@session.window.panes, monotonic_now) if @describe_panes
+        invalidate if @alert_board.refresh(monotonic_now)
 
         prune_dead_panes
         prune_dead_drawer
@@ -1711,7 +1713,8 @@ module Muxr
         switcher: @switcher,
         directory_prompt: @directory_prompt,
         prefix: @input.prefix,
-        keys: key_labels
+        keys: key_labels,
+        alerts: @alert_board.alerts
       )
     end
 
